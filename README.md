@@ -69,3 +69,7 @@ curl -sS http://127.0.0.1:3001/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"<put over-200-char text here>"}'
 ```
+
+## Deployment
+
+See detailed server deployment steps in `depolyment_guide.md`.
