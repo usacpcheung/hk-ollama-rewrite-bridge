@@ -1,0 +1,10 @@
+{
+  "name": "hk-ollama-rewrite-bridge",
+  "version": "1.0.0",
+  "description": "HK Cantonese rewrite bridge for Ollama",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}
