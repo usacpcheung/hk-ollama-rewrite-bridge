@@ -1,1 +1,15 @@
-# will configure later
+[Unit]
+Description=HK Ollama Rewrite Bridge (Express)
+After=network.target
+
+[Service]
+Type=simple
+User=hsadmin
+WorkingDirectory=/workspace/hk-ollama-rewrite-bridge
+ExecStart=/usr/bin/node /workspace/hk-ollama-rewrite-bridge/server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
