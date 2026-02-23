@@ -170,9 +170,18 @@ sudo systemctl restart apache2
 Use provided snippet `apache/proxy-snippet.conf`:
 
 ```apache
+ProxyPass /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
+ProxyPassReverse /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
+ProxyPass /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
+ProxyPassReverse /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
+
+# Temporary legacy compatibility alias (deprecated; remove in next breaking-release window)
 ProxyPass /api/rewrite http://127.0.0.1:3001/rewrite
 ProxyPassReverse /api/rewrite http://127.0.0.1:3001/rewrite
 ```
+
+Public clients should call the namespaced routes (`/api/rewrite-bridge/*`).
+The bridge process itself still listens only on local internal routes (`/rewrite`, `/model-status`) at `127.0.0.1:3001`.
 
 Add these lines inside your active VirtualHost (`:80` or `:443`) and reload Apache:
 
@@ -227,7 +236,7 @@ Assume your domain is `rewrite.example.com`.
 From any external machine:
 
 ```bash
-curl -sS https://rewrite.example.com/api/rewrite \
+curl -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"你今日得唔得閒？"}'
 ```
@@ -235,9 +244,15 @@ curl -sS https://rewrite.example.com/api/rewrite \
 Or with HTTP (if no TLS yet):
 
 ```bash
-curl -sS http://rewrite.example.com/api/rewrite \
+curl -sS http://rewrite.example.com/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"你今日得唔得閒？"}'
+```
+
+Check namespaced status endpoint:
+
+```bash
+curl -sS https://rewrite.example.com/api/rewrite-bridge/model-status
 ```
 
 If external test fails, check in this order:

@@ -46,9 +46,27 @@ Tune runtime behavior without code changes:
 OLLAMA_KEEP_ALIVE=45m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 npm start
 ```
 
+## Public API path behind reverse proxy
+
+Canonical public namespace is **`/api/rewrite-bridge/`**.
+
+- `POST /api/rewrite-bridge/rewrite`
+- `GET /api/rewrite-bridge/model-status`
+
+Backend service still listens on local-only internal routes:
+
+- `POST /rewrite`
+- `GET /model-status`
+
+### Compatibility note
+
+`/api/rewrite` is kept as a temporary legacy alias for rewrite requests only.
+New integrations should use `/api/rewrite-bridge/*` and migrate as soon as possible.
+Planned removal of legacy `/api/rewrite` alias: next breaking-release window after all clients migrate.
+
 ## API
 
-### `GET /model-status`
+### `GET /model-status` (internal app route)
 
 Returns model readiness info suitable for frontend polling.
 
@@ -69,7 +87,7 @@ Response JSON:
 - `lastWarmAt` is ISO-8601 timestamp of last successful warm/serve event.
 - `lastError` is latest known error object (or `null`).
 
-### `POST /rewrite`
+### `POST /rewrite` (internal app route)
 
 Request JSON:
 
@@ -101,22 +119,24 @@ Error format:
 
 ### Frontend behavior recommendation
 
-- If `POST /rewrite` returns `202` / `MODEL_WARMING`, show a **“model is loading”** message.
-- Retry submission, or poll `GET /model-status` every **2–3 seconds** until `status` becomes `ready`.
+- If `POST /api/rewrite-bridge/rewrite` returns `202` / `MODEL_WARMING`, show a **“model is loading”** message.
+- Retry submission, or poll `GET /api/rewrite-bridge/model-status` every **2–3 seconds** until `status` becomes `ready`.
 - Respect `Retry-After` when present.
 
 ## curl examples
 
+These examples use the public reverse-proxy namespace.
+
 ### Check model status
 
 ```bash
-curl -sS http://127.0.0.1:3001/model-status
+curl -sS https://rewrite.example.com/api/rewrite-bridge/model-status
 ```
 
 ### Normal request
 
 ```bash
-curl -i -sS http://127.0.0.1:3001/rewrite \
+curl -i -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"佢啱啱先返到公司，等多陣。"}'
 ```
@@ -124,7 +144,7 @@ curl -i -sS http://127.0.0.1:3001/rewrite \
 ### Missing text
 
 ```bash
-curl -sS http://127.0.0.1:3001/rewrite \
+curl -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
@@ -132,7 +152,7 @@ curl -sS http://127.0.0.1:3001/rewrite \
 ### Too long (>200 chars)
 
 ```bash
-curl -sS http://127.0.0.1:3001/rewrite \
+curl -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"<put over-200-char text here>"}'
 ```
