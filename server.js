@@ -45,7 +45,7 @@ const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b-instruct';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 
-let isColdModelRequest = true;
+let modelPhase = 'unknown';
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -72,6 +72,8 @@ app.post('/rewrite', async (req, res) => {
   const startedAt = Date.now();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   let inputLength = 0;
+  let requestPhase = modelPhase;
+  let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
 
   try {
     const { text } = req.body || {};
@@ -93,9 +95,14 @@ app.post('/rewrite', async (req, res) => {
 
     const prompt = PROMPT_TEMPLATE.replace('{TEXT}', trimmedText);
 
+    if (modelPhase === 'unknown') {
+      modelPhase = 'warming';
+    }
+    requestPhase = modelPhase;
+    selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
+
     const controller = new AbortController();
-    const requestTimeoutMs = isColdModelRequest ? OLLAMA_COLD_TIMEOUT_MS : OLLAMA_TIMEOUT_MS;
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), selectedTimeoutMs);
 
     let ollamaResponse;
     try {
@@ -116,7 +123,15 @@ app.post('/rewrite', async (req, res) => {
       });
     } catch (err) {
       if (err.name === 'AbortError') {
-        return errorResponse(res, 504, 'TIMEOUT', 'Model timeout');
+        if (requestPhase === 'ready') {
+          return errorResponse(res, 504, 'MODEL_TIMEOUT', 'Model response timed out. Please retry.');
+        }
+        return errorResponse(
+          res,
+          504,
+          'MODEL_COLD_START_TIMEOUT',
+          'Model is warming up and took too long to respond. Please retry shortly.'
+        );
       }
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Failed to reach model');
     } finally {
@@ -127,7 +142,7 @@ app.post('/rewrite', async (req, res) => {
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Model request failed');
     }
 
-    isColdModelRequest = false;
+    modelPhase = 'ready';
 
     let ollamaJson;
     try {
@@ -150,7 +165,9 @@ app.post('/rewrite', async (req, res) => {
         requestId,
         ip,
         inputLength,
-        elapsedMs
+        elapsedMs,
+        phase: requestPhase,
+        selectedTimeoutMs
       })
     );
   }
