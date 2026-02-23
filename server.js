@@ -47,10 +47,13 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generat
 const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
 const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds('OLLAMA_PS_CACHE_MS', 2_000, { max: 30_000 });
 const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_PS_TIMEOUT_MS', 1_000, { max: 10_000 });
+const MODEL_WARMING_RETRY_AFTER_SEC = Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
 let lastProbeReady = null;
+let lastWarmAt = null;
+let lastError = null;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -65,11 +68,16 @@ const PROMPT_TEMPLATE = [
 
 app.use(express.json({ limit: '16kb' }));
 
-function errorResponse(res, status, code, message) {
+function errorResponse(res, status, code, message, extra = {}) {
   return res.status(status).json({
     ok: false,
-    error: { code, message }
+    error: { code, message },
+    ...extra
   });
+}
+
+function setLastError(code, message) {
+  lastError = { code, message, at: new Date().toISOString() };
 }
 
 async function probeModelReady() {
@@ -107,6 +115,21 @@ async function probeModelReady() {
     clearTimeout(timeout);
   }
 }
+
+app.get('/model-status', (_req, res) => {
+  let status = 'warming';
+  if (modelPhase === 'ready') {
+    status = lastError ? 'degraded' : 'ready';
+  } else if (lastError) {
+    status = 'degraded';
+  }
+
+  return res.json({
+    status,
+    lastWarmAt,
+    lastError
+  });
+});
 
 app.post('/rewrite', async (req, res) => {
   const requestId = crypto.randomUUID();
@@ -158,6 +181,17 @@ app.post('/rewrite', async (req, res) => {
     requestPhase = modelPhase;
     selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
 
+    if (requestPhase !== 'ready') {
+      res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
+      return errorResponse(
+        res,
+        202,
+        'MODEL_WARMING',
+        'Model is loading',
+        { retryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC }
+      );
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), selectedTimeoutMs);
 
@@ -181,8 +215,13 @@ app.post('/rewrite', async (req, res) => {
     } catch (err) {
       if (err.name === 'AbortError') {
         if (requestPhase === 'ready') {
+          setLastError('MODEL_TIMEOUT', 'Model response timed out. Please retry.');
           return errorResponse(res, 504, 'MODEL_TIMEOUT', 'Model response timed out. Please retry.');
         }
+        setLastError(
+          'MODEL_COLD_START_TIMEOUT',
+          'Model is warming up and took too long to respond. Please retry shortly.'
+        );
         return errorResponse(
           res,
           504,
@@ -190,26 +229,32 @@ app.post('/rewrite', async (req, res) => {
           'Model is warming up and took too long to respond. Please retry shortly.'
         );
       }
+      setLastError('OLLAMA_ERROR', 'Failed to reach model');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Failed to reach model');
     } finally {
       clearTimeout(timeout);
     }
 
     if (!ollamaResponse.ok) {
+      setLastError('OLLAMA_ERROR', 'Model request failed');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Model request failed');
     }
 
     modelPhase = 'ready';
+    lastWarmAt = new Date().toISOString();
+    lastError = null;
 
     let ollamaJson;
     try {
       ollamaJson = await ollamaResponse.json();
     } catch (_err) {
+      setLastError('OLLAMA_ERROR', 'Invalid model response');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Invalid model response');
     }
 
     const modelText = (ollamaJson.response || '').trim();
     if (!modelText) {
+      setLastError('OLLAMA_ERROR', 'Empty model response');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
@@ -257,7 +302,8 @@ app.listen(PORT, HOST, () => {
       ollamaTimeoutMs: OLLAMA_TIMEOUT_MS,
       ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
-      ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS
+      ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
+      modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);

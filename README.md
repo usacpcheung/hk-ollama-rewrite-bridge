@@ -24,6 +24,27 @@ Server binds to `127.0.0.1:3001` only.
 
 ## API
 
+### `GET /model-status`
+
+Returns model readiness info suitable for frontend polling.
+
+Response JSON:
+
+```json
+{
+  "status": "warming",
+  "lastWarmAt": null,
+  "lastError": null
+}
+```
+
+- `status` is one of:
+  - `warming`: model is still loading
+  - `ready`: model is ready for rewrite requests
+  - `degraded`: recent model/proxy errors occurred
+- `lastWarmAt` is ISO-8601 timestamp of last successful warm/serve event.
+- `lastError` is latest known error object (or `null`).
+
 ### `POST /rewrite`
 
 Request JSON:
@@ -38,18 +59,40 @@ Success:
 { "ok": true, "result": "你今天有空嗎？" }
 ```
 
+Warming response (HTTP `202` + `Retry-After` header):
+
+```json
+{
+  "ok": false,
+  "error": { "code": "MODEL_WARMING", "message": "Model is loading" },
+  "retryAfterSec": 2
+}
+```
+
 Error format:
 
 ```json
 { "ok": false, "error": { "code": "...", "message": "..." } }
 ```
 
+### Frontend behavior recommendation
+
+- If `POST /rewrite` returns `202` / `MODEL_WARMING`, show a **“model is loading”** message.
+- Retry submission, or poll `GET /model-status` every **2–3 seconds** until `status` becomes `ready`.
+- Respect `Retry-After` when present.
+
 ## curl examples
+
+### Check model status
+
+```bash
+curl -sS http://127.0.0.1:3001/model-status
+```
 
 ### Normal request
 
 ```bash
-curl -sS http://127.0.0.1:3001/rewrite \
+curl -i -sS http://127.0.0.1:3001/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"佢啱啱先返到公司，等多陣。"}'
 ```
