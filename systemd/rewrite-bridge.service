@@ -10,6 +10,8 @@ ExecStart=/usr/bin/node /workspace/hk-ollama-rewrite-bridge/server.js
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
+# Optional runtime tuning file (create /etc/default/rewrite-bridge)
+# EnvironmentFile=/etc/default/rewrite-bridge
 
 [Install]
 WantedBy=multi-user.target

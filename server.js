@@ -45,9 +45,20 @@ const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b-instruct';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
-const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds('OLLAMA_PS_CACHE_MS', 2_000, { max: 30_000 });
-const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_PS_TIMEOUT_MS', 1_000, { max: 10_000 });
-const MODEL_WARMING_RETRY_AFTER_SEC = Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
+const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds(
+  'OLLAMA_PS_CACHE_MS',
+  parseEnvMilliseconds('WARMUP_PS_CACHE_MS', 2_000, { max: 30_000 }),
+  { max: 30_000 }
+);
+const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
+  'OLLAMA_PS_TIMEOUT_MS',
+  parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
+  { max: 10_000 }
+);
+const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(
+  process.env.WARMUP_RETRY_AFTER_SEC,
+  { min: 1, max: 30 }
+) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;

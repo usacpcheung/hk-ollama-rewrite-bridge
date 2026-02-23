@@ -113,6 +113,50 @@ sudo journalctl -u rewrite-bridge -f
 ```
 
 ---
+### Environment-based tuning (no code changes)
+
+Use either inline `Environment=` entries or an `EnvironmentFile=` to tune runtime knobs.
+
+Example with `EnvironmentFile` (recommended):
+
+1. Create `/etc/default/rewrite-bridge`:
+
+```bash
+sudo tee /etc/default/rewrite-bridge >/dev/null <<'ENV'
+OLLAMA_KEEP_ALIVE=45m
+OLLAMA_TIMEOUT_MS=45000
+OLLAMA_COLD_TIMEOUT_MS=180000
+WARMUP_PS_CACHE_MS=3000
+WARMUP_PS_TIMEOUT_MS=1200
+WARMUP_RETRY_AFTER_SEC=3
+ENV
+```
+
+2. Add to `/etc/systemd/system/rewrite-bridge.service` under `[Service]`:
+
+```ini
+EnvironmentFile=/etc/default/rewrite-bridge
+```
+
+Or set directly in unit file:
+
+```ini
+Environment=OLLAMA_KEEP_ALIVE=45m
+Environment=OLLAMA_TIMEOUT_MS=45000
+Environment=OLLAMA_COLD_TIMEOUT_MS=180000
+Environment=WARMUP_PS_CACHE_MS=3000
+Environment=WARMUP_PS_TIMEOUT_MS=1200
+Environment=WARMUP_RETRY_AFTER_SEC=3
+```
+
+3. Apply changes:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart rewrite-bridge
+sudo systemctl status rewrite-bridge --no-pager
+```
+
 
 ## 5) Configure Apache reverse proxy
 
@@ -225,3 +269,5 @@ sudo systemctl restart rewrite-bridge
 - Use HTTPS (Let’s Encrypt / certbot) at Apache layer.
 - Consider log rotation/centralization for systemd and Apache logs.
 - Monitor response times and timeout rates (`TIMEOUT` errors).
+- **Large models may need higher cold timeout**: raise `OLLAMA_COLD_TIMEOUT_MS` (e.g. `120000-300000`) to avoid premature warming failures.
+- **Keep-alive vs memory tradeoff**: higher `OLLAMA_KEEP_ALIVE` improves latency for subsequent requests but keeps model memory resident longer.
