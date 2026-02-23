@@ -44,8 +44,13 @@ const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 90
 const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b-instruct';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
+const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
+const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds('OLLAMA_PS_CACHE_MS', 2_000, { max: 30_000 });
+const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_PS_TIMEOUT_MS', 1_000, { max: 10_000 });
 
 let modelPhase = 'unknown';
+let lastProbeAtMs = 0;
+let lastProbeReady = null;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -67,6 +72,42 @@ function errorResponse(res, status, code, message) {
   });
 }
 
+async function probeModelReady() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_PS_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(OLLAMA_PS_URL, { signal: controller.signal });
+    if (!response.ok) {
+      return { ready: null, error: `ps_http_${response.status}` };
+    }
+
+    let psJson;
+    try {
+      psJson = await response.json();
+    } catch (_err) {
+      return { ready: null, error: 'ps_invalid_json' };
+    }
+
+    const models = Array.isArray(psJson.models) ? psJson.models : [];
+    const ready = models.some((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return false;
+      }
+      return entry.name === OLLAMA_MODEL || entry.model === OLLAMA_MODEL;
+    });
+
+    return { ready, error: null };
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      return { ready: null, error: 'ps_timeout' };
+    }
+    return { ready: null, error: 'ps_fetch_failed' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 app.post('/rewrite', async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
@@ -74,6 +115,8 @@ app.post('/rewrite', async (req, res) => {
   let inputLength = 0;
   let requestPhase = modelPhase;
   let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
+  let probeReady = lastProbeReady;
+  let probeError = null;
 
   try {
     const { text } = req.body || {};
@@ -95,9 +138,23 @@ app.post('/rewrite', async (req, res) => {
 
     const prompt = PROMPT_TEMPLATE.replace('{TEXT}', trimmedText);
 
-    if (modelPhase === 'unknown') {
+    const nowMs = Date.now();
+    if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+      const probeResult = await probeModelReady();
+      lastProbeAtMs = nowMs;
+      probeReady = probeResult.ready;
+      probeError = probeResult.error;
+      if (probeResult.ready !== null) {
+        lastProbeReady = probeResult.ready;
+      }
+    }
+
+    if (probeReady === true) {
+      modelPhase = 'ready';
+    } else if (probeReady === false && modelPhase === 'unknown') {
       modelPhase = 'warming';
     }
+
     requestPhase = modelPhase;
     selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
 
@@ -160,6 +217,7 @@ app.post('/rewrite', async (req, res) => {
     return res.json({ ok: true, result: finalText });
   } finally {
     const elapsedMs = Date.now() - startedAt;
+    const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
     console.log(
       JSON.stringify({
         requestId,
@@ -167,7 +225,10 @@ app.post('/rewrite', async (req, res) => {
         inputLength,
         elapsedMs,
         phase: requestPhase,
-        selectedTimeoutMs
+        selectedTimeoutMs,
+        probeReady,
+        probeAgeMs,
+        probeError
       })
     );
   }
@@ -190,10 +251,13 @@ app.listen(PORT, HOST, () => {
       level: 'info',
       msg: 'Effective Ollama config',
       ollamaUrl: OLLAMA_URL,
+      ollamaPsUrl: OLLAMA_PS_URL,
       ollamaModel: OLLAMA_MODEL,
       ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
       ollamaTimeoutMs: OLLAMA_TIMEOUT_MS,
-      ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS
+      ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
+      ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
