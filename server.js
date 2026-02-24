@@ -55,9 +55,20 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
   parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
   { max: 10_000 }
 );
-const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 4_000, {
-  max: 30_000
+const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 60_000, {
+  max: 300_000
 });
+const WARMUP_ON_START = process.env.WARMUP_ON_START
+  ? process.env.WARMUP_ON_START.toLowerCase() !== 'false'
+  : true;
+const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
+  max: 900_000
+});
+const WARMUP_STARTUP_RETRY_INTERVAL_MS = parseEnvMilliseconds(
+  'WARMUP_STARTUP_RETRY_INTERVAL_MS',
+  5_000,
+  { max: 60_000 }
+);
 const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RETRY_AFTER_SEC, {
   min: 1,
   max: 30
@@ -72,6 +83,9 @@ let lastWarmupTriggerAtMs = 0;
 let warmupInFlight = false;
 let lastWarmupResult = null;
 let lastWarmupError = null;
+let serviceState = 'starting';
+let startupWarmupAttempts = 0;
+let startupWarmupDeadlineAtMs = null;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -185,30 +199,80 @@ async function triggerWarmupIfNeeded(nowMs) {
   }
 }
 
-async function kickOffStartupWarmup() {
-  const triggered = await triggerWarmupIfNeeded(Date.now());
-  const probeResult = await probeModelReady();
+async function delay(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-  lastProbeAtMs = Date.now();
-  if (probeResult.ready !== null) {
-    lastProbeReady = probeResult.ready;
+async function runStartupWarmupLoop() {
+  startupWarmupAttempts = 0;
+  startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
+
+  while (Date.now() < startupWarmupDeadlineAtMs) {
+    startupWarmupAttempts += 1;
+    const attemptStartedAtMs = Date.now();
+    const triggered = await triggerWarmupIfNeeded(attemptStartedAtMs);
+    const probeResult = await probeModelReady();
+
+    lastProbeAtMs = Date.now();
+    if (probeResult.ready !== null) {
+      lastProbeReady = probeResult.ready;
+    }
+
+    if (probeResult.ready === true) {
+      modelPhase = 'ready';
+      serviceState = 'ready';
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          msg: 'Startup warmup loop completed',
+          serviceState,
+          startupWarmupAttempts,
+          startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+          warmupTriggered: triggered,
+          probeReady: probeResult.ready,
+          probeError: probeResult.error,
+          lastWarmupResult,
+          lastWarmupError
+        })
+      );
+      return;
+    }
+
+    if (modelPhase === 'unknown') {
+      modelPhase = 'warming';
+    }
+
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        msg: 'Startup warmup attempt completed',
+        serviceState,
+        startupWarmupAttempts,
+        startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+        warmupTriggered: triggered,
+        probeReady: probeResult.ready,
+        probeError: probeResult.error,
+        lastWarmupResult,
+        lastWarmupError
+      })
+    );
+
+    await delay(Math.max(0, WARMUP_STARTUP_RETRY_INTERVAL_MS - (Date.now() - attemptStartedAtMs)));
   }
 
-  if (probeResult.ready === true) {
-    modelPhase = 'ready';
-  } else if (modelPhase === 'unknown') {
-    modelPhase = 'warming';
-  }
-
-  console.log(
+  serviceState = 'degraded';
+  console.warn(
     JSON.stringify({
-      level: 'info',
-      msg: 'Startup warmup attempt completed',
-      warmupTriggered: triggered,
-      probeReady: probeResult.ready,
-      probeError: probeResult.error,
+      level: 'warn',
+      msg: 'Startup warmup loop exceeded max wait budget',
+      serviceState,
+      startupWarmupAttempts,
+      startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
+        ? new Date(startupWarmupDeadlineAtMs).toISOString()
+        : null,
       lastWarmupResult,
-      lastWarmupError
+      lastWarmupError,
+      lastProbeReady
     })
   );
 }
@@ -223,6 +287,11 @@ app.get('/model-status', (_req, res) => {
 
   return res.json({
     status,
+    serviceState,
+    startupWarmupAttempts,
+    startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
+      ? new Date(startupWarmupDeadlineAtMs).toISOString()
+      : null,
     lastWarmAt,
     lastError,
     warmupInFlight,
@@ -230,6 +299,18 @@ app.get('/model-status', (_req, res) => {
     lastWarmupResult,
     lastWarmupError
   });
+});
+
+app.get('/healthz', (_req, res) => {
+  return res.json({ ok: true });
+});
+
+app.get('/readyz', (_req, res) => {
+  if (serviceState === 'ready') {
+    return res.json({ ok: true, serviceState });
+  }
+
+  return res.status(503).json({ ok: false, serviceState });
 });
 
 app.post('/rewrite', async (req, res) => {
@@ -274,7 +355,7 @@ app.post('/rewrite', async (req, res) => {
       }
     }
 
-    if (probeReady === true) {
+    if (serviceState === 'ready' && probeReady === true) {
       modelPhase = 'ready';
     } else if (probeReady === false && modelPhase === 'unknown') {
       modelPhase = 'warming';
@@ -293,6 +374,7 @@ app.post('/rewrite', async (req, res) => {
 
       if (probeReady === true) {
         modelPhase = 'ready';
+        serviceState = 'ready';
       } else {
         modelPhase = 'warming';
       }
@@ -301,7 +383,7 @@ app.post('/rewrite', async (req, res) => {
     requestPhase = modelPhase;
     selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
 
-    if (requestPhase !== 'ready') {
+    if (serviceState === 'starting') {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
       if (warmupTriggeredNow) {
         return errorResponse(
@@ -313,6 +395,33 @@ app.post('/rewrite', async (req, res) => {
         );
       }
 
+      return errorResponse(
+        res,
+        202,
+        'MODEL_WARMING',
+        `Model is warming up, retry after ${MODEL_WARMING_RETRY_AFTER_SEC} seconds.`,
+        { retryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC }
+      );
+    }
+
+    if (serviceState === 'degraded') {
+      return errorResponse(
+        res,
+        503,
+        'MODEL_STARTUP_DEGRADED',
+        'Model startup warm-up exceeded the configured wait budget. Please retry shortly and check service/Ollama status.',
+        {
+          serviceState,
+          startupWarmupAttempts,
+          startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
+            ? new Date(startupWarmupDeadlineAtMs).toISOString()
+            : null
+        }
+      );
+    }
+
+    if (requestPhase !== 'ready') {
+      res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
       return errorResponse(
         res,
         202,
@@ -439,18 +548,28 @@ app.listen(PORT, HOST, () => {
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
-      modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC
+      warmupOnStart: WARMUP_ON_START,
+      warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,
+      warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,
+      modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC,
+      serviceState
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
 
-  kickOffStartupWarmup().catch((err) => {
-    console.warn(
-      JSON.stringify({
-        level: 'warn',
-        msg: 'Startup warmup attempt failed',
-        error: err?.name || 'startup_warmup_failed'
-      })
-    );
-  });
+  if (WARMUP_ON_START) {
+    runStartupWarmupLoop().catch((err) => {
+      serviceState = 'degraded';
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'Startup warmup loop failed',
+          error: err?.name || 'startup_warmup_failed',
+          serviceState
+        })
+      );
+    });
+  } else {
+    serviceState = 'ready';
+  }
 });
