@@ -155,7 +155,7 @@ async function triggerWarmupIfNeeded(nowMs) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: OLLAMA_MODEL,
-        prompt: 'warmup',
+        prompt: 'hi',
         stream: false,
         keep_alive: OLLAMA_KEEP_ALIVE,
         options: {
@@ -183,6 +183,34 @@ async function triggerWarmupIfNeeded(nowMs) {
     warmupInFlight = false;
     clearTimeout(timeout);
   }
+}
+
+async function kickOffStartupWarmup() {
+  const triggered = await triggerWarmupIfNeeded(Date.now());
+  const probeResult = await probeModelReady();
+
+  lastProbeAtMs = Date.now();
+  if (probeResult.ready !== null) {
+    lastProbeReady = probeResult.ready;
+  }
+
+  if (probeResult.ready === true) {
+    modelPhase = 'ready';
+  } else if (modelPhase === 'unknown') {
+    modelPhase = 'warming';
+  }
+
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      msg: 'Startup warmup attempt completed',
+      warmupTriggered: triggered,
+      probeReady: probeResult.ready,
+      probeError: probeResult.error,
+      lastWarmupResult,
+      lastWarmupError
+    })
+  );
 }
 
 app.get('/model-status', (_req, res) => {
@@ -415,4 +443,14 @@ app.listen(PORT, HOST, () => {
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
+
+  kickOffStartupWarmup().catch((err) => {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'Startup warmup attempt failed',
+        error: err?.name || 'startup_warmup_failed'
+      })
+    );
+  });
 });
