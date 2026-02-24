@@ -70,6 +70,8 @@ Canonical public namespace is **`/api/rewrite-bridge/`**.
 
 - `POST /api/rewrite-bridge/rewrite`
 - `GET /api/rewrite-bridge/model-status`
+- `GET /api/rewrite-bridge/healthz`
+- `GET /api/rewrite-bridge/readyz`
 
 Backend service still listens on local-only internal routes:
 
@@ -82,7 +84,7 @@ Backend service still listens on local-only internal routes:
 
 ### `GET /model-status` (internal app route)
 
-Returns model readiness info suitable for frontend polling.
+Diagnostics endpoint for frontend polling and operator debugging.
 
 Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `startupWarmupDeadlineAt`, `warmupInFlight`, `lastWarmupTriggerAt`, `lastWarmupResult`, `lastWarmupError`.
 
@@ -94,8 +96,12 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 
 ### `GET /healthz` / `GET /readyz`
 
-- `/healthz` is liveness only (`200` if process is up).
-- `/readyz` is readiness (`200` only when `serviceState=ready`, otherwise `503`).
+Intended audience:
+- `/healthz`: infra/process liveness checks (`200` if process is up).
+- `/readyz`: traffic gating for load balancers (`200` only when `serviceState=ready`, otherwise `503`).
+- `/model-status`: richer diagnostics for UI polling and operator troubleshooting.
+
+If exposed through public VirtualHost, protect `/api/rewrite-bridge/healthz` and `/api/rewrite-bridge/readyz` with allowlist/auth or private-network-only controls.
 
 ## Frontend behavior recommendation
 

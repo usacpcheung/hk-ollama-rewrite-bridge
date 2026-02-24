@@ -186,6 +186,10 @@ ProxyPass /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
 ProxyPassReverse /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
 ProxyPass /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
 ProxyPassReverse /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
+ProxyPass /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
+ProxyPassReverse /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
+ProxyPass /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
+ProxyPassReverse /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
 
 # Temporary legacy compatibility alias (deprecated; remove in next breaking-release window)
 ProxyPass /api/rewrite http://127.0.0.1:3001/rewrite
@@ -193,7 +197,23 @@ ProxyPassReverse /api/rewrite http://127.0.0.1:3001/rewrite
 ```
 
 Public clients should call the namespaced routes (`/api/rewrite-bridge/*`).
-The bridge process itself still listens only on local internal routes (`/rewrite`, `/model-status`) at `127.0.0.1:3001`.
+The bridge process itself still listens only on local internal routes (`/rewrite`, `/model-status`, `/healthz`, `/readyz`) at `127.0.0.1:3001`.
+
+### VirtualHost placement and access control recommendation
+
+Place all `ProxyPass` directives inside your active `VirtualHost` (`:80`/`:443`).
+For `/api/rewrite-bridge/healthz` and `/api/rewrite-bridge/readyz`, restrict access with at least one of:
+- source allowlist (`Require ip ...`),
+- auth (`Require valid-user`), or
+- private-network-only exposure behind internal LB/VPN.
+
+Example hardening block (inside the same VirtualHost):
+
+```apache
+<LocationMatch "^/api/rewrite-bridge/(healthz|readyz)$">
+  Require ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+</LocationMatch>
+```
 
 Add these lines inside your active VirtualHost (`:80` or `:443`) and reload Apache:
 
@@ -270,6 +290,13 @@ Check namespaced status endpoint:
 
 ```bash
 curl -sS https://rewrite.example.com/api/rewrite-bridge/model-status
+```
+
+Health checks through VirtualHost:
+
+```bash
+curl -i -sS https://rewrite.example.com/api/rewrite-bridge/healthz
+curl -i -sS https://rewrite.example.com/api/rewrite-bridge/readyz
 ```
 
 If external test fails, check in this order:
