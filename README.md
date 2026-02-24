@@ -103,6 +103,18 @@ Intended audience:
 
 If exposed through public VirtualHost, protect `/api/rewrite-bridge/healthz` and `/api/rewrite-bridge/readyz` with allowlist/auth or private-network-only controls.
 
+`/readyz` response contract:
+
+```json
+{ "ok": true, "serviceState": "ready" }
+```
+
+```json
+{ "ok": false, "serviceState": "starting", "reason": "STARTING_WARMUP" }
+```
+
+Other possible `reason` values: `STARTUP_DEGRADED`, `MODEL_NOT_READY`.
+
 ## Frontend behavior recommendation
 
 - If `POST /api/rewrite-bridge/rewrite` returns `202`, show a **model loading** message and retry using `Retry-After`.

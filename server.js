@@ -310,7 +310,14 @@ app.get('/readyz', (_req, res) => {
     return res.json({ ok: true, serviceState });
   }
 
-  return res.status(503).json({ ok: false, serviceState });
+  let reason = 'MODEL_NOT_READY';
+  if (serviceState === 'starting') {
+    reason = 'STARTING_WARMUP';
+  } else if (serviceState === 'degraded') {
+    reason = 'STARTUP_DEGRADED';
+  }
+
+  return res.status(503).json({ ok: false, serviceState, reason });
 });
 
 app.post('/rewrite', async (req, res) => {

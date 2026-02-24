@@ -299,6 +299,13 @@ curl -i -sS https://rewrite.example.com/api/rewrite-bridge/healthz
 curl -i -sS https://rewrite.example.com/api/rewrite-bridge/readyz
 ```
 
+Readiness reason troubleshooting (503 should include stable `reason`):
+
+```bash
+curl -sS https://rewrite.example.com/api/rewrite-bridge/readyz
+# Example: {"ok":false,"serviceState":"starting","reason":"STARTING_WARMUP"}
+```
+
 If external test fails, check in this order:
 1. `sudo systemctl status rewrite-bridge`
 2. `curl http://127.0.0.1:3001/rewrite ...` on server
