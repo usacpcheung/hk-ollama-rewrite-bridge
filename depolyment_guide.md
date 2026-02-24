@@ -125,10 +125,11 @@ Example with `EnvironmentFile` (recommended):
 sudo tee /etc/default/rewrite-bridge >/dev/null <<'ENV'
 OLLAMA_KEEP_ALIVE=45m
 OLLAMA_TIMEOUT_MS=45000
-OLLAMA_COLD_TIMEOUT_MS=180000
+OLLAMA_COLD_TIMEOUT_MS=120000
 WARMUP_PS_CACHE_MS=3000
 WARMUP_PS_TIMEOUT_MS=1200
 WARMUP_RETRY_AFTER_SEC=3
+WARMUP_TRIGGER_TIMEOUT_MS=4000
 ENV
 ```
 
@@ -143,10 +144,11 @@ Or set directly in unit file:
 ```ini
 Environment=OLLAMA_KEEP_ALIVE=45m
 Environment=OLLAMA_TIMEOUT_MS=45000
-Environment=OLLAMA_COLD_TIMEOUT_MS=180000
+Environment=OLLAMA_COLD_TIMEOUT_MS=120000
 Environment=WARMUP_PS_CACHE_MS=3000
 Environment=WARMUP_PS_TIMEOUT_MS=1200
 Environment=WARMUP_RETRY_AFTER_SEC=3
+Environment=WARMUP_TRIGGER_TIMEOUT_MS=4000
 ```
 
 3. Apply changes:
@@ -191,6 +193,16 @@ sudo systemctl reload apache2
 ```
 
 ---
+
+
+### Warm-up response behavior
+
+When model is not loaded, `POST /api/rewrite-bridge/rewrite` can return `202` in two phases:
+
+- `MODEL_WARMUP_STARTED`: first request that triggers one-shot model wake-up.
+- `MODEL_WARMING`: subsequent requests while wake-up is in progress/within cold window.
+
+Clients should respect `Retry-After` and poll `/api/rewrite-bridge/model-status` every 2–3 seconds.
 
 ## 6) How to test on the server (direct app port)
 
@@ -286,3 +298,11 @@ sudo systemctl restart rewrite-bridge
 - Monitor response times and timeout rates (`TIMEOUT` errors).
 - **Large models may need higher cold timeout**: raise `OLLAMA_COLD_TIMEOUT_MS` (e.g. `120000-300000`) to avoid premature warming failures.
 - **Keep-alive vs memory tradeoff**: higher `OLLAMA_KEEP_ALIVE` improves latency for subsequent requests but keeps model memory resident longer.
+
+
+## Validation checklist for warm-up flow
+
+- Cold start: first rewrite request returns `202` + `MODEL_WARMUP_STARTED`.
+- Second immediate request returns `202` + `MODEL_WARMING` (no duplicate wake-up call).
+- After model load, rewrite returns `200`.
+- Service logs include warm-up metadata fields for traceability.

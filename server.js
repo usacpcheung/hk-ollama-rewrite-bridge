@@ -38,7 +38,7 @@ function parseEnvMilliseconds(name, fallback, bounds = {}) {
 }
 
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
-const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 90_000, {
+const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
   max: 600_000
 });
 const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
@@ -55,16 +55,23 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
   parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
   { max: 10_000 }
 );
-const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(
-  process.env.WARMUP_RETRY_AFTER_SEC,
-  { min: 1, max: 30 }
-) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
+const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 4_000, {
+  max: 30_000
+});
+const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RETRY_AFTER_SEC, {
+  min: 1,
+  max: 30
+}) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
 let lastProbeReady = null;
 let lastWarmAt = null;
 let lastError = null;
+let lastWarmupTriggerAtMs = 0;
+let warmupInFlight = false;
+let lastWarmupResult = null;
+let lastWarmupError = null;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -89,6 +96,10 @@ function errorResponse(res, status, code, message, extra = {}) {
 
 function setLastError(code, message) {
   lastError = { code, message, at: new Date().toISOString() };
+}
+
+function warmupWithinColdWindow(nowMs) {
+  return lastWarmupTriggerAtMs > 0 && nowMs - lastWarmupTriggerAtMs < OLLAMA_COLD_TIMEOUT_MS;
 }
 
 async function probeModelReady() {
@@ -127,6 +138,53 @@ async function probeModelReady() {
   }
 }
 
+async function triggerWarmupIfNeeded(nowMs) {
+  if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
+    return false;
+  }
+
+  warmupInFlight = true;
+  lastWarmupTriggerAtMs = nowMs;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WARMUP_TRIGGER_TIMEOUT_MS);
+
+  try {
+    const warmupResponse = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: 'warmup',
+        stream: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
+        options: {
+          temperature: 0,
+          num_predict: 1
+        }
+      }),
+      signal: controller.signal
+    });
+
+    if (!warmupResponse.ok) {
+      lastWarmupResult = 'failed';
+      lastWarmupError = `warmup_http_${warmupResponse.status}`;
+      return true;
+    }
+
+    lastWarmupResult = 'success';
+    lastWarmupError = null;
+    return true;
+  } catch (err) {
+    lastWarmupResult = 'failed';
+    lastWarmupError = err.name === 'AbortError' ? 'warmup_timeout' : 'warmup_fetch_failed';
+    return true;
+  } finally {
+    warmupInFlight = false;
+    clearTimeout(timeout);
+  }
+}
+
 app.get('/model-status', (_req, res) => {
   let status = 'warming';
   if (modelPhase === 'ready') {
@@ -138,7 +196,11 @@ app.get('/model-status', (_req, res) => {
   return res.json({
     status,
     lastWarmAt,
-    lastError
+    lastError,
+    warmupInFlight,
+    lastWarmupTriggerAt: lastWarmupTriggerAtMs ? new Date(lastWarmupTriggerAtMs).toISOString() : null,
+    lastWarmupResult,
+    lastWarmupError
   });
 });
 
@@ -151,6 +213,7 @@ app.post('/rewrite', async (req, res) => {
   let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
   let probeReady = lastProbeReady;
   let probeError = null;
+  let warmupTriggeredNow = false;
 
   try {
     const { text } = req.body || {};
@@ -189,16 +252,44 @@ app.post('/rewrite', async (req, res) => {
       modelPhase = 'warming';
     }
 
+    if (probeReady !== true) {
+      warmupTriggeredNow = await triggerWarmupIfNeeded(nowMs);
+
+      const postWarmupProbe = await probeModelReady();
+      probeReady = postWarmupProbe.ready;
+      probeError = postWarmupProbe.error;
+      lastProbeAtMs = Date.now();
+      if (postWarmupProbe.ready !== null) {
+        lastProbeReady = postWarmupProbe.ready;
+      }
+
+      if (probeReady === true) {
+        modelPhase = 'ready';
+      } else {
+        modelPhase = 'warming';
+      }
+    }
+
     requestPhase = modelPhase;
     selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
 
     if (requestPhase !== 'ready') {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
+      if (warmupTriggeredNow) {
+        return errorResponse(
+          res,
+          202,
+          'MODEL_WARMUP_STARTED',
+          `Model wake-up started, retry after ${MODEL_WARMING_RETRY_AFTER_SEC} seconds.`,
+          { retryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC }
+        );
+      }
+
       return errorResponse(
         res,
         202,
         'MODEL_WARMING',
-        'Model is loading',
+        `Model is warming up, retry after ${MODEL_WARMING_RETRY_AFTER_SEC} seconds.`,
         { retryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC }
       );
     }
@@ -284,7 +375,12 @@ app.post('/rewrite', async (req, res) => {
         selectedTimeoutMs,
         probeReady,
         probeAgeMs,
-        probeError
+        probeError,
+        warmupTriggeredNow,
+        warmupInFlight,
+        lastWarmupResult,
+        lastWarmupError,
+        lastWarmupTriggerAtMs
       })
     );
   }
@@ -314,6 +410,7 @@ app.listen(PORT, HOST, () => {
       ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
+      warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
       modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC
     })
   );
