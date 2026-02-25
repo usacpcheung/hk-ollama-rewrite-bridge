@@ -40,6 +40,7 @@ Tune runtime behavior without code changes:
 | `WARMUP_PS_TIMEOUT_MS` | fallback alias | Legacy/alias for `OLLAMA_PS_TIMEOUT_MS` when primary key is unset. |
 | `WARMUP_RETRY_AFTER_SEC` | auto `2-3` | Optional override for `Retry-After` in warming `202` responses. |
 | `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Timeout (ms) for each warm-up trigger call; higher helps cold loads complete on tiny VPS. |
+| `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Cooldown window (ms) before another warm-up trigger is allowed; recommend `5000-15000` (max `120000`). |
 | `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. |
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
@@ -47,7 +48,7 @@ Tune runtime behavior without code changes:
 ### Example startup with overrides
 
 ```bash
-OLLAMA_KEEP_ALIVE=10m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=60000 WARMUP_STARTUP_MAX_WAIT_MS=180000 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000 npm start
+OLLAMA_KEEP_ALIVE=10m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=60000 WARMUP_RETRIGGER_WINDOW_MS=10000 WARMUP_STARTUP_MAX_WAIT_MS=180000 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000 npm start
 ```
 
 ## Small VPS recommended profile
@@ -56,6 +57,7 @@ For 2–4 vCPU / 4GB RAM class hosts:
 
 ```bash
 WARMUP_TRIGGER_TIMEOUT_MS=60000
+WARMUP_RETRIGGER_WINDOW_MS=10000
 OLLAMA_COLD_TIMEOUT_MS=180000
 WARMUP_STARTUP_MAX_WAIT_MS=180000
 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
@@ -92,6 +94,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 
 - During startup warm-up (`serviceState=starting`), returns HTTP `202` and `Retry-After` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`.
 - If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
+- Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }`.
 
 ### `GET /healthz` / `GET /readyz`
@@ -106,14 +109,16 @@ If exposed through public VirtualHost, protect `/api/rewrite-bridge/healthz` and
 `/readyz` response contract:
 
 ```json
-{ "ok": true, "serviceState": "ready" }
+{ "ok": true, "serviceState": "ready", "reason": null }
 ```
 
 ```json
 { "ok": false, "serviceState": "starting", "reason": "STARTING_WARMUP" }
 ```
 
-Other possible `reason` values: `STARTUP_DEGRADED`, `MODEL_NOT_READY`.
+Other possible `reason` values: `STARTUP_DEGRADED`, `MODEL_NOT_READY`, `MODEL_PROBE_UNAVAILABLE`.
+
+Response stability note: `/readyz` always includes `ok`, `serviceState`, and `reason` (with `reason: null` on success); frontend clients should branch on `ok` and treat `reason` as nullable.
 
 ## Frontend behavior recommendation
 

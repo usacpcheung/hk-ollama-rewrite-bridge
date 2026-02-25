@@ -63,6 +63,9 @@ const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
 const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 60_000, {
   max: 300_000
 });
+const WARMUP_RETRIGGER_WINDOW_MS = parseEnvMilliseconds('WARMUP_RETRIGGER_WINDOW_MS', 10_000, {
+  max: 120_000
+});
 const WARMUP_ON_START = process.env.WARMUP_ON_START
   ? process.env.WARMUP_ON_START.toLowerCase() !== 'false'
   : true;
@@ -111,8 +114,29 @@ function setLastError(code, message) {
   lastError = { code, message, at: new Date().toISOString() };
 }
 
+function promoteServiceReady() {
+  modelPhase = 'ready';
+  serviceState = 'ready';
+}
+
+function applyProbeState(probeReady, { demoteReadyOnUnknown = false } = {}) {
+  if (probeReady === true) {
+    promoteServiceReady();
+    return;
+  }
+
+  if (probeReady === false && modelPhase === 'ready') {
+    modelPhase = 'warming';
+    return;
+  }
+
+  if (demoteReadyOnUnknown && probeReady === null && serviceState === 'ready') {
+    modelPhase = 'warming';
+  }
+}
+
 function warmupWithinColdWindow(nowMs) {
-  return lastWarmupTriggerAtMs > 0 && nowMs - lastWarmupTriggerAtMs < OLLAMA_COLD_TIMEOUT_MS;
+  return lastWarmupTriggerAtMs > 0 && nowMs - lastWarmupTriggerAtMs < WARMUP_RETRIGGER_WINDOW_MS;
 }
 
 async function probeModelReady() {
@@ -218,8 +242,7 @@ async function runStartupWarmupLoop() {
     }
 
     if (probeResult.ready === true) {
-      modelPhase = 'ready';
-      serviceState = 'ready';
+      promoteServiceReady();
       console.log(
         JSON.stringify({
           level: 'info',
@@ -289,15 +312,17 @@ app.get('/model-status', async (_req, res) => {
     }
   }
 
-  if (probeReady === false && modelPhase === 'ready') {
-    modelPhase = 'warming';
-  }
+  applyProbeState(probeReady);
 
   let status = 'warming';
-  if (modelPhase === 'ready') {
+  if (serviceState === 'degraded') {
+    status = 'degraded';
+  } else if (modelPhase === 'ready') {
     status = lastError ? 'degraded' : 'ready';
   } else if (lastError) {
     status = 'degraded';
+  } else if (serviceState === 'starting') {
+    status = 'warming';
   }
 
   return res.json({
@@ -323,19 +348,21 @@ app.get('/healthz', (_req, res) => {
 });
 
 app.get('/readyz', async (_req, res) => {
-  if (serviceState === 'ready') {
-    const nowMs = Date.now();
-    let probeReady = lastProbeReady;
+  const nowMs = Date.now();
+  let probeReady = lastProbeReady;
 
-    if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
-      const probeResult = await probeModelReady();
-      lastProbeAtMs = nowMs;
-      probeReady = probeResult.ready;
-      if (probeResult.ready !== null) {
-        lastProbeReady = probeResult.ready;
-      }
+  if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+    const probeResult = await probeModelReady();
+    lastProbeAtMs = nowMs;
+    probeReady = probeResult.ready;
+    if (probeResult.ready !== null) {
+      lastProbeReady = probeResult.ready;
     }
+  }
 
+  applyProbeState(probeReady);
+
+  if (serviceState === 'ready') {
     if (probeReady === true) {
       return res.json({ ok: true, serviceState, reason: null });
     }
@@ -404,11 +431,7 @@ app.post('/rewrite', async (req, res) => {
       }
     }
 
-    if (serviceState === 'ready' && probeReady === true) {
-      modelPhase = 'ready';
-    } else if (probeReady === false || (serviceState === 'ready' && probeReady === null)) {
-      modelPhase = 'warming';
-    }
+    applyProbeState(probeReady, { demoteReadyOnUnknown: true });
 
     if (probeReady !== true) {
       warmupTriggeredNow = await triggerWarmupIfNeeded(nowMs);
@@ -421,10 +444,8 @@ app.post('/rewrite', async (req, res) => {
         lastProbeReady = postWarmupProbe.ready;
       }
 
-      if (probeReady === true) {
-        modelPhase = 'ready';
-        serviceState = 'ready';
-      } else {
+      applyProbeState(probeReady);
+      if (probeReady !== true) {
         modelPhase = 'warming';
       }
     }
@@ -597,6 +618,7 @@ app.listen(PORT, HOST, () => {
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
+      warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS,
       warmupOnStart: WARMUP_ON_START,
       warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,
       warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,
