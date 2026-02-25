@@ -55,6 +55,11 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
   parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
   { max: 10_000 }
 );
+const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
+  'READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
+  Math.min(1_000, OLLAMA_PS_CACHE_MS),
+  { max: 30_000 }
+);
 const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 60_000, {
   max: 300_000
 });
@@ -271,7 +276,23 @@ async function runStartupWarmupLoop() {
   );
 }
 
-app.get('/model-status', (_req, res) => {
+app.get('/model-status', async (_req, res) => {
+  const nowMs = Date.now();
+  let probeReady = lastProbeReady;
+
+  if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+    const probeResult = await probeModelReady();
+    lastProbeAtMs = nowMs;
+    probeReady = probeResult.ready;
+    if (probeResult.ready !== null) {
+      lastProbeReady = probeResult.ready;
+    }
+  }
+
+  if (probeReady === false && modelPhase === 'ready') {
+    modelPhase = 'warming';
+  }
+
   let status = 'warming';
   if (modelPhase === 'ready') {
     status = lastError ? 'degraded' : 'ready';
@@ -291,7 +312,9 @@ app.get('/model-status', (_req, res) => {
     warmupInFlight,
     lastWarmupTriggerAt: lastWarmupTriggerAtMs ? new Date(lastWarmupTriggerAtMs).toISOString() : null,
     lastWarmupResult,
-    lastWarmupError
+    lastWarmupError,
+    lastProbeReady,
+    probeAgeMs: lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null
   });
 });
 
@@ -299,9 +322,29 @@ app.get('/healthz', (_req, res) => {
   return res.json({ ok: true });
 });
 
-app.get('/readyz', (_req, res) => {
+app.get('/readyz', async (_req, res) => {
   if (serviceState === 'ready') {
-    return res.json({ ok: true, serviceState });
+    const nowMs = Date.now();
+    let probeReady = lastProbeReady;
+
+    if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+      const probeResult = await probeModelReady();
+      lastProbeAtMs = nowMs;
+      probeReady = probeResult.ready;
+      if (probeResult.ready !== null) {
+        lastProbeReady = probeResult.ready;
+      }
+    }
+
+    if (probeReady === true) {
+      return res.json({ ok: true, serviceState, reason: null });
+    }
+
+    if (probeReady === false) {
+      return res.status(503).json({ ok: false, serviceState, reason: 'MODEL_NOT_READY' });
+    }
+
+    return res.status(503).json({ ok: false, serviceState, reason: 'MODEL_PROBE_UNAVAILABLE' });
   }
 
   let reason = 'MODEL_NOT_READY';
@@ -346,7 +389,12 @@ app.post('/rewrite', async (req, res) => {
     const prompt = PROMPT_TEMPLATE.replace('{TEXT}', trimmedText);
 
     const nowMs = Date.now();
-    if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+    const probeAgeMs = lastProbeAtMs ? Math.max(0, nowMs - lastProbeAtMs) : Number.POSITIVE_INFINITY;
+    const shouldForceFreshReadyProbe =
+      serviceState === 'ready' &&
+      (probeReady === null || probeAgeMs > READY_REWRITE_STRICT_PROBE_MAX_AGE_MS);
+
+    if (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
       const probeResult = await probeModelReady();
       lastProbeAtMs = nowMs;
       probeReady = probeResult.ready;
@@ -358,7 +406,7 @@ app.post('/rewrite', async (req, res) => {
 
     if (serviceState === 'ready' && probeReady === true) {
       modelPhase = 'ready';
-    } else if (probeReady === false && modelPhase === 'unknown') {
+    } else if (probeReady === false || (serviceState === 'ready' && probeReady === null)) {
       modelPhase = 'warming';
     }
 
