@@ -123,13 +123,17 @@ Example with `EnvironmentFile` (recommended):
 
 ```bash
 sudo tee /etc/default/rewrite-bridge >/dev/null <<'ENV'
-OLLAMA_KEEP_ALIVE=45m
+OLLAMA_KEEP_ALIVE=10m
 OLLAMA_TIMEOUT_MS=45000
-OLLAMA_COLD_TIMEOUT_MS=120000
+OLLAMA_COLD_TIMEOUT_MS=180000
 WARMUP_PS_CACHE_MS=3000
 WARMUP_PS_TIMEOUT_MS=1200
 WARMUP_RETRY_AFTER_SEC=3
-WARMUP_TRIGGER_TIMEOUT_MS=4000
+WARMUP_TRIGGER_TIMEOUT_MS=60000
+WARMUP_RETRIGGER_WINDOW_MS=10000
+WARMUP_ON_START=true
+WARMUP_STARTUP_MAX_WAIT_MS=180000
+WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
 ENV
 ```
 
@@ -142,13 +146,17 @@ EnvironmentFile=/etc/default/rewrite-bridge
 Or set directly in unit file:
 
 ```ini
-Environment=OLLAMA_KEEP_ALIVE=45m
+Environment=OLLAMA_KEEP_ALIVE=10m
 Environment=OLLAMA_TIMEOUT_MS=45000
-Environment=OLLAMA_COLD_TIMEOUT_MS=120000
+Environment=OLLAMA_COLD_TIMEOUT_MS=180000
 Environment=WARMUP_PS_CACHE_MS=3000
 Environment=WARMUP_PS_TIMEOUT_MS=1200
 Environment=WARMUP_RETRY_AFTER_SEC=3
-Environment=WARMUP_TRIGGER_TIMEOUT_MS=4000
+Environment=WARMUP_TRIGGER_TIMEOUT_MS=60000
+Environment=WARMUP_RETRIGGER_WINDOW_MS=10000
+Environment=WARMUP_ON_START=true
+Environment=WARMUP_STARTUP_MAX_WAIT_MS=180000
+Environment=WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
 ```
 
 3. Apply changes:
@@ -159,6 +167,10 @@ sudo systemctl restart rewrite-bridge
 sudo systemctl status rewrite-bridge --no-pager
 ```
 
+On 4GB VPS hosts, this profile is a good starting point. Tradeoff reminder:
+- Longer `OLLAMA_KEEP_ALIVE` improves repeat-request latency.
+- Longer keep-alive also increases steady-state RAM usage.
+- `OLLAMA_KEEP_ALIVE=10m` is usually a balanced compromise for memory-constrained servers.
 
 ## 5) Configure Apache reverse proxy
 
@@ -176,6 +188,10 @@ ProxyPass /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
 ProxyPassReverse /api/rewrite-bridge/rewrite http://127.0.0.1:3001/rewrite
 ProxyPass /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
 ProxyPassReverse /api/rewrite-bridge/model-status http://127.0.0.1:3001/model-status
+ProxyPass /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
+ProxyPassReverse /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
+ProxyPass /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
+ProxyPassReverse /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
 
 # Temporary legacy compatibility alias (deprecated; remove in next breaking-release window)
 ProxyPass /api/rewrite http://127.0.0.1:3001/rewrite
@@ -183,7 +199,23 @@ ProxyPassReverse /api/rewrite http://127.0.0.1:3001/rewrite
 ```
 
 Public clients should call the namespaced routes (`/api/rewrite-bridge/*`).
-The bridge process itself still listens only on local internal routes (`/rewrite`, `/model-status`) at `127.0.0.1:3001`.
+The bridge process itself still listens only on local internal routes (`/rewrite`, `/model-status`, `/healthz`, `/readyz`) at `127.0.0.1:3001`.
+
+### VirtualHost placement and access control recommendation
+
+Place all `ProxyPass` directives inside your active `VirtualHost` (`:80`/`:443`).
+For `/api/rewrite-bridge/healthz` and `/api/rewrite-bridge/readyz`, restrict access with at least one of:
+- source allowlist (`Require ip ...`),
+- auth (`Require valid-user`), or
+- private-network-only exposure behind internal LB/VPN.
+
+Example hardening block (inside the same VirtualHost):
+
+```apache
+<LocationMatch "^/api/rewrite-bridge/(healthz|readyz)$">
+  Require ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+</LocationMatch>
+```
 
 Add these lines inside your active VirtualHost (`:80` or `:443`) and reload Apache:
 
@@ -197,12 +229,7 @@ sudo systemctl reload apache2
 
 ### Warm-up response behavior
 
-When model is not loaded, `POST /api/rewrite-bridge/rewrite` can return `202` in two phases:
-
-- `MODEL_WARMUP_STARTED`: first request that triggers one-shot model wake-up.
-- `MODEL_WARMING`: subsequent requests while wake-up is in progress/within cold window.
-
-Clients should respect `Retry-After` and poll `/api/rewrite-bridge/model-status` every 2–3 seconds.
+When startup warm-up is running, `POST /api/rewrite-bridge/rewrite` returns `202` with warm-up codes. If startup budget is exceeded, API returns `503` with `MODEL_STARTUP_DEGRADED`. Clients should respect `Retry-After` and poll `/api/rewrite-bridge/model-status` every 2–3 seconds.
 
 ## 6) How to test on the server (direct app port)
 
@@ -267,6 +294,23 @@ Check namespaced status endpoint:
 curl -sS https://rewrite.example.com/api/rewrite-bridge/model-status
 ```
 
+Health checks through VirtualHost:
+
+```bash
+curl -i -sS https://rewrite.example.com/api/rewrite-bridge/healthz
+curl -i -sS https://rewrite.example.com/api/rewrite-bridge/readyz
+```
+
+Readiness response schema troubleshooting (`reason` is always present, nullable on success):
+
+```bash
+curl -sS https://rewrite.example.com/api/rewrite-bridge/readyz
+# Success example: {"ok":true,"serviceState":"ready","reason":null}
+# Failure example: {"ok":false,"serviceState":"starting","reason":"STARTING_WARMUP"}
+```
+
+Response stability note: `/readyz` is schema-stable for clients (`ok`, `serviceState`, `reason` in both success/failure payloads).
+
 If external test fails, check in this order:
 1. `sudo systemctl status rewrite-bridge`
 2. `curl http://127.0.0.1:3001/rewrite ...` on server
@@ -297,12 +341,23 @@ sudo systemctl restart rewrite-bridge
 - Consider log rotation/centralization for systemd and Apache logs.
 - Monitor response times and timeout rates (`TIMEOUT` errors).
 - **Large models may need higher cold timeout**: raise `OLLAMA_COLD_TIMEOUT_MS` (e.g. `120000-300000`) to avoid premature warming failures.
+- **Warm-up retrigger cooldown**: tune `WARMUP_RETRIGGER_WINDOW_MS` (recommended `5000-15000`) to avoid excessive warm-up trigger spam while still recovering quickly.
 - **Keep-alive vs memory tradeoff**: higher `OLLAMA_KEEP_ALIVE` improves latency for subsequent requests but keeps model memory resident longer.
 
 
-## Validation checklist for warm-up flow
+## 10) Operator validation checklist
 
-- Cold start: first rewrite request returns `202` + `MODEL_WARMUP_STARTED`.
-- Second immediate request returns `202` + `MODEL_WARMING` (no duplicate wake-up call).
-- After model load, rewrite returns `200`.
-- Service logs include warm-up metadata fields for traceability.
+```bash
+# Startup loop attempts and transition
+sudo systemctl restart rewrite-bridge
+sudo journalctl -u rewrite-bridge -f
+
+# serviceState should move starting -> ready (or degraded)
+watch -n 2 "curl -sS http://127.0.0.1:3001/model-status"
+
+# /rewrite returns 202 during startup, then 200 after ready
+curl -i -sS http://127.0.0.1:3001/rewrite -H 'Content-Type: application/json' -d '{"text":"你今日得唔得閒？"}'
+
+# Check no repeated concurrent warm-up attempts
+sudo journalctl -u rewrite-bridge -n 300 --no-pager | rg 'Startup warmup attempt completed|warmupInFlight|MODEL_WARMUP_STARTED'
+```

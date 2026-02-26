@@ -32,20 +32,39 @@ Tune runtime behavior without code changes:
 | `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Model name sent in rewrite requests. |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Ollama keep-alive duration; longer keeps model loaded longer. |
 | `OLLAMA_TIMEOUT_MS` | `30000` | Request timeout (ms) when model is in `ready` phase. |
-| `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Request timeout (ms) for cold/warming phases. |
+| `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Request timeout (ms) for cold/warming phases. Recommend `120000-180000` for low-power VPS. |
 | `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Ollama status endpoint used to probe readiness. |
 | `OLLAMA_PS_CACHE_MS` | `2000` | Cache TTL (ms) for readiness probe results. |
 | `OLLAMA_PS_TIMEOUT_MS` | `1000` | Timeout (ms) for each `/api/ps` probe call. |
 | `WARMUP_PS_CACHE_MS` | fallback alias | Legacy/alias for `OLLAMA_PS_CACHE_MS` when primary key is unset. |
 | `WARMUP_PS_TIMEOUT_MS` | fallback alias | Legacy/alias for `OLLAMA_PS_TIMEOUT_MS` when primary key is unset. |
 | `WARMUP_RETRY_AFTER_SEC` | auto `2-3` | Optional override for `Retry-After` in warming `202` responses. |
-| `WARMUP_TRIGGER_TIMEOUT_MS` | `4000` | Timeout (ms) for the one-shot wake-up call sent when model is not loaded. |
+| `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Timeout (ms) for each warm-up trigger call; higher helps cold loads complete on tiny VPS. |
+| `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Cooldown window (ms) before another warm-up trigger is allowed; recommend `5000-15000` (max `120000`). |
+| `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. |
+| `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
+| `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
 
 ### Example startup with overrides
 
 ```bash
-OLLAMA_KEEP_ALIVE=45m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=120000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=4000 npm start
+OLLAMA_KEEP_ALIVE=10m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=60000 WARMUP_RETRIGGER_WINDOW_MS=10000 WARMUP_STARTUP_MAX_WAIT_MS=180000 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000 npm start
 ```
+
+## Small VPS recommended profile
+
+For 2–4 vCPU / 4GB RAM class hosts:
+
+```bash
+WARMUP_TRIGGER_TIMEOUT_MS=60000
+WARMUP_RETRIGGER_WINDOW_MS=10000
+OLLAMA_COLD_TIMEOUT_MS=180000
+WARMUP_STARTUP_MAX_WAIT_MS=180000
+WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
+OLLAMA_KEEP_ALIVE=10m
+```
+
+Longer keep-alive improves latency but increases RAM usage.
 
 ## Public API path behind reverse proxy
 
@@ -53,136 +72,77 @@ Canonical public namespace is **`/api/rewrite-bridge/`**.
 
 - `POST /api/rewrite-bridge/rewrite`
 - `GET /api/rewrite-bridge/model-status`
+- `GET /api/rewrite-bridge/healthz`
+- `GET /api/rewrite-bridge/readyz`
 
 Backend service still listens on local-only internal routes:
 
 - `POST /rewrite`
 - `GET /model-status`
-
-### Compatibility note
-
-`/api/rewrite` is kept as a temporary legacy alias for rewrite requests only.
-New integrations should use `/api/rewrite-bridge/*` and migrate as soon as possible.
-Planned removal of legacy `/api/rewrite` alias: next breaking-release window after all clients migrate.
+- `GET /healthz`
+- `GET /readyz`
 
 ## API
 
 ### `GET /model-status` (internal app route)
 
-Returns model readiness info suitable for frontend polling.
+Diagnostics endpoint for frontend polling and operator debugging.
 
-Response JSON:
-
-```json
-{
-  "status": "warming",
-  "lastWarmAt": null,
-  "lastError": null
-}
-```
-
-- `status` is one of:
-  - `warming`: model is still loading
-  - `ready`: model is ready for rewrite requests
-  - `degraded`: recent model/proxy errors occurred
-- `lastWarmAt` is ISO-8601 timestamp of last successful warm/serve event.
-- `lastError` is latest known error object (or `null`).
-- Warm-up metadata is included: `warmupInFlight`, `lastWarmupTriggerAt`, `lastWarmupResult`, `lastWarmupError`.
+Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `startupWarmupDeadlineAt`, `warmupInFlight`, `lastWarmupTriggerAt`, `lastWarmupResult`, `lastWarmupError`.
 
 ### `POST /rewrite` (internal app route)
 
-Request JSON:
+- During startup warm-up (`serviceState=starting`), returns HTTP `202` and `Retry-After` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`.
+- If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
+- Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
+- Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }`.
+
+### `GET /healthz` / `GET /readyz`
+
+Intended audience:
+- `/healthz`: infra/process liveness checks (`200` if process is up).
+- `/readyz`: traffic gating for load balancers (`200` only when `serviceState=ready`, otherwise `503`).
+- `/model-status`: richer diagnostics for UI polling and operator troubleshooting.
+
+If exposed through public VirtualHost, protect `/api/rewrite-bridge/healthz` and `/api/rewrite-bridge/readyz` with allowlist/auth or private-network-only controls.
+
+`/readyz` response contract:
 
 ```json
-{ "text": "你今日得唔得閒？" }
+{ "ok": true, "serviceState": "ready", "reason": null }
 ```
-
-Success:
 
 ```json
-{ "ok": true, "result": "你今天有空嗎？" }
+{ "ok": false, "serviceState": "starting", "reason": "STARTING_WARMUP" }
 ```
 
-Wake-up started response (HTTP `202` + `Retry-After` header):
+Other possible `reason` values: `STARTUP_DEGRADED`, `MODEL_NOT_READY`, `MODEL_PROBE_UNAVAILABLE`.
 
-```json
-{
-  "ok": false,
-  "error": { "code": "MODEL_WARMUP_STARTED", "message": "Model wake-up started, retry after 2 seconds." },
-  "retryAfterSec": 2
-}
-```
+Response stability note: `/readyz` always includes `ok`, `serviceState`, and `reason` (with `reason: null` on success); frontend clients should branch on `ok` and treat `reason` as nullable.
 
-Warming-in-progress response (HTTP `202` + `Retry-After` header):
+## Frontend behavior recommendation
 
-```json
-{
-  "ok": false,
-  "error": { "code": "MODEL_WARMING", "message": "Model is warming up, retry after 2 seconds." },
-  "retryAfterSec": 2
-}
-```
-
-Error format:
-
-```json
-{ "ok": false, "error": { "code": "...", "message": "..." } }
-```
-
-### Frontend behavior recommendation
-
-- If `POST /api/rewrite-bridge/rewrite` returns `202` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`, show a **“model is loading”** message.
-- Retry submission, or poll `GET /api/rewrite-bridge/model-status` every **2–3 seconds** until `status` becomes `ready`.
-- Respect `Retry-After` when present.
-
-## curl examples
-
-These examples use the public reverse-proxy namespace.
-
-### Check model status
-
-```bash
-curl -sS https://rewrite.example.com/api/rewrite-bridge/model-status
-```
-
-### Normal request
-
-```bash
-curl -i -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"佢啱啱先返到公司，等多陣。"}'
-```
-
-### Missing text
-
-```bash
-curl -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
-  -H 'Content-Type: application/json' \
-  -d '{}'
-```
-
-### Too long (>200 chars)
-
-```bash
-curl -sS https://rewrite.example.com/api/rewrite-bridge/rewrite \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"<put over-200-char text here>"}'
-```
-
-## Troubleshooting tuning tips
-
-- **Large models timing out during first request**: increase `OLLAMA_COLD_TIMEOUT_MS` (for example `120000-300000`) to accommodate model load time.
-- **Frequent timeouts even after warm-up**: increase `OLLAMA_TIMEOUT_MS` incrementally and inspect request logs (`phase`, `selectedTimeoutMs`).
-- **High memory usage on host**: reduce `OLLAMA_KEEP_ALIVE` so idle models unload sooner; longer keep-alive improves latency but uses more RAM.
+- If `POST /api/rewrite-bridge/rewrite` returns `202`, show a **model loading** message and retry using `Retry-After`.
+- If it returns `503` with `MODEL_STARTUP_DEGRADED`, tell users to retry later and alert operators.
+- Poll `GET /api/rewrite-bridge/model-status` every **2–3 seconds** until `serviceState` is `ready`.
 
 ## Deployment
 
 See detailed server deployment steps in `depolyment_guide.md`.
 
+## Operator validation checklist
 
-## Validation checklist
+```bash
+# 1) Start service and watch startup warm-up attempts + transition
+sudo systemctl restart rewrite-bridge
+sudo journalctl -u rewrite-bridge -f
 
-- Cold start first rewrite request returns `202` + `MODEL_WARMUP_STARTED`.
-- Immediate subsequent request (within cold timeout window) returns `202` + `MODEL_WARMING` without re-triggering wake-up.
-- Once model is loaded, rewrite returns `200` with `{ok:true,result:...}`.
-- Request logs include warm-up fields (`warmupTriggeredNow`, `warmupInFlight`, `lastWarmupResult`, `lastWarmupError`, `lastWarmupTriggerAtMs`).
+# 2) Observe serviceState starting -> ready/degraded
+watch -n 2 "curl -sS http://127.0.0.1:3001/model-status"
+
+# 3) Verify /rewrite behavior during warm-up and after ready
+curl -i -sS http://127.0.0.1:3001/rewrite -H 'Content-Type: application/json' -d '{"text":"你今日得唔得閒？"}'
+
+# 4) Confirm single in-flight warm-up behavior
+sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt completed|warmupInFlight|MODEL_WARMUP_STARTED'
+```
