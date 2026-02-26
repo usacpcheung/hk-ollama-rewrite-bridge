@@ -4,7 +4,11 @@
   "description": "HK Cantonese rewrite bridge for Ollama",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "express": "^4.21.2",
+    "opencc-js": "^1.0.5"
+  }
 }
