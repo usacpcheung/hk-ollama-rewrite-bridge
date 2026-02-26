@@ -130,6 +130,7 @@ WARMUP_PS_CACHE_MS=3000
 WARMUP_PS_TIMEOUT_MS=1200
 WARMUP_RETRY_AFTER_SEC=3
 WARMUP_TRIGGER_TIMEOUT_MS=60000
+WARMUP_RETRIGGER_WINDOW_MS=10000
 WARMUP_ON_START=true
 WARMUP_STARTUP_MAX_WAIT_MS=180000
 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
@@ -152,6 +153,7 @@ Environment=WARMUP_PS_CACHE_MS=3000
 Environment=WARMUP_PS_TIMEOUT_MS=1200
 Environment=WARMUP_RETRY_AFTER_SEC=3
 Environment=WARMUP_TRIGGER_TIMEOUT_MS=60000
+Environment=WARMUP_RETRIGGER_WINDOW_MS=10000
 Environment=WARMUP_ON_START=true
 Environment=WARMUP_STARTUP_MAX_WAIT_MS=180000
 Environment=WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
@@ -299,12 +301,15 @@ curl -i -sS https://rewrite.example.com/api/rewrite-bridge/healthz
 curl -i -sS https://rewrite.example.com/api/rewrite-bridge/readyz
 ```
 
-Readiness reason troubleshooting (503 should include stable `reason`):
+Readiness response schema troubleshooting (`reason` is always present, nullable on success):
 
 ```bash
 curl -sS https://rewrite.example.com/api/rewrite-bridge/readyz
-# Example: {"ok":false,"serviceState":"starting","reason":"STARTING_WARMUP"}
+# Success example: {"ok":true,"serviceState":"ready","reason":null}
+# Failure example: {"ok":false,"serviceState":"starting","reason":"STARTING_WARMUP"}
 ```
+
+Response stability note: `/readyz` is schema-stable for clients (`ok`, `serviceState`, `reason` in both success/failure payloads).
 
 If external test fails, check in this order:
 1. `sudo systemctl status rewrite-bridge`
@@ -336,6 +341,7 @@ sudo systemctl restart rewrite-bridge
 - Consider log rotation/centralization for systemd and Apache logs.
 - Monitor response times and timeout rates (`TIMEOUT` errors).
 - **Large models may need higher cold timeout**: raise `OLLAMA_COLD_TIMEOUT_MS` (e.g. `120000-300000`) to avoid premature warming failures.
+- **Warm-up retrigger cooldown**: tune `WARMUP_RETRIGGER_WINDOW_MS` (recommended `5000-15000`) to avoid excessive warm-up trigger spam while still recovering quickly.
 - **Keep-alive vs memory tradeoff**: higher `OLLAMA_KEEP_ALIVE` improves latency for subsequent requests but keeps model memory resident longer.
 
 
