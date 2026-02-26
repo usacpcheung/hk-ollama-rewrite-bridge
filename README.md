@@ -84,6 +84,9 @@ Backend service still listens on local-only internal routes:
 
 ## API
 
+Detailed endpoint result contracts and examples are documented in `docs/api-endpoint-results.md`.
+
+
 ### `GET /model-status` (internal app route)
 
 Diagnostics endpoint for frontend polling and operator debugging.
