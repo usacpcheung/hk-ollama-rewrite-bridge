@@ -60,6 +60,19 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
 const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
   max: 30_000
 });
+const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
+  'MINIMAX_PASSIVE_READY_GRACE_MS',
+  10 * 60_000,
+  { max: 24 * 60 * 60_000 }
+);
+const MINIMAX_FAIL_OPEN_ON_IDLE = process.env.MINIMAX_FAIL_OPEN_ON_IDLE
+  ? process.env.MINIMAX_FAIL_OPEN_ON_IDLE.toLowerCase() !== 'false'
+  : true;
+const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
+  parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
+    min: 1,
+    max: 100
+  }) || 3;
 const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
   'READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
   Math.min(1_000, OLLAMA_PS_CACHE_MS),
@@ -115,6 +128,9 @@ let lastWarmupError = null;
 let serviceState = 'starting';
 let startupWarmupAttempts = 0;
 let startupWarmupDeadlineAtMs = null;
+let lastRewriteSuccessAtMs = 0;
+let lastRewriteFailureAtMs = 0;
+let consecutiveRewriteFailures = 0;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -163,6 +179,33 @@ function warmupWithinColdWindow(nowMs) {
 async function probeModelReady() {
   const timeoutMs = REWRITE_PROVIDER === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
   return provider.checkReadiness({ timeoutMs });
+}
+
+function getMinimaxPassiveReadiness(nowMs = Date.now()) {
+  if (!MINIMAX_API_KEY) {
+    return { ready: false, reason: 'MINIMAX_API_KEY_MISSING' };
+  }
+
+  const lastActivityAtMs = Math.max(lastRewriteSuccessAtMs, lastRewriteFailureAtMs, 0);
+  const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
+  const noRecentFailures =
+    lastRewriteFailureAtMs === 0 || nowMs - lastRewriteFailureAtMs > MINIMAX_PASSIVE_READY_GRACE_MS;
+
+  if (MINIMAX_FAIL_OPEN_ON_IDLE && idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS) {
+    return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+  }
+
+  if (
+    consecutiveRewriteFailures >= MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD &&
+    !noRecentFailures
+  ) {
+    return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
+  }
+
+  return {
+    ready: true,
+    reason: null
+  };
 }
 
 async function triggerWarmupIfNeeded(nowMs) {
@@ -269,8 +312,10 @@ async function runStartupWarmupLoop() {
 app.get('/model-status', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
+  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const minimaxPassiveReadiness = isMinimax ? getMinimaxPassiveReadiness(nowMs) : null;
 
-  if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+  if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
     lastProbeAtMs = nowMs;
     probeReady = probeResult.ready;
@@ -279,7 +324,15 @@ app.get('/model-status', async (_req, res) => {
     }
   }
 
-  applyProbeState(probeReady);
+  if (isMinimax) {
+    if (minimaxPassiveReadiness.ready) {
+      promoteServiceReady();
+    } else {
+      modelPhase = 'warming';
+    }
+  } else {
+    applyProbeState(probeReady);
+  }
 
   let status = 'warming';
   if (serviceState === 'degraded') {
@@ -306,7 +359,22 @@ app.get('/model-status', async (_req, res) => {
     lastWarmupResult,
     lastWarmupError,
     lastProbeReady,
-    probeAgeMs: lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null
+    probeAgeMs: lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null,
+    minimaxPassiveReadiness: isMinimax
+      ? {
+          ...minimaxPassiveReadiness,
+          lastRewriteSuccessAt: lastRewriteSuccessAtMs
+            ? new Date(lastRewriteSuccessAtMs).toISOString()
+            : null,
+          lastRewriteFailureAt: lastRewriteFailureAtMs
+            ? new Date(lastRewriteFailureAtMs).toISOString()
+            : null,
+          consecutiveRewriteFailures,
+          passiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
+          failOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
+          failureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD
+        }
+      : null
   });
 });
 
@@ -317,6 +385,20 @@ app.get('/healthz', (_req, res) => {
 app.get('/readyz', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
+  const isMinimax = REWRITE_PROVIDER === 'minimax';
+
+  if (isMinimax) {
+    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
+    if (minimaxPassiveReadiness.ready) {
+      promoteServiceReady();
+      return res.json({ ok: true, serviceState, reason: null });
+    }
+
+    modelPhase = 'warming';
+    return res
+      .status(503)
+      .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
+  }
 
   if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
@@ -361,6 +443,7 @@ app.post('/rewrite', async (req, res) => {
   let probeReady = lastProbeReady;
   let probeError = null;
   let warmupTriggeredNow = false;
+  const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
     const { text } = req.body || {};
@@ -388,7 +471,7 @@ app.post('/rewrite', async (req, res) => {
       serviceState === 'ready' &&
       (probeReady === null || probeAgeMs > READY_REWRITE_STRICT_PROBE_MAX_AGE_MS);
 
-    if (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+    if (!isMinimax && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
       const probeResult = await probeModelReady();
       lastProbeAtMs = nowMs;
       probeReady = probeResult.ready;
@@ -398,22 +481,33 @@ app.post('/rewrite', async (req, res) => {
       }
     }
 
-    applyProbeState(probeReady, { demoteReadyOnUnknown: true });
-
-    if (probeReady !== true) {
-      warmupTriggeredNow = await triggerWarmupIfNeeded(nowMs);
-
-      const postWarmupProbe = await probeModelReady();
-      probeReady = postWarmupProbe.ready;
-      probeError = postWarmupProbe.error;
-      lastProbeAtMs = Date.now();
-      if (postWarmupProbe.ready !== null) {
-        lastProbeReady = postWarmupProbe.ready;
-      }
-
-      applyProbeState(probeReady);
-      if (probeReady !== true) {
+    if (isMinimax) {
+      const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
+      probeReady = minimaxPassiveReadiness.ready;
+      probeError = minimaxPassiveReadiness.reason;
+      if (minimaxPassiveReadiness.ready) {
+        promoteServiceReady();
+      } else {
         modelPhase = 'warming';
+      }
+    } else {
+      applyProbeState(probeReady, { demoteReadyOnUnknown: true });
+
+      if (probeReady !== true) {
+        warmupTriggeredNow = await triggerWarmupIfNeeded(nowMs);
+
+        const postWarmupProbe = await probeModelReady();
+        probeReady = postWarmupProbe.ready;
+        probeError = postWarmupProbe.error;
+        lastProbeAtMs = Date.now();
+        if (postWarmupProbe.ready !== null) {
+          lastProbeReady = postWarmupProbe.ready;
+        }
+
+        applyProbeState(probeReady);
+        if (probeReady !== true) {
+          modelPhase = 'warming';
+        }
       }
     }
 
@@ -470,6 +564,8 @@ app.post('/rewrite', async (req, res) => {
 
     const rewriteResult = await provider.rewrite({ prompt, timeoutMs: selectedTimeoutMs });
     if (!rewriteResult.ok) {
+      lastRewriteFailureAtMs = Date.now();
+      consecutiveRewriteFailures += 1;
       const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
@@ -489,6 +585,8 @@ app.post('/rewrite', async (req, res) => {
     }
 
     modelPhase = 'ready';
+    lastRewriteSuccessAtMs = Date.now();
+    consecutiveRewriteFailures = 0;
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
@@ -552,7 +650,10 @@ app.listen(PORT, HOST, () => {
       warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,
       warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,
       modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC,
-      serviceState
+      serviceState,
+      minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
+      minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
+      minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
