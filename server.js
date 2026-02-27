@@ -458,7 +458,8 @@ app.post('/rewrite', async (req, res) => {
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
-    const { text } = req.body || {};
+    const { text, stream } = req.body || {};
+    const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
 
     if (typeof text !== 'string') {
       return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
@@ -594,6 +595,93 @@ app.post('/rewrite', async (req, res) => {
         `Model is warming up, retry after ${MODEL_WARMING_RETRY_AFTER_SEC} seconds.`,
         { retryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC }
       );
+    }
+
+    if (streamRequested) {
+      res.status(200);
+      res.set({
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+
+      if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+      }
+
+      let streamDoneSent = false;
+      let streamedText = '';
+
+      const writeStreamChunk = (payload) => {
+        if (res.writableEnded) {
+          return;
+        }
+
+        res.write(`${JSON.stringify(payload)}\n`);
+        if (typeof res.flush === 'function') {
+          res.flush();
+        }
+      };
+
+      const writeDoneChunk = (extra = {}) => {
+        if (streamDoneSent) {
+          return;
+        }
+
+        streamDoneSent = true;
+        writeStreamChunk({ response: '', done: true, ...extra });
+      };
+
+      const rewriteResult = provider.rewriteStream
+        ? await provider.rewriteStream({
+            prompt,
+            timeoutMs: selectedTimeoutMs,
+            onChunk: async (event) => {
+              if (event?.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
+                const hkText = toHK(event.text);
+                streamedText += hkText;
+                writeStreamChunk({ response: hkText, done: false });
+                return;
+              }
+
+              if (event?.type === 'done') {
+                writeDoneChunk({ done_reason: event.reason || 'stop' });
+              }
+            }
+          })
+        : await provider.rewrite({ prompt, timeoutMs: selectedTimeoutMs });
+
+      if (!rewriteResult.ok) {
+        lastRewriteFailureAtMs = Date.now();
+        consecutiveRewriteFailures += 1;
+        const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+        setLastError(mappedError.code, mappedError.message);
+        writeStreamChunk({
+          done: true,
+          error: {
+            code: mappedError.code,
+            message: mappedError.message,
+            status: mappedError.status || 502
+          }
+        });
+        return res.end();
+      }
+
+      modelPhase = 'ready';
+      lastRewriteSuccessAtMs = Date.now();
+      consecutiveRewriteFailures = 0;
+      lastWarmAt = new Date().toISOString();
+      lastError = null;
+
+      const finalResponse = (rewriteResult.data?.response || '').trim();
+      if (!streamedText && finalResponse) {
+        const finalText = toHK(finalResponse);
+        writeStreamChunk({ response: finalText, done: false });
+      }
+
+      writeDoneChunk({ done_reason: 'stop' });
+      return res.end();
     }
 
     const rewriteResult = await provider.rewrite({ prompt, timeoutMs: selectedTimeoutMs });

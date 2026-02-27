@@ -62,6 +62,18 @@ function createOllamaProvider({
     });
   }
 
+  async function rewriteStream({ prompt, timeoutMs, onChunk }) {
+    return generateStream({
+      prompt,
+      timeoutMs,
+      options: {
+        temperature: 0.2,
+        num_predict: 300
+      },
+      onChunk
+    });
+  }
+
   async function generate({ prompt, timeoutMs, options }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -102,6 +114,105 @@ function createOllamaProvider({
     }
   }
 
+  async function generateStream({ prompt, timeoutMs, options, onChunk }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const emit = async (event) => {
+      if (typeof onChunk === 'function') {
+        await onChunk(event);
+      }
+    };
+
+    try {
+      const response = await fetch(generateUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          prompt,
+          stream: true,
+          keep_alive: keepAlive,
+          options
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
+        };
+      }
+
+      if (!response.body) {
+        return { ok: false, error: mapError(new Error('missing_body'), { kind: 'invalid_json' }) };
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let responseText = '';
+      let lastChunk = null;
+
+      const processLine = async (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return;
+        }
+
+        let payload;
+        try {
+          payload = JSON.parse(trimmed);
+        } catch (_err) {
+          return;
+        }
+
+        lastChunk = payload;
+        const token = payload?.response;
+        if (typeof token === 'string' && token.length > 0) {
+          responseText += token;
+          await emit({ type: 'token', text: token, raw: payload });
+        }
+
+        if (payload?.done) {
+          await emit({ type: 'done', reason: payload.done_reason || 'stop', raw: payload });
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          await processLine(line);
+        }
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        await processLine(buffer);
+      }
+
+      return {
+        ok: true,
+        data: {
+          response: responseText,
+          completion: lastChunk
+        }
+      };
+    } catch (err) {
+      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function mapError(err, context = {}) {
     if (context.kind === 'http') {
       return {
@@ -135,6 +246,7 @@ function createOllamaProvider({
 
   return {
     rewrite,
+    rewriteStream,
     checkReadiness,
     triggerWarmup,
     mapError,
