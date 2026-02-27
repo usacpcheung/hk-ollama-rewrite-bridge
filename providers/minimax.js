@@ -1,3 +1,5 @@
+const { randomUUID } = require('crypto');
+
 function createMinimaxProvider({
   apiUrl,
   model,
@@ -167,6 +169,12 @@ function createMinimaxProvider({
       let streamedText = '';
       let doneEventEmitted = false;
       let finalCompletionEvent = null;
+      let finalMessageContent = '';
+      const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
+
+      const emitMappedChunk = async (chunk) => {
+        await emit({ type: 'chunk', chunk });
+      };
 
       const emitDone = async (reason) => {
         if (doneEventEmitted) {
@@ -174,7 +182,13 @@ function createMinimaxProvider({
         }
 
         doneEventEmitted = true;
-        await emit({ type: 'done', reason: reason || 'stop' });
+        await emitMappedChunk(buildMappedChunk({
+          id: streamId,
+          model,
+          response: '',
+          done: true,
+          doneReason: reason || 'stop'
+        }));
       };
 
       const processSseFrame = async (frame) => {
@@ -199,26 +213,36 @@ function createMinimaxProvider({
           return;
         }
 
-        let eventData;
-        try {
-          eventData = JSON.parse(payload);
-        } catch (_err) {
+        const parsedFrame = parseMinimaxSseFrame(payload);
+        if (!parsedFrame) {
           return;
         }
 
-        if (eventData?.object === 'chat.completion') {
-          finalCompletionEvent = eventData;
+        if (parsedFrame.completion) {
+          finalCompletionEvent = parsedFrame.completion;
         }
 
-        const choice = eventData?.choices?.[0] || {};
-        const deltaText = choice?.delta?.content;
-        if (typeof deltaText === 'string' && deltaText.length > 0) {
-          streamedText += deltaText;
-          await emit({ type: 'token', text: deltaText });
+        if (typeof parsedFrame.finalMessageContent === 'string' && parsedFrame.finalMessageContent.length > 0) {
+          finalMessageContent = parsedFrame.finalMessageContent;
         }
 
-        if (choice?.finish_reason) {
-          await emitDone(choice.finish_reason);
+        if (parsedFrame.chunk) {
+          const chunk = {
+            ...parsedFrame.chunk,
+            id: streamId,
+            model
+          };
+
+          const token = chunk.response;
+          if (typeof token === 'string' && token.length > 0 && !chunk.done) {
+            streamedText += token;
+          }
+
+          await emitMappedChunk(chunk);
+
+          if (chunk.done) {
+            doneEventEmitted = true;
+          }
         }
       };
 
@@ -245,10 +269,20 @@ function createMinimaxProvider({
 
       const finalResponseText =
         finalCompletionEvent?.reply ||
+        finalMessageContent ||
         finalCompletionEvent?.choices?.[0]?.message?.content ||
         finalCompletionEvent?.choices?.[0]?.text ||
         streamedText ||
         '';
+
+      if (!streamedText && finalResponseText) {
+        await emitMappedChunk(buildMappedChunk({
+          id: streamId,
+          model,
+          response: finalResponseText,
+          done: false
+        }));
+      }
 
       await emitDone('stop');
       await emit({
@@ -328,4 +362,61 @@ function createMinimaxProvider({
   };
 }
 
-module.exports = { createMinimaxProvider };
+function buildMappedChunk({ id, model, response, done, doneReason }) {
+  return {
+    ...(id ? { id } : {}),
+    object: 'chat.completion.chunk',
+    created_at: new Date().toISOString(),
+    ...(model ? { model } : {}),
+    response,
+    done,
+    ...(done ? { done_reason: doneReason || 'stop' } : {})
+  };
+}
+
+function parseMinimaxSseFrame(payload) {
+  let eventData;
+  try {
+    eventData = JSON.parse(payload);
+  } catch (_err) {
+    return null;
+  }
+
+  const completion = eventData?.object === 'chat.completion' ? eventData : null;
+  const choice = eventData?.choices?.[0] || {};
+  const deltaText = choice?.delta?.content;
+  const finishReason = choice?.finish_reason;
+  const finalMessageContent = choice?.message?.content;
+
+  if (typeof deltaText === 'string' && deltaText.length > 0) {
+    return {
+      completion,
+      finalMessageContent,
+      chunk: buildMappedChunk({ response: deltaText, done: false })
+    };
+  }
+
+  if (finishReason) {
+    return {
+      completion,
+      finalMessageContent,
+      chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason })
+    };
+  }
+
+  if (typeof finalMessageContent === 'string' && finalMessageContent.length > 0) {
+    return {
+      completion,
+      finalMessageContent,
+      chunk: null
+    };
+  }
+
+  return {
+    completion,
+    finalMessageContent: '',
+    chunk: null
+  };
+}
+
+module.exports = { createMinimaxProvider, parseMinimaxSseFrame, buildMappedChunk };

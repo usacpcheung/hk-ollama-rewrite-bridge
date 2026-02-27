@@ -638,15 +638,19 @@ app.post('/rewrite', async (req, res) => {
             prompt,
             timeoutMs: selectedTimeoutMs,
             onChunk: async (event) => {
-              if (event?.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
-                const hkText = toHK(event.text);
-                streamedText += hkText;
-                writeStreamChunk({ response: hkText, done: false });
-                return;
-              }
+              if (event?.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
+                const chunk = { ...event.chunk };
+                if (typeof chunk.response === 'string' && chunk.response.length > 0 && !chunk.done) {
+                  const hkText = toHK(chunk.response);
+                  streamedText += hkText;
+                  chunk.response = hkText;
+                }
 
-              if (event?.type === 'done') {
-                writeDoneChunk({ done_reason: event.reason || 'stop' });
+                writeStreamChunk(chunk);
+
+                if (chunk.done) {
+                  streamDoneSent = true;
+                }
               }
             }
           })
