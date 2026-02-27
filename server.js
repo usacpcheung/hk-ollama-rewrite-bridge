@@ -83,22 +83,11 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
-const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
-const MINIMAX_ENDPOINT =
-  process.env.MINIMAX_ENDPOINT || 'https://api.minimax.chat/v1/text/chatcompletion_v2';
-const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
-const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
-
 const provider = createProvider({
-  provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
-  ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  minimaxEndpoint: MINIMAX_ENDPOINT,
-  minimaxModel: MINIMAX_MODEL,
-  minimaxApiKey: MINIMAX_API_KEY,
-  minimaxTimeoutMs: OLLAMA_TIMEOUT_MS
+  ollamaKeepAlive: OLLAMA_KEEP_ALIVE
 });
 
 let modelPhase = 'unknown';
@@ -489,10 +478,10 @@ app.post('/rewrite', async (req, res) => {
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
-    const modelText = (rewriteResult.data?.text || '').trim();
+    const modelText = (rewriteResult.data.response || '').trim();
     if (!modelText) {
-      setLastError('MODEL_PROVIDER_ERROR', 'Empty model response');
-      return errorResponse(res, 502, 'MODEL_PROVIDER_ERROR', 'Empty model response');
+      setLastError('OLLAMA_ERROR', 'Empty model response');
+      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
     const finalText = toHK(modelText);
