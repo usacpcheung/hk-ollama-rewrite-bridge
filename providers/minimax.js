@@ -22,6 +22,17 @@ function createMinimaxProvider({
       });
 
       if (response.ok) {
+        let data;
+        try {
+          data = await response.json();
+        } catch (_err) {
+          return { ready: false, error: 'minimax_readiness_invalid_json' };
+        }
+
+        if (!isConfiguredModelAvailable(data, model)) {
+          return { ready: false, error: 'minimax_model_unavailable' };
+        }
+
         return { ready: true, error: null };
       }
 
@@ -158,6 +169,57 @@ function createMinimaxProvider({
       minimaxApiKeySet: Boolean(apiKey)
     })
   };
+}
+
+function isConfiguredModelAvailable(payload, targetModel) {
+  if (!targetModel) {
+    return false;
+  }
+
+  const models = collectModelIdentifiers(payload);
+  return models.has(targetModel);
+}
+
+function collectModelIdentifiers(payload) {
+  const models = new Set();
+  const queue = [payload];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        queue.push(item);
+      }
+      continue;
+    }
+
+    if (!current || typeof current !== 'object') {
+      continue;
+    }
+
+    if (typeof current.id === 'string') {
+      models.add(current.id);
+    }
+
+    if (typeof current.model === 'string') {
+      models.add(current.model);
+    }
+
+    if (typeof current.name === 'string') {
+      models.add(current.name);
+    }
+
+    if (Array.isArray(current.models)) {
+      queue.push(current.models);
+    }
+
+    if (Array.isArray(current.data)) {
+      queue.push(current.data);
+    }
+  }
+
+  return models;
 }
 
 module.exports = { createMinimaxProvider };
