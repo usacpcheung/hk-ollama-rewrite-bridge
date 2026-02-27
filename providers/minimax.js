@@ -1,6 +1,5 @@
 function createMinimaxProvider({
   apiUrl,
-  readinessUrl,
   model,
   apiKey
 }) {
@@ -13,25 +12,23 @@ function createMinimaxProvider({
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(readinessUrl, {
-        method: 'GET',
+      const response = await fetch(apiUrl, {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`
         },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_completion_tokens: 1,
+          stream: false
+        }),
         signal: controller.signal
       });
 
       if (response.ok) {
-        let data;
-        try {
-          data = await response.json();
-        } catch (_err) {
-          return { ready: false, error: 'minimax_readiness_invalid_json' };
-        }
-
-        if (!isConfiguredModelAvailable(data, model)) {
-          return { ready: false, error: 'minimax_model_unavailable' };
-        }
+        await response.json();
 
         return { ready: true, error: null };
       }
@@ -45,6 +42,7 @@ function createMinimaxProvider({
       if (err?.name === 'AbortError') {
         return { ready: false, error: 'minimax_readiness_timeout' };
       }
+
       return { ready: false, error: 'minimax_readiness_fetch_failed' };
     } finally {
       clearTimeout(timeout);
@@ -82,7 +80,7 @@ function createMinimaxProvider({
           model,
           messages: [{ role: 'user', content: prompt }],
           stream: false,
-          max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           temperature: 0.2
         }),
         signal: controller.signal
@@ -164,62 +162,10 @@ function createMinimaxProvider({
     getInfo: () => ({
       provider: 'minimax',
       minimaxApiUrl: apiUrl,
-      minimaxReadinessUrl: readinessUrl,
       minimaxModel: model,
       minimaxApiKeySet: Boolean(apiKey)
     })
   };
-}
-
-function isConfiguredModelAvailable(payload, targetModel) {
-  if (!targetModel) {
-    return false;
-  }
-
-  const models = collectModelIdentifiers(payload);
-  return models.has(targetModel);
-}
-
-function collectModelIdentifiers(payload) {
-  const models = new Set();
-  const queue = [payload];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-
-    if (Array.isArray(current)) {
-      for (const item of current) {
-        queue.push(item);
-      }
-      continue;
-    }
-
-    if (!current || typeof current !== 'object') {
-      continue;
-    }
-
-    if (typeof current.id === 'string') {
-      models.add(current.id);
-    }
-
-    if (typeof current.model === 'string') {
-      models.add(current.model);
-    }
-
-    if (typeof current.name === 'string') {
-      models.add(current.name);
-    }
-
-    if (Array.isArray(current.models)) {
-      queue.push(current.models);
-    }
-
-    if (Array.isArray(current.data)) {
-      queue.push(current.data);
-    }
-  }
-
-  return models;
 }
 
 module.exports = { createMinimaxProvider };

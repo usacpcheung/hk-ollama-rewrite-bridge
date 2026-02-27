@@ -7,6 +7,7 @@ const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const MAX_TEXT_LENGTH = 200;
+const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -56,6 +57,9 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
   parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
   { max: 10_000 }
 );
+const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
+  max: 30_000
+});
 const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
   'READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
   Math.min(1_000, OLLAMA_PS_CACHE_MS),
@@ -84,18 +88,17 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
 
-const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.chat/v1/text/chatcompletion_v2';
-const MINIMAX_READINESS_URL = process.env.MINIMAX_READINESS_URL || 'https://api.minimax.chat/v1/models';
-const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
+const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
+const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
 const provider = createProvider({
+  provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
   minimaxApiUrl: MINIMAX_API_URL,
-  minimaxReadinessUrl: MINIMAX_READINESS_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY
 });
@@ -158,7 +161,8 @@ function warmupWithinColdWindow(nowMs) {
 }
 
 async function probeModelReady() {
-  return provider.checkReadiness({ timeoutMs: OLLAMA_PS_TIMEOUT_MS });
+  const timeoutMs = REWRITE_PROVIDER === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  return provider.checkReadiness({ timeoutMs });
 }
 
 async function triggerWarmupIfNeeded(nowMs) {
