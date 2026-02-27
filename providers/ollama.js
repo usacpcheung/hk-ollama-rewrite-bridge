@@ -94,7 +94,18 @@ function createOllamaProvider({
         return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
       }
 
-      return { ok: true, data };
+      return {
+        ok: true,
+        data: {
+          text: typeof data.response === 'string' ? data.response : '',
+          meta: {
+            provider: 'ollama',
+            model: data.model || model,
+            totalDuration: data.total_duration || null,
+            evalCount: data.eval_count || null
+          }
+        }
+      };
     } catch (err) {
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
@@ -105,7 +116,7 @@ function createOllamaProvider({
   function mapError(err, context = {}) {
     if (context.kind === 'http') {
       return {
-        code: 'OLLAMA_ERROR',
+        code: 'MODEL_PROVIDER_ERROR',
         message: 'Model request failed',
         status: 502,
         detail: `warmup_http_${context.status}`
@@ -113,7 +124,7 @@ function createOllamaProvider({
     }
 
     if (context.kind === 'invalid_json') {
-      return { code: 'OLLAMA_ERROR', message: 'Invalid model response', status: 502 };
+      return { code: 'MODEL_PROVIDER_ERROR', message: 'Invalid model response', status: 502 };
     }
 
     if (err?.name === 'AbortError') {
@@ -126,7 +137,7 @@ function createOllamaProvider({
     }
 
     return {
-      code: 'OLLAMA_ERROR',
+      code: 'MODEL_PROVIDER_ERROR',
       message: 'Failed to reach model',
       status: 502,
       detail: 'warmup_fetch_failed'
