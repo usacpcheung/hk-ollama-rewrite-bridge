@@ -1,5 +1,5 @@
 const { createOllamaProvider } = require('./ollama');
-const { createMiniMaxProvider } = require('./minimax');
+const { createMinimaxProvider } = require('./minimax');
 
 function createProvider({
   provider = process.env.REWRITE_PROVIDER || 'ollama',
@@ -7,10 +7,9 @@ function createProvider({
   ollamaPsUrl,
   ollamaModel,
   ollamaKeepAlive,
-  minimaxEndpoint,
+  minimaxApiUrl,
   minimaxModel,
-  minimaxApiKey,
-  minimaxTimeoutMs
+  minimaxApiKey
 }) {
   if (provider === 'ollama') {
     return createOllamaProvider({
@@ -22,15 +21,10 @@ function createProvider({
   }
 
   if (provider === 'minimax') {
-    if (!minimaxApiKey) {
-      throw new Error('MINIMAX_API_KEY is required when REWRITE_PROVIDER=minimax');
-    }
-
-    return createMiniMaxProvider({
-      endpoint: minimaxEndpoint,
+    return createMinimaxProvider({
+      apiUrl: minimaxApiUrl,
       model: minimaxModel,
-      apiKey: minimaxApiKey,
-      timeoutMs: minimaxTimeoutMs
+      apiKey: minimaxApiKey
     });
   }
 

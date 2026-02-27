@@ -1,100 +1,76 @@
-function createMiniMaxProvider({ endpoint, model, apiKey, timeoutMs = 30_000 }) {
-  function normalizeContent(content) {
-    if (typeof content === 'string') {
-      return content;
+function createMinimaxProvider({
+  apiUrl,
+  model,
+  apiKey
+}) {
+  async function checkReadiness({ timeoutMs }) {
+    if (!apiKey) {
+      return { ready: false, error: 'minimax_api_key_missing' };
     }
 
-    if (Array.isArray(content)) {
-      return content
-        .map((part) => {
-          if (typeof part === 'string') {
-            return part;
-          }
-          if (part && typeof part === 'object' && typeof part.text === 'string') {
-            return part.text;
-          }
-          return '';
-        })
-        .join('')
-        .trim();
-    }
-
-    return '';
-  }
-
-  function mapError(err, context = {}) {
-    if (context.kind === 'http') {
-      if (context.status === 401 || context.status === 403) {
-        return {
-          code: 'MODEL_AUTH_ERROR',
-          message: 'Model authentication failed',
-          status: 502,
-          detail: `provider_http_${context.status}`
-        };
-      }
-
-      if (context.status === 429) {
-        return {
-          code: 'MODEL_RATE_LIMIT',
-          message: 'Model provider rate limit reached',
-          status: 503,
-          detail: 'provider_http_429'
-        };
-      }
-
-      if (context.status >= 400 && context.status < 500) {
-        return {
-          code: 'MODEL_BAD_REQUEST',
-          message: 'Model request was rejected by provider',
-          status: 502,
-          detail: `provider_http_${context.status}`
-        };
-      }
-
-      return {
-        code: 'MODEL_PROVIDER_ERROR',
-        message: 'Model provider request failed',
-        status: 502,
-        detail: `provider_http_${context.status}`
-      };
-    }
-
-    if (context.kind === 'invalid_json') {
-      return { code: 'MODEL_PROVIDER_ERROR', message: 'Invalid model response', status: 502 };
-    }
-
-    if (err?.name === 'AbortError') {
-      return {
-        code: 'MODEL_TIMEOUT',
-        message: 'Model response timed out. Please retry.',
-        status: 504,
-        detail: 'provider_timeout'
-      };
-    }
-
-    return {
-      code: 'MODEL_PROVIDER_ERROR',
-      message: 'Failed to reach model provider',
-      status: 502,
-      detail: 'provider_fetch_failed'
-    };
-  }
-
-  async function checkReadiness() {
-    return { ready: true, error: null };
-  }
-
-  async function triggerWarmup({ timeoutMs: warmupTimeoutMs }) {
-    return rewrite({ prompt: 'hi', timeoutMs: warmupTimeoutMs });
-  }
-
-  async function rewrite({ prompt, timeoutMs: overrideTimeoutMs }) {
     const controller = new AbortController();
-    const requestTimeoutMs = overrideTimeoutMs || timeoutMs;
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_completion_tokens: 1,
+          stream: false
+        }),
+        signal: controller.signal
+      });
+
+      if (response.ok) {
+        await response.json();
+
+        return { ready: true, error: null };
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return { ready: false, error: 'minimax_auth_failed' };
+      }
+
+      return { ready: false, error: `minimax_readiness_http_${response.status}` };
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        return { ready: false, error: 'minimax_readiness_timeout' };
+      }
+
+      return { ready: false, error: 'minimax_readiness_fetch_failed' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function triggerWarmup({ timeoutMs }) {
+    return generate({
+      prompt: '你好',
+      timeoutMs,
+      maxTokens: 1
+    });
+  }
+
+  async function rewrite({ prompt, timeoutMs }) {
+    return generate({
+      prompt,
+      timeoutMs,
+      maxTokens: 300
+    });
+  }
+
+  async function generate({ prompt, timeoutMs, maxTokens }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -103,49 +79,79 @@ function createMiniMaxProvider({ endpoint, model, apiKey, timeoutMs = 30_000 }) 
         body: JSON.stringify({
           model,
           messages: [{ role: 'user', content: prompt }],
+          stream: false,
+          max_completion_tokens: maxTokens,
           temperature: 0.2
         }),
         signal: controller.signal
       });
 
       if (!response.ok) {
-        return { ok: false, error: mapError(new Error('request_failed'), { kind: 'http', status: response.status }) };
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
+        };
       }
 
-      let payload;
+      let data;
       try {
-        payload = await response.json();
+        data = await response.json();
       } catch (_err) {
         return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
       }
 
-      const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
-      const text = (
-        normalizeContent(choice?.message?.content) ||
-        normalizeContent(choice?.delta?.content) ||
-        normalizeContent(payload.reply) ||
-        normalizeContent(payload.output_text) ||
-        normalizeContent(payload.text)
-      ).trim();
+      const responseText =
+        data?.reply ||
+        data?.choices?.[0]?.message?.content ||
+        data?.choices?.[0]?.text ||
+        '';
 
-      return {
-        ok: true,
-        data: {
-          text,
-          meta: {
-            provider: 'minimax',
-            model,
-            id: payload.id || null,
-            usage: payload.usage || null,
-            finishReason: choice?.finish_reason || null
-          }
-        }
-      };
+      return { ok: true, data: { response: responseText } };
     } catch (err) {
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  function mapError(err, context = {}) {
+    if (context.kind === 'http') {
+      if (context.status === 401 || context.status === 403) {
+        return {
+          code: 'PROVIDER_AUTH_ERROR',
+          message: 'Provider authentication failed',
+          status: 502,
+          detail: `minimax_http_${context.status}`
+        };
+      }
+
+      return {
+        code: 'PROVIDER_ERROR',
+        message: 'Provider request failed',
+        status: 502,
+        detail: `minimax_http_${context.status}`
+      };
+    }
+
+    if (context.kind === 'invalid_json') {
+      return { code: 'PROVIDER_ERROR', message: 'Invalid provider response', status: 502 };
+    }
+
+    if (err?.name === 'AbortError') {
+      return {
+        code: 'MODEL_TIMEOUT',
+        message: 'Model response timed out. Please retry.',
+        status: 504,
+        detail: 'minimax_timeout'
+      };
+    }
+
+    return {
+      code: 'PROVIDER_ERROR',
+      message: 'Failed to reach provider',
+      status: 502,
+      detail: 'minimax_fetch_failed'
+    };
   }
 
   return {
@@ -155,11 +161,11 @@ function createMiniMaxProvider({ endpoint, model, apiKey, timeoutMs = 30_000 }) 
     mapError,
     getInfo: () => ({
       provider: 'minimax',
-      minimaxEndpoint: endpoint,
+      minimaxApiUrl: apiUrl,
       minimaxModel: model,
-      minimaxTimeoutMs: timeoutMs
+      minimaxApiKeySet: Boolean(apiKey)
     })
   };
 }
 
-module.exports = { createMiniMaxProvider };
+module.exports = { createMinimaxProvider };
