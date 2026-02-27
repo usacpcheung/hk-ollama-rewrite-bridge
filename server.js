@@ -83,11 +83,21 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
+
+const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.chat/v1/text/chatcompletion_v2';
+const MINIMAX_READINESS_URL = process.env.MINIMAX_READINESS_URL || 'https://api.minimax.chat/v1/models';
+const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'MiniMax-Text-01';
+const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
+
 const provider = createProvider({
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
-  ollamaKeepAlive: OLLAMA_KEEP_ALIVE
+  ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+  minimaxApiUrl: MINIMAX_API_URL,
+  minimaxReadinessUrl: MINIMAX_READINESS_URL,
+  minimaxModel: MINIMAX_MODEL,
+  minimaxApiKey: MINIMAX_API_KEY
 });
 
 let modelPhase = 'unknown';
