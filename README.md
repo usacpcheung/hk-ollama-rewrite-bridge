@@ -52,6 +52,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
+| `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 
 ### Example startup with overrides
 
@@ -141,10 +142,20 @@ When `REWRITE_PROVIDER=minimax`, readiness is **passive**:
 
 This keeps readiness checks non-billable and avoids probe-induced usage/cost spikes. Tradeoff: upstream outages may be detected less immediately when traffic is idle.
 
+Policy details:
+- `MINIMAX_FAIL_OPEN_ON_IDLE=true` keeps the time/idle fail-open behavior. Once failures are old enough (or traffic has been idle past `MINIMAX_PASSIVE_READY_GRACE_MS`), passive readiness can return to green.
+- `MINIMAX_FAIL_OPEN_ON_IDLE=false` is strict fail-closed after threshold failures: elapsed time alone does not recover readiness; a successful rewrite is required to clear failure streak state.
+
+Controlled recovery-attempt mechanism (backend guardrail):
+- Even in strict fail-closed state (`MINIMAX_RECENT_FAILURES`), backend allows bounded `POST /rewrite` recovery attempts to break deadlock.
+- Attempts are globally rate-limited by `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS`.
+- If cooldown is active, `POST /rewrite` returns `429 MINIMAX_RECOVERY_COOLDOWN` with `Retry-After`.
+- Non-recoverable readiness failures (for example `MINIMAX_API_KEY_MISSING`) remain hard denied.
+
 Operationally:
 - Ready (`200`) when passive policy allows traffic.
 - Not ready (`503`) with deterministic reason codes such as `MINIMAX_API_KEY_MISSING` or `MINIMAX_RECENT_FAILURES`.
-- `/model-status` includes passive-readiness diagnostics (`lastRewriteSuccessAt`, `lastRewriteFailureAt`, `consecutiveRewriteFailures`, policy reason/knobs) for troubleshooting without external probe traffic.
+- `/model-status` includes passive-readiness diagnostics (`lastRewriteSuccessAt`, `lastRewriteFailureAt`, `consecutiveRewriteFailures`, recovery cooldown metadata, policy reason/knobs) for troubleshooting without external probe traffic.
 
 ## Frontend behavior recommendation
 
