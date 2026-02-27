@@ -8,7 +8,6 @@ function createProvider({
   ollamaModel,
   ollamaKeepAlive,
   minimaxApiUrl,
-  minimaxReadinessUrl,
   minimaxModel,
   minimaxApiKey
 }) {
@@ -24,7 +23,6 @@ function createProvider({
   if (provider === 'minimax') {
     return createMinimaxProvider({
       apiUrl: minimaxApiUrl,
-      readinessUrl: minimaxReadinessUrl,
       model: minimaxModel,
       apiKey: minimaxApiKey
     });
