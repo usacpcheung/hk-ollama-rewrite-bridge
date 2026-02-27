@@ -1,6 +1,6 @@
 # hk-ollama-rewrite-bridge
 
-Production-ready Node.js Express bridge that rewrites Hong Kong colloquial Cantonese into formal Traditional Chinese via local Ollama.
+Production-ready Node.js Express bridge that rewrites Hong Kong colloquial Cantonese into formal Traditional Chinese via configurable backend providers (`ollama` or `minimax`).
 
 ## Requirements
 
@@ -93,7 +93,11 @@ Backend service still listens on local-only internal routes:
 
 ## API
 
-Detailed endpoint result contracts and examples are documented in `docs/api-endpoint-results.md`.
+Detailed endpoint contracts, response formats, streaming behavior, and provider-specific result normalization are documented in `docs/api-reference.md`.
+
+## Deployment
+
+Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/depolyment_guide.md`.
 
 
 ### `GET /model-status` (internal app route)
@@ -165,7 +169,7 @@ Operationally:
 
 ## Deployment
 
-See detailed server deployment steps in `depolyment_guide.md`.
+See detailed server deployment steps in `docs/depolyment_guide.md`.
 
 ## Operator validation checklist
 
