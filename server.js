@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
+const { createProvider } = require('./providers');
 
 const app = express();
 const HOST = '127.0.0.1';
@@ -82,6 +83,13 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
+const provider = createProvider({
+  ollamaUrl: OLLAMA_URL,
+  ollamaPsUrl: OLLAMA_PS_URL,
+  ollamaModel: OLLAMA_MODEL,
+  ollamaKeepAlive: OLLAMA_KEEP_ALIVE
+});
+
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
 let lastProbeReady = null;
@@ -140,39 +148,7 @@ function warmupWithinColdWindow(nowMs) {
 }
 
 async function probeModelReady() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OLLAMA_PS_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(OLLAMA_PS_URL, { signal: controller.signal });
-    if (!response.ok) {
-      return { ready: null, error: `ps_http_${response.status}` };
-    }
-
-    let psJson;
-    try {
-      psJson = await response.json();
-    } catch (_err) {
-      return { ready: null, error: 'ps_invalid_json' };
-    }
-
-    const models = Array.isArray(psJson.models) ? psJson.models : [];
-    const ready = models.some((entry) => {
-      if (!entry || typeof entry !== 'object') {
-        return false;
-      }
-      return entry.name === OLLAMA_MODEL || entry.model === OLLAMA_MODEL;
-    });
-
-    return { ready, error: null };
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      return { ready: null, error: 'ps_timeout' };
-    }
-    return { ready: null, error: 'ps_fetch_failed' };
-  } finally {
-    clearTimeout(timeout);
-  }
+  return provider.checkReadiness({ timeoutMs: OLLAMA_PS_TIMEOUT_MS });
 }
 
 async function triggerWarmupIfNeeded(nowMs) {
@@ -183,42 +159,19 @@ async function triggerWarmupIfNeeded(nowMs) {
   warmupInFlight = true;
   lastWarmupTriggerAtMs = nowMs;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), WARMUP_TRIGGER_TIMEOUT_MS);
-
   try {
-    const warmupResponse = await fetch(OLLAMA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt: 'hi',
-        stream: false,
-        keep_alive: OLLAMA_KEEP_ALIVE,
-        options: {
-          temperature: 0,
-          num_predict: 1
-        }
-      }),
-      signal: controller.signal
-    });
-
-    if (!warmupResponse.ok) {
+    const warmupResult = await provider.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
+    if (!warmupResult.ok) {
       lastWarmupResult = 'failed';
-      lastWarmupError = `warmup_http_${warmupResponse.status}`;
+      lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
       return true;
     }
 
     lastWarmupResult = 'success';
     lastWarmupError = null;
     return true;
-  } catch (err) {
-    lastWarmupResult = 'failed';
-    lastWarmupError = err.name === 'AbortError' ? 'warmup_timeout' : 'warmup_fetch_failed';
-    return true;
   } finally {
     warmupInFlight = false;
-    clearTimeout(timeout);
   }
 }
 
@@ -501,32 +454,10 @@ app.post('/rewrite', async (req, res) => {
       );
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), selectedTimeoutMs);
-
-    let ollamaResponse;
-    try {
-      ollamaResponse = await fetch(OLLAMA_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          prompt,
-          stream: false,
-          keep_alive: OLLAMA_KEEP_ALIVE,
-          options: {
-            temperature: 0.2,
-            num_predict: 300
-          }
-        }),
-        signal: controller.signal
-      });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (requestPhase === 'ready') {
-          setLastError('MODEL_TIMEOUT', 'Model response timed out. Please retry.');
-          return errorResponse(res, 504, 'MODEL_TIMEOUT', 'Model response timed out. Please retry.');
-        }
+    const rewriteResult = await provider.rewrite({ prompt, timeoutMs: selectedTimeoutMs });
+    if (!rewriteResult.ok) {
+      const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+      if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
           'Model is warming up and took too long to respond. Please retry shortly.'
@@ -538,30 +469,16 @@ app.post('/rewrite', async (req, res) => {
           'Model is warming up and took too long to respond. Please retry shortly.'
         );
       }
-      setLastError('OLLAMA_ERROR', 'Failed to reach model');
-      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Failed to reach model');
-    } finally {
-      clearTimeout(timeout);
-    }
 
-    if (!ollamaResponse.ok) {
-      setLastError('OLLAMA_ERROR', 'Model request failed');
-      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Model request failed');
+      setLastError(mappedError.code, mappedError.message);
+      return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
     }
 
     modelPhase = 'ready';
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
-    let ollamaJson;
-    try {
-      ollamaJson = await ollamaResponse.json();
-    } catch (_err) {
-      setLastError('OLLAMA_ERROR', 'Invalid model response');
-      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Invalid model response');
-    }
-
-    const modelText = (ollamaJson.response || '').trim();
+    const modelText = (rewriteResult.data.response || '').trim();
     if (!modelText) {
       setLastError('OLLAMA_ERROR', 'Empty model response');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
@@ -605,14 +522,12 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, HOST, () => {
+  const providerInfo = provider.getInfo ? provider.getInfo() : {};
   console.log(
     JSON.stringify({
       level: 'info',
       msg: 'Effective Ollama config',
-      ollamaUrl: OLLAMA_URL,
-      ollamaPsUrl: OLLAMA_PS_URL,
-      ollamaModel: OLLAMA_MODEL,
-      ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+      ...providerInfo,
       ollamaTimeoutMs: OLLAMA_TIMEOUT_MS,
       ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
