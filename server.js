@@ -569,7 +569,7 @@ app.post('/rewrite', async (req, res) => {
       );
     }
 
-    if (serviceState === 'degraded') {
+    if (serviceState === 'degraded' && !minimaxRecoveryAttempt) {
       return errorResponse(
         res,
         503,
