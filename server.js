@@ -73,6 +73,11 @@ const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
     min: 1,
     max: 100
   }) || 3;
+const MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS = parseEnvMilliseconds(
+  'MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS',
+  15_000,
+  { max: 10 * 60_000 }
+);
 const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
   'READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
   Math.min(1_000, OLLAMA_PS_CACHE_MS),
@@ -131,6 +136,7 @@ let startupWarmupDeadlineAtMs = null;
 let lastRewriteSuccessAtMs = 0;
 let lastRewriteFailureAtMs = 0;
 let consecutiveRewriteFailures = 0;
+let lastMinimaxRecoveryAttemptAtMs = 0;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
@@ -188,18 +194,19 @@ function getMinimaxPassiveReadiness(nowMs = Date.now()) {
 
   const lastActivityAtMs = Math.max(lastRewriteSuccessAtMs, lastRewriteFailureAtMs, 0);
   const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
-  const noRecentFailures =
+  const failuresAreStale =
     lastRewriteFailureAtMs === 0 || nowMs - lastRewriteFailureAtMs > MINIMAX_PASSIVE_READY_GRACE_MS;
+
+  if (consecutiveRewriteFailures >= MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD) {
+    if (MINIMAX_FAIL_OPEN_ON_IDLE && (failuresAreStale || (idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS))) {
+      return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+    }
+
+    return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
+  }
 
   if (MINIMAX_FAIL_OPEN_ON_IDLE && idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS) {
     return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
-  }
-
-  if (
-    consecutiveRewriteFailures >= MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD &&
-    !noRecentFailures
-  ) {
-    return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
   }
 
   return {
@@ -370,6 +377,10 @@ app.get('/model-status', async (_req, res) => {
             ? new Date(lastRewriteFailureAtMs).toISOString()
             : null,
           consecutiveRewriteFailures,
+          lastRecoveryAttemptAt: lastMinimaxRecoveryAttemptAtMs
+            ? new Date(lastMinimaxRecoveryAttemptAtMs).toISOString()
+            : null,
+          recoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
           passiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
           failOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
           failureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD
@@ -443,6 +454,7 @@ app.post('/rewrite', async (req, res) => {
   let probeReady = lastProbeReady;
   let probeError = null;
   let warmupTriggeredNow = false;
+  let minimaxRecoveryAttempt = false;
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
@@ -489,6 +501,28 @@ app.post('/rewrite', async (req, res) => {
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
+
+        if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
+          const cooldownRemainingMs =
+            lastMinimaxRecoveryAttemptAtMs > 0
+              ? MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS - (nowMs - lastMinimaxRecoveryAttemptAtMs)
+              : 0;
+
+          if (cooldownRemainingMs > 0) {
+            const retryAfterSec = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
+            res.set('Retry-After', String(retryAfterSec));
+            return errorResponse(
+              res,
+              429,
+              'MINIMAX_RECOVERY_COOLDOWN',
+              `Minimax recovery attempt cooldown active, retry after ${retryAfterSec} seconds.`,
+              { retryAfterSec }
+            );
+          }
+
+          minimaxRecoveryAttempt = true;
+          lastMinimaxRecoveryAttemptAtMs = nowMs;
+        }
       }
     } else {
       applyProbeState(probeReady, { demoteReadyOnUnknown: true });
@@ -551,7 +585,7 @@ app.post('/rewrite', async (req, res) => {
       );
     }
 
-    if (requestPhase !== 'ready') {
+    if (requestPhase !== 'ready' && !minimaxRecoveryAttempt) {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
       return errorResponse(
         res,
@@ -613,6 +647,7 @@ app.post('/rewrite', async (req, res) => {
         probeAgeMs,
         probeError,
         warmupTriggeredNow,
+        minimaxRecoveryAttempt,
         warmupInFlight,
         lastWarmupResult,
         lastWarmupError,
@@ -653,7 +688,8 @@ app.listen(PORT, HOST, () => {
       serviceState,
       minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
       minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
-      minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD
+      minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
+      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
