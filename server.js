@@ -618,6 +618,7 @@ app.post('/rewrite', async (req, res) => {
 
       let streamDoneSent = false;
       let streamedText = '';
+      let streamedChunkEmitted = false;
 
       const writeStreamChunk = (payload) => {
         if (res.writableEnded) {
@@ -644,11 +645,45 @@ app.post('/rewrite', async (req, res) => {
             prompt,
             timeoutMs: selectedTimeoutMs,
             onChunk: async (event) => {
-              if (event?.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
+              if (!event || typeof event !== 'object') {
+                return;
+              }
+
+              if (event.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
                 const chunk = event.chunk;
-                if (typeof chunk.response === 'string' && chunk.response.length > 0 && !chunk.done) {
-                  streamedText += chunk.response;
+                const chunkResponse = typeof chunk.response === 'string' ? chunk.response : '';
+
+                if (chunkResponse && !chunk.done) {
+                  streamedText += chunkResponse;
+                  streamedChunkEmitted = true;
                 }
+
+                if (chunk.done) {
+                  const { done_reason: doneReason } = chunk;
+                  writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
+                  return;
+                }
+
+                if (chunkResponse) {
+                  writeStreamChunk({
+                    ...chunk,
+                    response: toHK(chunkResponse),
+                    done: false
+                  });
+                }
+
+                return;
+              }
+
+              if (event.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
+                streamedText += event.text;
+                streamedChunkEmitted = true;
+                writeStreamChunk({ response: toHK(event.text), done: false });
+                return;
+              }
+
+              if (event.type === 'done') {
+                writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
               }
             }
           })
@@ -678,7 +713,7 @@ app.post('/rewrite', async (req, res) => {
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
       const streamResponse = finalResponse || streamedText.trim();
-      if (streamResponse) {
+      if (streamResponse && !streamedChunkEmitted) {
         const finalText = toHK(streamResponse);
         writeStreamChunk({ response: finalText, done: false });
       }
