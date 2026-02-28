@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
 const { createCorsMiddleware } = require('./cors');
+const { authenticateRequest, normalizeDomains } = require('./auth');
 
 const app = express();
 const HOST = '127.0.0.1';
@@ -10,6 +11,8 @@ const PORT = 3001;
 const MAX_TEXT_LENGTH = 200;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const CORS_ALLOWLIST = process.env.CORS_ALLOWLIST || '';
+const AUTH_TOKENINFO_URL = process.env.AUTH_TOKENINFO_URL || 'https://oauth2.googleapis.com/tokeninfo';
+const AUTH_ALLOWED_EMAIL_DOMAINS = normalizeDomains(process.env.AUTH_ALLOWED_EMAIL_DOMAINS || '');
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -455,8 +458,30 @@ app.get('/readyz', async (_req, res) => {
 
 app.post('/rewrite', async (req, res) => {
   const requestId = crypto.randomUUID();
-  const startedAt = Date.now();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+
+  const authResult = await authenticateRequest({
+    req,
+    tokeninfoUrl: AUTH_TOKENINFO_URL,
+    allowedEmailDomains: AUTH_ALLOWED_EMAIL_DOMAINS,
+    logger: (category, detail = null) => {
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'Authentication failed',
+          category,
+          detail,
+          requestId,
+          ip
+        })
+      );
+    }
+  });
+
+  if (!authResult.ok) {
+    return res.status(authResult.status).json(authResult.body);
+  }
+  const startedAt = Date.now();
   let inputLength = 0;
   let requestPhase = modelPhase;
   let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
@@ -818,7 +843,9 @@ app.listen(PORT, HOST, () => {
       minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
       minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
       minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
-      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
+      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
+      authTokeninfoUrl: AUTH_TOKENINFO_URL,
+      authAllowedEmailDomains: AUTH_ALLOWED_EMAIL_DOMAINS
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
