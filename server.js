@@ -159,6 +159,22 @@ function errorResponse(res, status, code, message, extra = {}) {
   });
 }
 
+function requireAuthenticatedEmail(req, res) {
+  const email = (req.get('X-Authenticated-Email') || '').trim().toLowerCase();
+
+  if (!email) {
+    errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+    return null;
+  }
+
+  if (!email.endsWith('@hs.edu.hk')) {
+    errorResponse(res, 403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
+    return null;
+  }
+
+  return email;
+}
+
 function setLastError(code, message) {
   lastError = { code, message, at: new Date().toISOString() };
 }
@@ -454,6 +470,7 @@ app.post('/rewrite', async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  let email = null;
   let inputLength = 0;
   let requestPhase = modelPhase;
   let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
@@ -464,6 +481,11 @@ app.post('/rewrite', async (req, res) => {
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
+    email = requireAuthenticatedEmail(req, res);
+    if (email === null) {
+      return;
+    }
+
     const { text, stream } = req.body || {};
     const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
 
@@ -765,6 +787,7 @@ app.post('/rewrite', async (req, res) => {
       JSON.stringify({
         requestId,
         ip,
+        email,
         inputLength,
         elapsedMs,
         phase: requestPhase,
