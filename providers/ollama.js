@@ -56,7 +56,7 @@ function createOllamaProvider({
       prompt,
       timeoutMs,
       options: {
-        temperature: 0.2,
+        temperature: 0.15,
         num_predict: 300
       }
     });
@@ -67,7 +67,7 @@ function createOllamaProvider({
       prompt,
       timeoutMs,
       options: {
-        temperature: 0.2,
+        temperature: 0.15,
         num_predict: 300
       },
       onChunk

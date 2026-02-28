@@ -92,7 +92,7 @@ function createMinimaxProvider({
           messages: [{ role: 'user', content: prompt }],
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.2
+          temperature: 0.15
         }),
         signal: controller.signal
       });
@@ -147,7 +147,7 @@ function createMinimaxProvider({
           messages: [{ role: 'user', content: prompt }],
           stream: true,
           max_completion_tokens: maxTokens,
-          temperature: 0.2
+          temperature: 0.15
         }),
         signal: controller.signal
       });
