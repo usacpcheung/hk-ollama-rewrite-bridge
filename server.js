@@ -2,12 +2,14 @@ const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
+const { createCorsMiddleware } = require('./cors');
 
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const MAX_TEXT_LENGTH = 200;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
+const CORS_ALLOWLIST = process.env.CORS_ALLOWLIST || '';
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -150,6 +152,7 @@ const PROMPT_TEMPLATE =
   + '輸出格式：只輸出改寫後正文，不要標題、前言、註解、解釋、JSON、metadata 或引號。\n\n原文：{TEXT}';
 
 app.use(express.json({ limit: '16kb' }));
+app.use(createCorsMiddleware(CORS_ALLOWLIST));
 
 function errorResponse(res, status, code, message, extra = {}) {
   return res.status(status).json({
