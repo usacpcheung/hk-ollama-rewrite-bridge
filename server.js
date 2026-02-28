@@ -645,17 +645,9 @@ app.post('/rewrite', async (req, res) => {
             timeoutMs: selectedTimeoutMs,
             onChunk: async (event) => {
               if (event?.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
-                const chunk = { ...event.chunk };
+                const chunk = event.chunk;
                 if (typeof chunk.response === 'string' && chunk.response.length > 0 && !chunk.done) {
-                  const hkText = toHK(chunk.response);
-                  streamedText += hkText;
-                  chunk.response = hkText;
-                }
-
-                writeStreamChunk(chunk);
-
-                if (chunk.done) {
-                  streamDoneSent = true;
+                  streamedText += chunk.response;
                 }
               }
             }
@@ -685,8 +677,9 @@ app.post('/rewrite', async (req, res) => {
       lastError = null;
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
-      if (!streamedText && finalResponse) {
-        const finalText = toHK(finalResponse);
+      const streamResponse = finalResponse || streamedText.trim();
+      if (streamResponse) {
+        const finalText = toHK(streamResponse);
         writeStreamChunk({ response: finalText, done: false });
       }
 
