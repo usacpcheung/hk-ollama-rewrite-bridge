@@ -200,3 +200,26 @@ curl -i -sS http://127.0.0.1:3001/rewrite -H 'Content-Type: application/json' -d
 # 4) Confirm single in-flight warm-up behavior
 sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt completed|warmupInFlight|MODEL_WARMUP_STARTED'
 ```
+
+## Implementation instruction output requirements
+
+Use the following structure when completing bridge update tasks.
+
+### Step A — Discovery
+
+Document discovery findings in one required output location: **the final report and a dedicated README section in the same change**.
+
+### Step B — Implementation
+
+Implement the requested behavior changes and summarize what was modified.
+
+### Deliverables (required at end of instruction)
+
+1. **Discovery summary** (short):
+   - server entry file path
+   - framework used
+   - rewrite endpoint path
+   - Minimax call location + current response shape
+2. **Implementation summary** (separate from discovery):
+   - list of changed files
+   - behavior changes introduced in each file
