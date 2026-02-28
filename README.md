@@ -22,6 +22,19 @@ npm start
 
 Server binds to `127.0.0.1:3001` only.
 
+## Tests
+
+All automated tests are centralized under `tests/` so they are easy to discover and run.
+
+- `tests/providers/ollama.test.js`: validates Ollama stream parsing/error handling for malformed or incomplete JSONL responses.
+- `tests/providers/minimax.test.js`: validates Minimax SSE frame normalization and done/fallback streaming behavior.
+
+Run all tests:
+
+```bash
+npm test
+```
+
 ## Environment Variables
 
 Tune runtime behavior without code changes:

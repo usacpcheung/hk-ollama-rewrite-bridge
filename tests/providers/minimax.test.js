@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createMinimaxProvider, parseMinimaxSseFrame } = require('./minimax');
+const { createMinimaxProvider, parseMinimaxSseFrame } = require('../../providers/minimax');
 
 function createSseStream(frames) {
   const encoder = new TextEncoder();
