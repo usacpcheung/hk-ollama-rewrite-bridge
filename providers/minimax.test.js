@@ -1,7 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseMinimaxSseFrame } = require('./minimax');
+const { createMinimaxProvider, parseMinimaxSseFrame } = require('./minimax');
+
+function createSseStream(frames) {
+  const encoder = new TextEncoder();
+
+  return new ReadableStream({
+    start(controller) {
+      for (const frame of frames) {
+        controller.enqueue(encoder.encode(`data: ${frame}\n\n`));
+      }
+      controller.close();
+    }
+  });
+}
 
 test('parses normal delta chunk into canonical response chunk', () => {
   const payload = JSON.stringify({
@@ -46,4 +59,45 @@ test('keeps final message content for fallback when delta is missing', () => {
 test('returns null for malformed JSON frame', () => {
   const parsed = parseMinimaxSseFrame('{"choices":[{"delta":{"content":"x"}}]');
   assert.equal(parsed, null);
+});
+
+test('rewriteStream does not emit fallback non-done chunk after done chunk', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(createSseStream([
+    JSON.stringify({
+      object: 'chat.completion.chunk',
+      choices: [{ finish_reason: 'stop', message: { content: '最終內容' } }]
+    })
+  ]), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key'
+  });
+
+  const events = [];
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async (event) => {
+      events.push(event);
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '最終內容');
+
+  const chunkEvents = events.filter((event) => event.type === 'chunk');
+  assert.equal(chunkEvents.length, 1);
+  assert.equal(chunkEvents[0].chunk.done, true);
+  assert.equal(chunkEvents[0].chunk.response, '');
+  assert.equal(chunkEvents.find((event) => event.chunk.done === false), undefined);
 });

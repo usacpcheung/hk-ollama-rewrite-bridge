@@ -275,7 +275,7 @@ function createMinimaxProvider({
         streamedText ||
         '';
 
-      if (!streamedText && finalResponseText) {
+      if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({
           id: streamId,
           model,
