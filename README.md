@@ -176,8 +176,10 @@ Response stability note: `/readyz` always includes `ok`, `serviceState`, and `re
 
 ### Minimax readiness policy (passive / non-synthetic)
 
-When `REWRITE_PROVIDER=minimax`, readiness is **passive**:
+When `REWRITE_PROVIDER=minimax`, readiness is **passive** by default:
+- Startup marks `serviceState=ready` without active warmup/probe traffic.
 - `/readyz` and `/model-status` do **not** send synthetic upstream chat-completion probes.
+- `MINIMAX_ACTIVE_STARTUP_PROBE=true` opt-in enables a startup loop that is still passive-only (no upstream warmup trigger/probe calls).
 - Rewrite preflight in `POST /rewrite` also avoids synthetic `checkReadiness()` traffic.
 - Readiness is inferred from local observations: API key presence, recent rewrite success/failure timestamps, and consecutive failure count.
 

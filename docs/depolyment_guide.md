@@ -127,6 +127,11 @@ If key is missing, readiness returns non-ready with reason `MINIMAX_API_KEY_MISS
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warmup attempts. |
 | `WARMUP_RETRY_AFTER_SEC` | auto (2-3) | Retry-After for warming responses. |
 
+Provider behavior:
+- `REWRITE_PROVIDER=ollama`: startup loop performs active warmup trigger + readiness probe attempts.
+- `REWRITE_PROVIDER=minimax`: startup is passive by default (immediate ready, no active warmup/probe calls).
+- `REWRITE_PROVIDER=minimax` with `MINIMAX_ACTIVE_STARTUP_PROBE=true`: opt-in passive startup loop (still no active upstream warmup trigger/probe calls).
+
 ### Minimax readiness resilience
 
 | Variable | Default | Purpose |
@@ -139,6 +144,7 @@ If key is missing, readiness returns non-ready with reason `MINIMAX_API_KEY_MISS
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Allows readiness to stay green when idle. |
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Failures needed before strict non-ready behavior. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown between bounded Minimax recovery attempts (`429` during cooldown). |
+| `MINIMAX_ACTIVE_STARTUP_PROBE` | `false` | Opt-in passive startup readiness loop for Minimax at boot; does not perform active warmup/probe calls. |
 
 ---
 

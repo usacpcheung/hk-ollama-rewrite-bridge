@@ -68,6 +68,9 @@ const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
 const MINIMAX_FAIL_OPEN_ON_IDLE = process.env.MINIMAX_FAIL_OPEN_ON_IDLE
   ? process.env.MINIMAX_FAIL_OPEN_ON_IDLE.toLowerCase() !== 'false'
   : true;
+const MINIMAX_ACTIVE_STARTUP_PROBE = process.env.MINIMAX_ACTIVE_STARTUP_PROBE
+  ? process.env.MINIMAX_ACTIVE_STARTUP_PROBE.toLowerCase() === 'true'
+  : false;
 const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
   parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
     min: 1,
@@ -308,8 +311,73 @@ async function delay(ms) {
 }
 
 async function runStartupWarmupLoop() {
+  if (REWRITE_PROVIDER === 'minimax' && !MINIMAX_ACTIVE_STARTUP_PROBE) {
+    startupWarmupAttempts = 0;
+    startupWarmupDeadlineAtMs = null;
+    promoteServiceReady();
+    console.log(
+      JSON.stringify({
+        level: 'info',
+        msg: 'Skipping startup warmup loop for passive minimax startup path',
+        serviceState,
+        minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE
+      })
+    );
+    return;
+  }
+
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
+
+  if (REWRITE_PROVIDER === 'minimax' && MINIMAX_ACTIVE_STARTUP_PROBE) {
+    while (Date.now() < startupWarmupDeadlineAtMs) {
+      startupWarmupAttempts += 1;
+      const minimaxPassiveReadiness = getMinimaxPassiveReadiness();
+      if (minimaxPassiveReadiness.ready) {
+        promoteServiceReady();
+        console.log(
+          JSON.stringify({
+            level: 'info',
+            msg: 'Minimax passive startup readiness completed',
+            serviceState,
+            startupWarmupAttempts,
+            startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+            minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE
+          })
+        );
+        return;
+      }
+
+      modelPhase = 'warming';
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          msg: 'Minimax passive startup readiness attempt completed',
+          serviceState,
+          startupWarmupAttempts,
+          startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+          reason: minimaxPassiveReadiness.reason,
+          minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE
+        })
+      );
+      await delay(WARMUP_STARTUP_RETRY_INTERVAL_MS);
+    }
+
+    serviceState = 'degraded';
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'Minimax passive startup readiness exceeded max wait budget',
+        serviceState,
+        startupWarmupAttempts,
+        startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
+          ? new Date(startupWarmupDeadlineAtMs).toISOString()
+          : null,
+        minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE
+      })
+    );
+    return;
+  }
 
   while (Date.now() < startupWarmupDeadlineAtMs) {
     startupWarmupAttempts += 1;
@@ -381,6 +449,10 @@ async function runStartupWarmupLoop() {
 }
 
 app.get('/model-status', async (_req, res) => {
+  // Startup semantics by provider:
+  // - ollama: startup readiness depends on active warmup/probe loop.
+  // - minimax: startup is passive by default (no startup upstream probe/warmup), with optional
+  //   passive readiness loop only when MINIMAX_ACTIVE_STARTUP_PROBE=true.
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
   const isMinimax = REWRITE_PROVIDER === 'minimax';
@@ -458,6 +530,10 @@ app.get('/healthz', (_req, res) => {
 });
 
 app.get('/readyz', async (_req, res) => {
+  // /readyz semantics by provider:
+  // - ollama: reports active warmup/probe readiness state.
+  // - minimax: uses passive readiness signals and does not perform startup warmup/probe calls
+  //   unless MINIMAX_ACTIVE_STARTUP_PROBE=true.
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
   const isMinimax = REWRITE_PROVIDER === 'minimax';
@@ -863,7 +939,8 @@ app.use((err, _req, res, _next) => {
   return errorResponse(res, 500, 'INTERNAL_ERROR', 'Internal server error');
 });
 
-app.listen(PORT, HOST, () => {
+function startServer() {
+  return app.listen(PORT, HOST, () => {
   const providerInfo = provider.getInfo ? provider.getInfo() : {};
   console.log(
     JSON.stringify({
@@ -883,6 +960,7 @@ app.listen(PORT, HOST, () => {
       serviceState,
       minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
       minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
+      minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE,
       minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
       minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
     })
@@ -904,4 +982,15 @@ app.listen(PORT, HOST, () => {
   } else {
     serviceState = 'ready';
   }
-});
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  runStartupWarmupLoop,
+  startServer
+};
