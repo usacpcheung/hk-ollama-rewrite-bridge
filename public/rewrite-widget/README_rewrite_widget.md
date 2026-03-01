@@ -1,0 +1,188 @@
+# Rewrite Bridge Widget (OIDC-Protected)
+
+This repository includes a reusable **Rewrite Widget UI** for the HK
+Rewrite Bridge API.
+
+It provides:
+
+-   A demo-style card UI (textbox, character counter, **Rewrite**,
+    **Undo**)
+-   A **model-ready status dot** (ready / loading / down)
+-   A **single shared model-status poller** across multiple widgets (no
+    duplicated network requests)
+-   Secure API calls using browser cookies (`credentials: "include"`)
+    for OIDC-protected endpoints
+-   Safe documentation templates (no sensitive information included)
+
+------------------------------------------------------------------------
+
+# Folder Structure
+
+public/ rewrite-widget/ rewrite-widget.js example.html README.md
+
+------------------------------------------------------------------------
+
+# Quick Start
+
+## 1. Serve the widget statically (Node / Express)
+
+Add to your server.js:
+
+``` js
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-widget")));
+```
+
+## 2. Access the demo page
+
+    https://<YOUR_DOMAIN>/rewrite-widget/example.html
+
+------------------------------------------------------------------------
+
+# Using the Widget in Any Page
+
+``` html
+<div id="rw"></div>
+
+<script src="/rewrite-widget/rewrite-widget.js"></script>
+<script>
+  RewriteWidget.mount({
+    containerSelector: "#rw",
+    apiBase: "",  // same-origin recommended
+    title: "Rewrite",
+    maxChars: 100,
+    reloadOnLoginRequired: true,
+    loginPageUrl: "/tools/rewritedemo.html"
+  });
+</script>
+```
+
+------------------------------------------------------------------------
+
+# Multiple Widgets on One Page
+
+Each widget maintains its own textbox and Undo state, but shares one
+model-status poller (no duplicated API calls).
+
+``` html
+<div id="rw1"></div>
+<div id="rw2"></div>
+
+<script src="/rewrite-widget/rewrite-widget.js"></script>
+<script>
+  RewriteWidget.mount({ containerSelector:"#rw1", apiBase:"" });
+  RewriteWidget.mount({ containerSelector:"#rw2", apiBase:"" });
+</script>
+```
+
+------------------------------------------------------------------------
+
+# OIDC Protection Overview
+
+The rewrite endpoint is typically protected by Apache
+`mod_auth_openidc`:
+
+-   Protected: POST /api/rewrite-bridge/rewrite
+
+-   Usually Public: GET /api/rewrite-bridge/model-status
+
+The widget sends API calls using:
+
+    fetch(..., credentials: "include")
+
+This means: - The browser must already have a valid OIDC session
+cookie - If not logged in, Apache redirects to Google login
+
+Best UX: Protect the widget page itself with OIDC so login happens
+automatically.
+
+------------------------------------------------------------------------
+
+# Safe Apache Configuration Template (NO REAL SECRETS)
+
+Replace placeholder values wrapped in \<...\>. DO NOT commit real
+secrets into GitHub.
+
+``` apache
+<VirtualHost *:443>
+  ServerName <YOUR_DOMAIN>
+
+  OIDCProviderMetadataURL https://accounts.google.com/.well-known/openid-configuration
+  OIDCClientID <GOOGLE_OIDC_CLIENT_ID>
+  OIDCClientSecret <GOOGLE_OIDC_CLIENT_SECRET>  # DO NOT COMMIT
+  OIDCRedirectURI https://<YOUR_DOMAIN>/oidc/callback
+  OIDCCryptoPassphrase <RANDOM_LONG_SECRET>     # DO NOT COMMIT
+
+  OIDCScope "openid email profile"
+  OIDCRemoteUserClaim email
+  OIDCClaimPrefix "OIDC_CLAIM_"
+
+  <Location "/api/rewrite-bridge/rewrite">
+    AuthType openid-connect
+    Require valid-user
+
+    RequestHeader unset X-Authenticated-Email
+    RequestHeader unset X-Authenticated-User
+
+    RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e"
+    RequestHeader set X-Authenticated-User "%{REMOTE_USER}e"
+  </Location>
+
+  ProxyPass        /api/rewrite-bridge/rewrite       http://127.0.0.1:3001/rewrite
+  ProxyPassReverse /api/rewrite-bridge/rewrite       http://127.0.0.1:3001/rewrite
+
+  ProxyPass        /api/rewrite-bridge/model-status  http://127.0.0.1:3001/model-status
+  ProxyPassReverse /api/rewrite-bridge/model-status  http://127.0.0.1:3001/model-status
+
+  ProxyPass        /rewrite-widget/  http://127.0.0.1:3001/rewrite-widget/
+  ProxyPassReverse /rewrite-widget/  http://127.0.0.1:3001/rewrite-widget/
+</VirtualHost>
+```
+
+------------------------------------------------------------------------
+
+# Keeping Secrets Out of Git
+
+Recommended method:
+
+1.  Create a local Apache include file: /etc/apache2/oidc-secrets.conf
+
+2.  Store secrets there: OIDCClientID `<REAL_ID>`{=html}
+    OIDCClientSecret `<REAL_SECRET>`{=html} OIDCCryptoPassphrase
+    `<REAL_SECRET>`{=html}
+
+3.  Include in vhost: Include /etc/apache2/oidc-secrets.conf
+
+4.  Restrict permissions: chmod 600 /etc/apache2/oidc-secrets.conf
+
+Also add to .gitignore:
+
+.env .env.* *.secrets.conf
+
+------------------------------------------------------------------------
+
+# Troubleshooting
+
+Login required: - User has no valid OIDC session. - Open a protected
+page to log in, then retry.
+
+Rewrite disabled: - Model status is not "ready". - Check
+/api/rewrite-bridge/model-status and server logs.
+
+Cross-domain usage: - Using widget from another domain requires CORS +
+credentials setup. - Recommended: host widget on same domain as API.
+
+------------------------------------------------------------------------
+
+# Production Recommendations
+
+-   Keep rewrite endpoint protected
+-   Keep model-status public
+-   Protect widget demo page for best UX
+-   Never commit secrets
+-   Use pull requests for deployment changes
