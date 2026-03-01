@@ -3,7 +3,9 @@ const { randomUUID } = require('crypto');
 function createMinimaxProvider({
   apiUrl,
   model,
-  apiKey
+  apiKey,
+  systemPrompt,
+  userTemplate
 }) {
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
@@ -22,7 +24,11 @@ function createMinimaxProvider({
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: 'ping' }],
+          messages: buildMessages({
+            prompt: 'ping',
+            systemPrompt,
+            userContent: renderUserContent(userTemplate, 'ping')
+          }),
           max_completion_tokens: 1,
           stream: false
         }),
@@ -59,24 +65,28 @@ function createMinimaxProvider({
     });
   }
 
-  async function rewrite({ prompt, timeoutMs }) {
+  async function rewrite({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
     return generate({
       prompt,
+      systemPrompt: runtimeSystemPrompt,
+      userContent,
       timeoutMs,
       maxTokens: 300
     });
   }
 
-  async function rewriteStream({ prompt, timeoutMs, onChunk }) {
+  async function rewriteStream({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk }) {
     return generateStream({
       prompt,
+      systemPrompt: runtimeSystemPrompt,
+      userContent,
       timeoutMs,
       maxTokens: 300,
       onChunk
     });
   }
 
-  async function generate({ prompt, timeoutMs, maxTokens }) {
+  async function generate({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -89,10 +99,14 @@ function createMinimaxProvider({
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: prompt }],
+          messages: buildMessages({
+            prompt,
+            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+            userContent
+          }),
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.2
+          temperature: 0.15
         }),
         signal: controller.signal
       });
@@ -125,7 +139,14 @@ function createMinimaxProvider({
     }
   }
 
-  async function generateStream({ prompt, timeoutMs, maxTokens, onChunk }) {
+  async function generateStream({
+    prompt,
+    systemPrompt: runtimeSystemPrompt,
+    userContent,
+    timeoutMs,
+    maxTokens,
+    onChunk
+  }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -144,10 +165,14 @@ function createMinimaxProvider({
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: prompt }],
+          messages: buildMessages({
+            prompt,
+            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+            userContent
+          }),
           stream: true,
           max_completion_tokens: maxTokens,
-          temperature: 0.2
+          temperature: 0.15
         }),
         signal: controller.signal
       });
@@ -275,7 +300,7 @@ function createMinimaxProvider({
         streamedText ||
         '';
 
-      if (!streamedText && finalResponseText) {
+      if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({
           id: streamId,
           model,
@@ -357,7 +382,9 @@ function createMinimaxProvider({
       provider: 'minimax',
       minimaxApiUrl: apiUrl,
       minimaxModel: model,
-      minimaxApiKeySet: Boolean(apiKey)
+      minimaxApiKeySet: Boolean(apiKey),
+      minimaxSystemPrompt: systemPrompt || null,
+      minimaxUserTemplate: userTemplate || null
     })
   };
 }
@@ -419,4 +446,37 @@ function parseMinimaxSseFrame(payload) {
   };
 }
 
-module.exports = { createMinimaxProvider, parseMinimaxSseFrame, buildMappedChunk };
+
+function renderUserContent(template, text) {
+  if (typeof template !== 'string' || template.length === 0) {
+    return text;
+  }
+
+  if (template.includes('{TEXT}')) {
+    return template.replace('{TEXT}', text);
+  }
+
+  return `${template}${text}`;
+}
+
+function buildMessages({ prompt, systemPrompt, userContent }) {
+  const userMessageContent = typeof userContent === 'string' ? userContent : prompt;
+  const normalizedSystemPrompt = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
+
+  if (!normalizedSystemPrompt) {
+    return [{ role: 'user', content: userMessageContent }];
+  }
+
+  return [
+    { role: 'system', content: normalizedSystemPrompt },
+    { role: 'user', content: userMessageContent }
+  ];
+}
+
+module.exports = {
+  createMinimaxProvider,
+  parseMinimaxSseFrame,
+  buildMappedChunk,
+  buildMessages,
+  renderUserContent
+};
