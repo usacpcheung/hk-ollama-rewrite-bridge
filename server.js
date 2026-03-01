@@ -110,6 +110,49 @@ const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
+const REWRITE_SYSTEM_PROMPT = process.env.REWRITE_SYSTEM_PROMPT ||
+  '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
+  + '必須逐句保留原意與全部資訊（包括人物、時間、地點、數字、否定、因果、條件、語氣）。\n'
+  + '只可改寫語體，不可新增、虛構、延伸、評論、解釋、總結或改變立場。\n'
+  + '請移除口語贅詞、語氣助詞與寒暄開場（例如：喂、係、嘅、啦、囉、呀、唉、哦、嗯、咩），但只可移除不影響語義者，不得刪除任何實質內容詞。\n'
+  + '若上述詞語出現在引號內容、專有名稱、品牌、口號、歌詞或其他關鍵語義位置，必須保留，不可硬改。\n'
+  + '不得把內容寫成故事、對話續寫、創作文本或條列重組。\n'
+  + '輸出格式：只輸出改寫後正文，不要標題、前言、註解、解釋、JSON、metadata 或引號。';
+const REWRITE_USER_TEMPLATE = process.env.REWRITE_USER_TEMPLATE || '原文：{TEXT}';
+const MINIMAX_SYSTEM_PROMPT =
+  process.env.MINIMAX_SYSTEM_PROMPT !== undefined
+    ? process.env.MINIMAX_SYSTEM_PROMPT
+    : REWRITE_SYSTEM_PROMPT;
+const MINIMAX_USER_TEMPLATE =
+  process.env.MINIMAX_USER_TEMPLATE !== undefined
+    ? process.env.MINIMAX_USER_TEMPLATE
+    : REWRITE_USER_TEMPLATE;
+
+function renderUserContent(userTemplate, text) {
+  if (typeof userTemplate !== 'string' || userTemplate.length === 0) {
+    return text;
+  }
+
+  if (userTemplate.includes('{TEXT}')) {
+    return userTemplate.replace('{TEXT}', text);
+  }
+
+  return `${userTemplate}${text}`;
+}
+
+function buildRewritePrompt(systemPrompt, userTemplate, text) {
+  const userContent = renderUserContent(userTemplate, text);
+  const prompt = [systemPrompt, userContent]
+    .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    .join('\n\n');
+
+  return {
+    prompt,
+    systemPrompt,
+    userContent
+  };
+}
+
 const provider = createProvider({
   provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
@@ -118,7 +161,9 @@ const provider = createProvider({
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
-  minimaxApiKey: MINIMAX_API_KEY
+  minimaxApiKey: MINIMAX_API_KEY,
+  minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
+  minimaxUserTemplate: MINIMAX_USER_TEMPLATE
 });
 
 let modelPhase = 'unknown';
@@ -140,9 +185,6 @@ let lastMinimaxRecoveryAttemptAtMs = 0;
 
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
-const PROMPT_TEMPLATE =
-  '將以下香港口語廣東話改寫成正式書面繁體中文，必須保留原意與所有細節（包括否定、因果、條件、語氣），不得刪減或總結，只輸出改寫後正文。\n\n原文：{TEXT}';
-
 app.use(express.json({ limit: '16kb' }));
 
 function errorResponse(res, status, code, message, extra = {}) {
@@ -151,6 +193,28 @@ function errorResponse(res, status, code, message, extra = {}) {
     error: { code, message },
     ...extra
   });
+}
+
+function requireAuthenticatedEmail(req, res) {
+  const rawHeader = req.get('X-Authenticated-Email');
+  const email = (rawHeader || '').trim().toLowerCase();
+
+  if (!email) {
+    errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+    return null;
+  }
+
+  if (email.includes(',')) {
+    errorResponse(res, 401, 'AUTH_HEADER_INVALID', 'Invalid authentication header');
+    return null;
+  }
+
+  if (!email.endsWith('@hs.edu.hk')) {
+    errorResponse(res, 403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
+    return null;
+  }
+
+  return email;
 }
 
 function setLastError(code, message) {
@@ -448,6 +512,7 @@ app.post('/rewrite', async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  let email = null;
   let inputLength = 0;
   let requestPhase = modelPhase;
   let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
@@ -458,7 +523,13 @@ app.post('/rewrite', async (req, res) => {
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
-    const { text } = req.body || {};
+    email = requireAuthenticatedEmail(req, res);
+    if (email === null) {
+      return;
+    }
+
+    const { text, stream } = req.body || {};
+    const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
 
     if (typeof text !== 'string') {
       return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
@@ -475,7 +546,9 @@ app.post('/rewrite', async (req, res) => {
       return errorResponse(res, 413, 'TOO_LONG', 'Max 200 characters');
     }
 
-    const prompt = PROMPT_TEMPLATE.replace('{TEXT}', trimmedText);
+    const { prompt, systemPrompt, userContent } = isMinimax
+      ? buildRewritePrompt(MINIMAX_SYSTEM_PROMPT, MINIMAX_USER_TEMPLATE, trimmedText)
+      : buildRewritePrompt(REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE, trimmedText);
 
     const nowMs = Date.now();
     const probeAgeMs = lastProbeAtMs ? Math.max(0, nowMs - lastProbeAtMs) : Number.POSITIVE_INFINITY;
@@ -596,7 +669,128 @@ app.post('/rewrite', async (req, res) => {
       );
     }
 
-    const rewriteResult = await provider.rewrite({ prompt, timeoutMs: selectedTimeoutMs });
+    if (streamRequested) {
+      res.status(200);
+      res.set({
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      });
+
+      if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+      }
+
+      let streamDoneSent = false;
+      let streamedText = '';
+      let streamedChunkEmitted = false;
+
+      const writeStreamChunk = (payload) => {
+        if (res.writableEnded) {
+          return;
+        }
+
+        res.write(`${JSON.stringify(payload)}\n`);
+        if (typeof res.flush === 'function') {
+          res.flush();
+        }
+      };
+
+      const writeDoneChunk = (extra = {}) => {
+        if (streamDoneSent) {
+          return;
+        }
+
+        streamDoneSent = true;
+        writeStreamChunk({ response: '', done: true, ...extra });
+      };
+
+      const rewriteResult = provider.rewriteStream
+        ? await provider.rewriteStream({
+            prompt,
+            systemPrompt,
+            userContent,
+            timeoutMs: selectedTimeoutMs,
+            onChunk: async (event) => {
+              if (!event || typeof event !== 'object') {
+                return;
+              }
+
+              if (event.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
+                const chunk = event.chunk;
+                const chunkResponse = typeof chunk.response === 'string' ? chunk.response : '';
+
+                if (chunkResponse && !chunk.done) {
+                  streamedText += chunkResponse;
+                  streamedChunkEmitted = true;
+                }
+
+                if (chunk.done) {
+                  const { done_reason: doneReason } = chunk;
+                  writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
+                  return;
+                }
+
+                if (chunkResponse) {
+                  writeStreamChunk({
+                    ...chunk,
+                    response: toHK(chunkResponse),
+                    done: false
+                  });
+                }
+
+                return;
+              }
+
+              if (event.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
+                streamedText += event.text;
+                streamedChunkEmitted = true;
+                writeStreamChunk({ response: toHK(event.text), done: false });
+                return;
+              }
+
+              if (event.type === 'done') {
+                writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
+              }
+            }
+          })
+        : await provider.rewrite({ prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+
+      if (!rewriteResult.ok) {
+        lastRewriteFailureAtMs = Date.now();
+        consecutiveRewriteFailures += 1;
+        const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+        setLastError(mappedError.code, mappedError.message);
+        writeStreamChunk({
+          done: true,
+          error: {
+            code: mappedError.code,
+            message: mappedError.message,
+            status: mappedError.status || 502
+          }
+        });
+        return res.end();
+      }
+
+      modelPhase = 'ready';
+      lastRewriteSuccessAtMs = Date.now();
+      consecutiveRewriteFailures = 0;
+      lastWarmAt = new Date().toISOString();
+      lastError = null;
+
+      const finalResponse = (rewriteResult.data?.response || '').trim();
+      const streamResponse = finalResponse || streamedText.trim();
+      if (streamResponse && !streamedChunkEmitted) {
+        const finalText = toHK(streamResponse);
+        writeStreamChunk({ response: finalText, done: false });
+      }
+
+      writeDoneChunk({ done_reason: 'stop' });
+      return res.end();
+    }
+
+    const rewriteResult = await provider.rewrite({ prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
@@ -639,6 +833,7 @@ app.post('/rewrite', async (req, res) => {
       JSON.stringify({
         requestId,
         ip,
+        email,
         inputLength,
         elapsedMs,
         phase: requestPhase,
