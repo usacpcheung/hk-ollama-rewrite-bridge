@@ -160,10 +160,16 @@ function errorResponse(res, status, code, message, extra = {}) {
 }
 
 function requireAuthenticatedEmail(req, res) {
-  const email = (req.get('X-Authenticated-Email') || '').trim().toLowerCase();
+  const rawHeader = req.get('X-Authenticated-Email');
+  const email = (rawHeader || '').trim().toLowerCase();
 
   if (!email) {
     errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+    return null;
+  }
+
+  if (email.includes(',')) {
+    errorResponse(res, 401, 'AUTH_HEADER_INVALID', 'Invalid authentication header');
     return null;
   }
 
