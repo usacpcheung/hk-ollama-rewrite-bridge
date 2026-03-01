@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createOllamaProvider } = require('./ollama');
+const { createOllamaProvider } = require('../../providers/ollama');
 
 function createJsonlStream(lines) {
   const encoder = new TextEncoder();

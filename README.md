@@ -22,6 +22,19 @@ npm start
 
 Server binds to `127.0.0.1:3001` only.
 
+## Tests
+
+All automated tests are centralized under `tests/` so they are easy to discover and run.
+
+- `tests/providers/ollama.test.js`: validates Ollama stream parsing/error handling for malformed or incomplete JSONL responses.
+- `tests/providers/minimax.test.js`: validates Minimax SSE frame normalization and done/fallback streaming behavior.
+
+Run all tests:
+
+```bash
+npm test
+```
+
 ## Environment Variables
 
 Tune runtime behavior without code changes:
@@ -48,6 +61,10 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
+| `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
+| `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
+| `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
+| `MINIMAX_USER_TEMPLATE` | fallback to `REWRITE_USER_TEMPLATE` | Minimax-only user role wrapper template. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
@@ -74,6 +91,26 @@ OLLAMA_KEEP_ALIVE=10m
 ```
 
 Longer keep-alive improves latency but increases RAM usage.
+
+
+### Minimax role-split prompt example
+
+When `REWRITE_PROVIDER=minimax`, requests are serialized as chat `messages`:
+
+```json
+[
+  {
+    "role": "system",
+    "content": "你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。"
+  },
+  {
+    "role": "user",
+    "content": "原文：我今日唔係好舒服，想請半日假。"
+  }
+]
+```
+
+If `MINIMAX_SYSTEM_PROMPT` is empty, the bridge safely falls back to a single `user` message.
 
 ## Public API path behind reverse proxy
 
