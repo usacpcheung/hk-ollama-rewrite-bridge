@@ -58,6 +58,7 @@
 
       // Shared state
       let state = {
+        status: "unknown",
         serviceState: "unknown",
         modelReady: false,
         reachable: true,
@@ -89,18 +90,22 @@
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data = await res.json();
-          const s = String(data?.serviceState || "unknown");
+          const status = String(data?.status || "unknown");
+          const serviceState = String(data?.serviceState || "unknown");
+          const modelReady = (status === "ready");
 
           setState({
             reachable: true,
             lastError: "",
-            serviceState: s,
-            modelReady: (s === "ready")
+            status,
+            serviceState,
+            modelReady
           });
         } catch (e) {
           setState({
             reachable: false,
             lastError: e?.message || "Model status error",
+            status: "down",
             serviceState: "down",
             modelReady: false
           });
@@ -352,6 +357,7 @@
     let inFlight = false;
     let lastOriginalText = "";
     let sharedModelReady = false;
+    let sharedStatus = "unknown";
     let sharedServiceState = "unknown";
     let sharedReachable = true;
 
@@ -375,6 +381,7 @@
     // Apply shared status to UI
     function applySharedState(st) {
       sharedModelReady = !!st.modelReady;
+      sharedStatus = st.status || "unknown";
       sharedServiceState = st.serviceState || "unknown";
       sharedReachable = !!st.reachable;
 
@@ -383,6 +390,11 @@
         ui.statusText.textContent = "API unreachable";
         ui.hint.textContent = "Will retry automatically";
         toast(st.lastError ? `Cannot reach API. ${st.lastError}` : "Cannot reach API.", "error");
+      } else if (sharedStatus === "degraded") {
+        setDot(ui.dot, "busy");
+        ui.statusText.textContent = "Model degraded";
+        ui.hint.textContent = "Reduced quality mode (retry if output looks off)";
+        if (!inFlight) toast("Model is degraded. Results may be lower quality.", "error");
       } else if (sharedServiceState === "ready") {
         setDot(ui.dot, "ready");
         ui.statusText.textContent = "Model ready";
