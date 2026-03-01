@@ -56,7 +56,7 @@ function createOllamaProvider({
       prompt,
       timeoutMs,
       options: {
-        temperature: 0.2,
+        temperature: 0.15,
         num_predict: 300
       }
     });
@@ -67,7 +67,7 @@ function createOllamaProvider({
       prompt,
       timeoutMs,
       options: {
-        temperature: 0.2,
+        temperature: 0.15,
         num_predict: 300
       },
       onChunk
@@ -155,6 +155,12 @@ function createOllamaProvider({
       let responseText = '';
       let lastChunk = null;
 
+      const invalidChunkError = () => {
+        const err = new Error('invalid_json');
+        err.code = 'INVALID_JSON_CHUNK';
+        return err;
+      };
+
       const processLine = async (line) => {
         const trimmed = line.trim();
         if (!trimmed) {
@@ -165,7 +171,7 @@ function createOllamaProvider({
         try {
           payload = JSON.parse(trimmed);
         } catch (_err) {
-          return;
+          throw invalidChunkError();
         }
 
         lastChunk = payload;
@@ -199,6 +205,10 @@ function createOllamaProvider({
         await processLine(buffer);
       }
 
+      if (!lastChunk || !lastChunk.done) {
+        throw invalidChunkError();
+      }
+
       return {
         ok: true,
         data: {
@@ -207,6 +217,10 @@ function createOllamaProvider({
         }
       };
     } catch (err) {
+      if (err?.code === 'INVALID_JSON_CHUNK') {
+        return { ok: false, error: mapError(err, { kind: 'invalid_json' }) };
+      }
+
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
       clearTimeout(timeout);
