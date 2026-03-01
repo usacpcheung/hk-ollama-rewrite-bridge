@@ -159,10 +159,10 @@ WARMUP_STARTUP_RETRY_INTERVAL_MS=5000
 ENV
 ```
 
-Reference from unit file under `[Service]`:
+The shipped unit already loads `/etc/default/rewrite-bridge` by default (optional if missing). Confirm this line exists under `[Service]`:
 
 ```ini
-EnvironmentFile=/etc/default/rewrite-bridge
+EnvironmentFile=-/etc/default/rewrite-bridge
 ```
 
 Enable and start:
@@ -247,4 +247,3 @@ Common causes:
 - Minimax mode without `MINIMAX_API_KEY` -> readiness remains non-ready.
 - Ollama unavailable or model not loaded -> prolonged warming / degraded startup.
 - Too-aggressive timeout values on small VPS -> frequent timeout or warmup failures.
-
