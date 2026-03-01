@@ -49,6 +49,30 @@ curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 ```
 
+
+### Minimax message-role example
+
+In Minimax mode, the bridge sends a role-split payload:
+
+```json
+{
+  "model": "M2-her",
+  "messages": [
+    {
+      "role": "system",
+      "content": "你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。"
+    },
+    {
+      "role": "user",
+      "content": "原文：我今日唔係好舒服，想請半日假。"
+    }
+  ],
+  "stream": false
+}
+```
+
+If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
+
 ### Success (`stream=false`)
 
 `200 OK`
