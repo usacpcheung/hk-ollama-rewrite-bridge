@@ -9,7 +9,9 @@ function createProvider({
   ollamaKeepAlive,
   minimaxApiUrl,
   minimaxModel,
-  minimaxApiKey
+  minimaxApiKey,
+  minimaxSystemPrompt,
+  minimaxUserTemplate
 }) {
   if (provider === 'ollama') {
     return createOllamaProvider({
@@ -24,7 +26,9 @@ function createProvider({
     return createMinimaxProvider({
       apiUrl: minimaxApiUrl,
       model: minimaxModel,
-      apiKey: minimaxApiKey
+      apiKey: minimaxApiKey,
+      systemPrompt: minimaxSystemPrompt,
+      userTemplate: minimaxUserTemplate
     });
   }
 
