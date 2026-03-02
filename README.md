@@ -61,6 +61,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
+| `AUTH_ALLOWED_EMAIL_DOMAIN` | `@hs.edu.hk` | Allowed authenticated email suffix for `X-Authenticated-Email` checks on `POST /rewrite`. Supports values like `hs.edu.hk` or `@hs.edu.hk` (normalized internally). |
 | `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
 | `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
 | `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
@@ -145,10 +146,29 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 
 ### `POST /rewrite` (internal app route)
 
+#### Authentication
+
+- `X-Authenticated-Email` header is required.
+- Header value must contain exactly one email address (no comma-separated/multi-value list).
+- Email must end with allowed domain suffix (default: `@hs.edu.hk`, configurable via `AUTH_ALLOWED_EMAIL_DOMAIN`).
+
+If the app is behind Apache/Nginx, do **not** forward this header directly from clients. Harden at the reverse proxy by unsetting inbound values and then setting a trusted value from your auth layer (to prevent spoofing), for example:
+
+```apache
+RequestHeader unset X-Authenticated-Email
+RequestHeader set X-Authenticated-Email "%{AUTHENTICATED_EMAIL}e"
+```
+
+See reverse-proxy setup in [Deployment guide → Apache reverse proxy](docs/depolyment_guide.md#6-apache-reverse-proxy).
+
 - During startup warm-up (`serviceState=starting`), returns HTTP `202` and `Retry-After` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`.
 - If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
 - Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }`.
+- Authentication failures:
+  - `401 AUTH_REQUIRED` when `X-Authenticated-Email` is missing.
+  - `401 AUTH_HEADER_INVALID` when header is malformed or contains multiple emails.
+  - `403 FORBIDDEN_DOMAIN` when email domain does not match the configured allowed suffix (default `@hs.edu.hk`).
 
 ### `GET /healthz` / `GET /readyz`
 
@@ -221,7 +241,10 @@ sudo journalctl -u rewrite-bridge -f
 watch -n 2 "curl -sS http://127.0.0.1:3001/model-status"
 
 # 3) Verify /rewrite behavior during warm-up and after ready
-curl -i -sS http://127.0.0.1:3001/rewrite -H 'Content-Type: application/json' -d '{"text":"你今日得唔得閒？"}'
+curl -i -sS http://127.0.0.1:3001/rewrite \
+  -H 'Content-Type: application/json' \
+  -H 'X-Authenticated-Email: user@hs.edu.hk' \
+  -d '{"text":"你今日得唔得閒？"}'
 
 # 4) Confirm single in-flight warm-up behavior
 sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt completed|warmupInFlight|MODEL_WARMUP_STARTED'

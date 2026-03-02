@@ -23,6 +23,21 @@ All error responses use:
 
 Rewrite HK colloquial Cantonese into formal Traditional Chinese.
 
+### Authentication
+
+- `X-Authenticated-Email` header is required.
+- Must contain exactly one email address.
+- Email must end with allowed domain suffix (default: `@hs.edu.hk`, configurable via `AUTH_ALLOWED_EMAIL_DOMAIN`).
+
+If using a reverse proxy, do not trust client-forwarded values for this header. Unset inbound values first, then set a trusted value from your auth layer:
+
+```apache
+RequestHeader unset X-Authenticated-Email
+RequestHeader set X-Authenticated-Email "%{AUTHENTICATED_EMAIL}e"
+```
+
+See [Deployment guide → Apache reverse proxy](./depolyment_guide.md#6-apache-reverse-proxy).
+
 ### Request body
 
 ```json
@@ -41,11 +56,13 @@ Rewrite HK colloquial Cantonese into formal Traditional Chinese.
 # internal route
 curl -i -sS http://127.0.0.1:3001/rewrite \
   -H 'Content-Type: application/json' \
+  -H 'X-Authenticated-Email: user@hs.edu.hk' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 
 # reverse-proxy route
 curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
+  -H 'X-Authenticated-Email: user@hs.edu.hk' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 ```
 
@@ -163,6 +180,9 @@ Example (`503`):
 - `400 INVALID_INPUT` when `text` missing/non-string/empty.
 - `413 TOO_LONG` when over 200 chars.
 - `400 INVALID_JSON` for malformed JSON body.
+- `401 AUTH_REQUIRED` when `X-Authenticated-Email` is missing.
+- `401 AUTH_HEADER_INVALID` when auth header is malformed or contains multiple emails.
+- `403 FORBIDDEN_DOMAIN` when email domain does not match the configured allowed suffix (default `@hs.edu.hk`).
 
 ### Upstream/provider errors
 
@@ -337,4 +357,3 @@ Backend parsing coverage currently includes:
   - terminal `[DONE]`
 
 This allows clients to consume one stable external response contract regardless of selected provider.
-

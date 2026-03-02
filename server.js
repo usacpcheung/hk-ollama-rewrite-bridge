@@ -108,6 +108,38 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 
+const DEFAULT_AUTH_ALLOWED_EMAIL_DOMAIN = '@hs.edu.hk';
+
+function normalizeAllowedEmailDomain(value) {
+  const rawValue = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!rawValue) {
+    return null;
+  }
+
+  const normalized = rawValue.startsWith('@') ? rawValue : `@${rawValue}`;
+
+  if (normalized.length <= 1 || normalized.includes(' ') || normalized.includes('@', 1)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+let AUTH_ALLOWED_EMAIL_DOMAIN = normalizeAllowedEmailDomain(
+  process.env.AUTH_ALLOWED_EMAIL_DOMAIN
+);
+
+if (!AUTH_ALLOWED_EMAIL_DOMAIN) {
+  AUTH_ALLOWED_EMAIL_DOMAIN = DEFAULT_AUTH_ALLOWED_EMAIL_DOMAIN;
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: 'Invalid AUTH_ALLOWED_EMAIL_DOMAIN; using default',
+      provided: process.env.AUTH_ALLOWED_EMAIL_DOMAIN,
+      fallback: DEFAULT_AUTH_ALLOWED_EMAIL_DOMAIN
+    })
+  );
+}
 
 const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
@@ -212,8 +244,8 @@ function requireAuthenticatedEmail(req, res) {
     return null;
   }
 
-  if (!email.endsWith('@hs.edu.hk')) {
-    errorResponse(res, 403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
+  if (!email.endsWith(AUTH_ALLOWED_EMAIL_DOMAIN)) {
+    errorResponse(res, 403, 'FORBIDDEN_DOMAIN', `Only ${AUTH_ALLOWED_EMAIL_DOMAIN} accounts are allowed`);
     return null;
   }
 
@@ -962,7 +994,8 @@ function startServer() {
       minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
       minimaxActiveStartupProbe: MINIMAX_ACTIVE_STARTUP_PROBE,
       minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
-      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
+      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
+      authAllowedEmailDomain: AUTH_ALLOWED_EMAIL_DOMAIN
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);
@@ -992,5 +1025,6 @@ if (require.main === module) {
 module.exports = {
   app,
   runStartupWarmupLoop,
-  startServer
+  startServer,
+  normalizeAllowedEmailDomain
 };
