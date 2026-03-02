@@ -37,9 +37,28 @@
     try { return await res.json(); } catch { return null; }
   }
 
-  function isLikelyAuthRedirect(res) {
+  function isLikelyAuthRedirect(res, requestUrl) {
+    if (!res) return false;
+
     const ct = (res.headers.get("content-type") || "").toLowerCase();
-    if (ct.includes("text/html")) return true;
+
+    // Auth/login pages usually end up as followed redirects to HTML.
+    // Avoid treating generic upstream HTML error pages (e.g., 502/503) as auth redirects.
+    if (res.ok && ct.includes("text/html") && res.redirected) return true;
+
+    // If we expected one endpoint but ended up at a different URL, it's likely a login bounce.
+    if (requestUrl && res.redirected && res.url) {
+      try {
+        const requested = new URL(requestUrl, window.location.href);
+        const finalUrl = new URL(res.url, window.location.href);
+        if (requested.origin !== finalUrl.origin || requested.pathname !== finalUrl.pathname) {
+          return true;
+        }
+      } catch {
+        // If URL parsing fails, ignore and continue with heuristic checks below.
+      }
+    }
+
     if (res.url && /accounts\.google\.com|oauth2|openid|oidc/i.test(res.url)) return true;
     return false;
   }
@@ -465,7 +484,7 @@
             65000
           );
 
-          if (isLikelyAuthRedirect(res) || res.status === 401) {
+          if (res.status === 401 || isLikelyAuthRedirect(res, REWRITE_URL)) {
             handleLoginRequired();
             return;
           }
