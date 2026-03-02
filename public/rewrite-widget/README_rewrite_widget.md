@@ -82,6 +82,26 @@ model-status poller (no duplicated API calls).
 
 ------------------------------------------------------------------------
 
+# Front-end Status Behavior Notes
+
+The widget polls `GET /api/rewrite-bridge/model-status` and reads both:
+
+-   `status` (overall rewrite-model readiness)
+-   `serviceState` (service lifecycle/display state)
+
+Important behavior:
+
+-   **Rewrite button readiness is driven by `status === "ready"`**.
+-   `serviceState` is still shown in status text / hints for operator
+    visibility.
+-   If `status === "degraded"`, the widget surfaces degraded messaging,
+    even if `serviceState` still reports `"ready"`.
+
+This separation helps avoid enabling rewrites when the backend reports a
+non-ready model state.
+
+------------------------------------------------------------------------
+
 # OIDC Protection Overview
 
 The rewrite endpoint is typically protected by Apache
@@ -172,7 +192,8 @@ Login required: - User has no valid OIDC session. - Open a protected
 page to log in, then retry.
 
 Rewrite disabled: - Model status is not "ready". - Check
-/api/rewrite-bridge/model-status and server logs.
+/api/rewrite-bridge/model-status (`status` must be `"ready"`) and
+server logs.
 
 Cross-domain usage: - Using widget from another domain requires CORS +
 credentials setup. - Recommended: host widget on same domain as API.
