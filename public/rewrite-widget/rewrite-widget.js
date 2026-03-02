@@ -444,13 +444,53 @@
     const unsubscribe = poller.subscribe(applySharedState);
 
     function handleLoginRequired() {
-      const loginUrl = cfg.loginPageUrl || "/tools/rewritedemo.html";
+      const RELOAD_TS_KEY = "rw_auth_reload_ts";
+      const RELOAD_COUNT_KEY = "rw_auth_reload_count";
+      const RELOAD_WINDOW_MS = 20000;
+      const RELOAD_MAX_ATTEMPTS = 3;
+
       if (cfg.reloadOnLoginRequired !== false) {
+        let now = Date.now();
+        let firstTs = now;
+        let count = 0;
+
+        try {
+          const storedTs = Number(sessionStorage.getItem(RELOAD_TS_KEY) || "0");
+          const storedCount = Number(sessionStorage.getItem(RELOAD_COUNT_KEY) || "0");
+          const inWindow = Number.isFinite(storedTs) && (now - storedTs) <= RELOAD_WINDOW_MS;
+
+          if (inWindow) {
+            firstTs = storedTs;
+            count = Number.isFinite(storedCount) ? storedCount : 0;
+          }
+
+          count += 1;
+          sessionStorage.setItem(RELOAD_TS_KEY, String(firstTs || now));
+          sessionStorage.setItem(RELOAD_COUNT_KEY, String(count));
+        } catch {
+          // Ignore storage errors and fall back to a single reload attempt.
+          count = 1;
+        }
+
+        if (count > RELOAD_MAX_ATTEMPTS) {
+          const manualMessage = cfg.loginPageUrl
+            ? `Login required. Reload attempts were exhausted. Sign in here, then retry:\n${cfg.loginPageUrl}`
+            : "Login required. Re-authenticate in your org portal and retry.";
+          toast(manualMessage, "error");
+          return;
+        }
+
         toast("Session expired. Reloading to sign in again…", "error");
         window.location.reload();
         return;
       }
-      toast(`Login required. Open this page to sign in, then retry:\n${loginUrl}`, "error");
+
+      if (cfg.loginPageUrl) {
+        toast(`Login required. Sign in here, then retry:\n${cfg.loginPageUrl}`, "error");
+        return;
+      }
+
+      toast("Login required. Re-authenticate in your org portal and retry.", "error");
     }
 
     async function rewrite() {

@@ -21,21 +21,21 @@
 
   <script src="/rewrite-widget/rewrite-widget.js"></script>
   <script>
-    // If this page is OIDC-protected, reloadOnLoginRequired=true gives best UX.
+    // OIDC-protected pages should use reloadOnLoginRequired: true for automatic auth recovery.
+    // loginPageUrl is optional and only for manual sign-in flows
+    // (reloadOnLoginRequired: false) on public/non-protected pages.
     RewriteWidget.mount({
       containerSelector: "#rw1",
       apiBase: "", // same-origin (recommended when hosted by the same server)
       title: "Rewrite Box 1",
-      reloadOnLoginRequired: true,
-      loginPageUrl: "/tools/rewritedemo.html"
+      reloadOnLoginRequired: true
     });
 
     RewriteWidget.mount({
       containerSelector: "#rw2",
       apiBase: "",
       title: "Rewrite Box 2",
-      reloadOnLoginRequired: true,
-      loginPageUrl: "/tools/rewritedemo.html"
+      reloadOnLoginRequired: true
     });
   </script>
 </body>

@@ -56,11 +56,13 @@ app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-w
     apiBase: "",  // same-origin recommended
     title: "Rewrite",
     maxChars: 100,
-    reloadOnLoginRequired: true,
-    loginPageUrl: "/tools/rewritedemo.html"
+    reloadOnLoginRequired: true
   });
 </script>
 ```
+
+`loginPageUrl` is optional and only used when you run a manual sign-in flow
+(`reloadOnLoginRequired: false`).
 
 ------------------------------------------------------------------------
 
@@ -120,6 +122,33 @@ cookie - If not logged in, Apache redirects to Google login
 
 Best UX: Protect the widget page itself with OIDC so login happens
 automatically.
+
+Recommended auth config by page type:
+
+- OIDC-protected widget pages (recommended):
+
+```js
+RewriteWidget.mount({
+  containerSelector: "#rw",
+  apiBase: "",
+  reloadOnLoginRequired: true
+});
+```
+
+- Public/non-protected pages:
+
+```js
+RewriteWidget.mount({
+  containerSelector: "#rw",
+  apiBase: "",
+  reloadOnLoginRequired: false,
+  loginPageUrl: "/login"
+});
+```
+
+If your page is public and you set `reloadOnLoginRequired: false` without a
+`loginPageUrl`, the widget shows a generic message:
+"Login required. Re-authenticate in your org portal and retry."
 
 ------------------------------------------------------------------------
 
@@ -191,6 +220,9 @@ Also add to .gitignore:
 Login required: - User has no valid OIDC session. - Open a protected
 page to log in, then retry.
 
+If repeated auth-triggered reloads occur, the widget now stops auto-reloading
+after a short burst and shows a stable manual login message.
+
 Rewrite disabled: - Model status is not "ready". - Check
 /api/rewrite-bridge/model-status (`status` must be `"ready"`) and
 server logs.
@@ -207,3 +239,42 @@ credentials setup. - Recommended: host widget on same domain as API.
 -   Protect widget demo page for best UX
 -   Never commit secrets
 -   Use pull requests for deployment changes
+
+------------------------------------------------------------------------
+
+# Migration Note (Removed Demo Login Fallback)
+
+The old demo-path fallback (`/tools/rewritedemo.html`) is deprecated and
+removed from default widget behavior.
+
+Before:
+
+```js
+RewriteWidget.mount({
+  containerSelector: "#rw",
+  apiBase: "",
+  reloadOnLoginRequired: false,
+  loginPageUrl: "/tools/rewritedemo.html"
+});
+```
+
+After (manual login flow):
+
+```js
+RewriteWidget.mount({
+  containerSelector: "#rw",
+  apiBase: "",
+  reloadOnLoginRequired: false,
+  loginPageUrl: "/login"
+});
+```
+
+After (OIDC-protected page flow):
+
+```js
+RewriteWidget.mount({
+  containerSelector: "#rw",
+  apiBase: "",
+  reloadOnLoginRequired: true
+});
+```
