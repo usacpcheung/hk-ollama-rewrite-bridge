@@ -208,6 +208,10 @@ Operationally:
 
 See detailed server deployment steps in `docs/depolyment_guide.md`.
 
+## Contributor task tracking
+
+- Agent guideline rollout task: `tasks/agent-guidelines-task.md`
+
 ## Operator validation checklist
 
 ```bash
