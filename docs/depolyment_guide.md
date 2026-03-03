@@ -182,9 +182,23 @@ sudo systemctl status rewrite-bridge --no-pager
 Enable modules:
 
 ```bash
-sudo a2enmod proxy proxy_http headers
+sudo a2enmod proxy proxy_http headers auth_openidc
 sudo systemctl restart apache2
 ```
+
+OIDC integration is required when exposing API on `:443` and enforcing access control.
+
+- `server.js` validates `X-Authenticated-Email` before allowing rewrite calls.
+- Apache must inject a trusted OIDC email claim into this header.
+- The backend hard-codes `@hs.edu.hk` domain allow-listing.
+
+Use `apache/proxy-snippet.conf` as the base, and replace all sensitive placeholders:
+
+- `OIDCProviderMetadataURL`
+- `OIDCClientID`
+- `OIDCClientSecret`
+- `OIDCRedirectURI`
+- `OIDCCryptoPassphrase`
 
 Map canonical public namespace `/api/rewrite-bridge/*` to internal routes:
 
@@ -197,6 +211,14 @@ ProxyPass /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
 ProxyPassReverse /api/rewrite-bridge/healthz http://127.0.0.1:3001/healthz
 ProxyPass /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
 ProxyPassReverse /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
+
+<Location "/api/rewrite-bridge">
+    AuthType openid-connect
+    Require valid-user
+</Location>
+
+RequestHeader unset X-Authenticated-Email
+RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e" env=OIDC_CLAIM_email
 ```
 
 Optional legacy compatibility alias:
