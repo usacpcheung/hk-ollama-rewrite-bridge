@@ -183,6 +183,10 @@ function buildRewritePrompt(systemPrompt, userTemplate, text) {
   };
 }
 
+function countUnicodeCharacters(value) {
+  return [...value].length;
+}
+
 const provider = createProvider({
   provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
@@ -573,13 +577,14 @@ app.post('/rewrite', async (req, res) => {
     }
 
     const trimmedText = text.trim();
-    inputLength = trimmedText.length;
+    const inputCharCount = countUnicodeCharacters(trimmedText);
+    inputLength = inputCharCount;
 
     if (!trimmedText) {
       return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
     }
 
-    if (trimmedText.length > MAX_TEXT_LENGTH) {
+    if (inputCharCount > MAX_TEXT_LENGTH) {
       return errorResponse(res, 413, 'TOO_LONG', `Max ${MAX_TEXT_LENGTH} characters`);
     }
 
