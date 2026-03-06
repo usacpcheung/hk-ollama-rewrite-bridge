@@ -99,6 +99,7 @@ If key is missing, readiness returns non-ready with reason `MINIMAX_API_KEY_MISS
 | Variable | Default | Purpose |
 |---|---|---|
 | `REWRITE_PROVIDER` | `ollama` | Backend provider (`ollama` or `minimax`). |
+| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length (allowed 1-600; invalid values fallback to default). |
 
 ### Ollama request/warmup
 
