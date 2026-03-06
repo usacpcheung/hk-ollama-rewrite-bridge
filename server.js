@@ -8,6 +8,7 @@ const HOST = '127.0.0.1';
 const PORT = 3001;
 const MAX_TEXT_LENGTH = 200;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
+const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -196,6 +197,13 @@ function errorResponse(res, status, code, message, extra = {}) {
 }
 
 function requireAuthenticatedEmail(req, res) {
+  const trustHeader = (req.get('X-Bridge-Auth') || '').trim();
+
+  if (!BRIDGE_INTERNAL_AUTH_SECRET || trustHeader !== BRIDGE_INTERNAL_AUTH_SECRET) {
+    errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+    return null;
+  }
+
   const rawHeader = req.get('X-Authenticated-Email');
   const email = (rawHeader || '').trim().toLowerCase();
 

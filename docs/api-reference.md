@@ -17,6 +17,17 @@ All error responses use:
 }
 ```
 
+## Authentication trust model (reverse-proxy deployments)
+
+Protected routes (for example `POST /rewrite`) require two trusted headers from the reverse proxy:
+
+- `X-Authenticated-Email`: normalized user email claim (must end with `@hs.edu.hk`)
+- `X-Bridge-Auth`: shared secret that must match backend env `BRIDGE_INTERNAL_AUTH_SECRET`
+
+Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
+
+Reverse proxy must unset these headers from inbound client traffic and set them server-side only after successful auth.
+
 ---
 
 ## 1) `POST /rewrite`
@@ -163,6 +174,12 @@ Example (`503`):
 - `400 INVALID_INPUT` when `text` missing/non-string/empty.
 - `413 TOO_LONG` when over 200 chars.
 - `400 INVALID_JSON` for malformed JSON body.
+
+### Authentication/authorization errors
+
+- `401 AUTH_REQUIRED` when `X-Bridge-Auth` is missing/invalid, or when authenticated email is absent.
+- `401 AUTH_HEADER_INVALID` when `X-Authenticated-Email` is malformed (for example multiple values).
+- `403 FORBIDDEN_DOMAIN` when authenticated email domain is not `hs.edu.hk`.
 
 ### Upstream/provider errors
 

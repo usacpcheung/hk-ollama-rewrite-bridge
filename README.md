@@ -70,6 +70,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
+| `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
 
 ### Example startup with overrides
 
@@ -127,6 +128,24 @@ Backend service still listens on local-only internal routes:
 - `GET /model-status`
 - `GET /healthz`
 - `GET /readyz`
+
+## Reverse-proxy authentication hardening
+
+To prevent header spoofing, backend authentication now requires **two trust signals** on protected routes:
+
+1. `X-Authenticated-Email` (set by trusted proxy from IdP claim)
+2. `X-Bridge-Auth` (shared secret set by trusted proxy only)
+
+Backend enforces that `X-Bridge-Auth` exactly matches `BRIDGE_INTERNAL_AUTH_SECRET` before it will trust `X-Authenticated-Email`. If either signal is missing/invalid, the API returns `401 AUTH_REQUIRED`.
+
+Deployment requirements:
+
+- Set a strong random `BRIDGE_INTERNAL_AUTH_SECRET` in the rewrite-bridge runtime environment.
+- In Apache/Nginx, **unset inbound** `X-Authenticated-Email` and `X-Bridge-Auth` from clients.
+- Re-set both headers server-side after successful OIDC/auth processing.
+- Keep the shared secret out of git and inject via secret management.
+
+Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
 ## API
 
