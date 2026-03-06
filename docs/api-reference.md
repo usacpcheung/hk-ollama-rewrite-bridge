@@ -43,7 +43,7 @@ Rewrite HK colloquial Cantonese into formal Traditional Chinese.
 }
 ```
 
-- `text` (required): string, trimmed, non-empty, max 200 chars.
+- `text` (required): string, trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` chars (default 200; capped at 600).
 - `stream` (optional): supports `true`, `"true"`, `1`, `"1"` to enable NDJSON streaming.
 
 ### Calling methods
@@ -172,7 +172,7 @@ Example (`503`):
 ### Validation errors
 
 - `400 INVALID_INPUT` when `text` missing/non-string/empty.
-- `413 TOO_LONG` when over 200 chars.
+- `413 TOO_LONG` when over the configured max length (`REWRITE_MAX_TEXT_LENGTH`, default 200).
 - `400 INVALID_JSON` for malformed JSON body.
 
 ### Authentication/authorization errors

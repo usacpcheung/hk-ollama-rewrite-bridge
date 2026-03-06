@@ -6,7 +6,8 @@ const { createProvider } = require('./providers');
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
-const MAX_TEXT_LENGTH = 200;
+const DEFAULT_MAX_TEXT_LENGTH = 200;
+const ABSOLUTE_MAX_TEXT_LENGTH = 600;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
@@ -15,6 +16,29 @@ function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } =
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
     return null;
   }
+  return parsed;
+}
+
+
+function parseEnvBoundedInteger(name, fallback, bounds = {}) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = parseBoundedInteger(rawValue, bounds);
+  if (parsed == null) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: `Invalid ${name}; using default`,
+        provided: rawValue,
+        fallback
+      })
+    );
+    return fallback;
+  }
+
   return parsed;
 }
 
@@ -39,6 +63,11 @@ function parseEnvMilliseconds(name, fallback, bounds = {}) {
 
   return parsed;
 }
+
+const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
+  min: 1,
+  max: ABSOLUTE_MAX_TEXT_LENGTH
+});
 
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
@@ -551,7 +580,7 @@ app.post('/rewrite', async (req, res) => {
     }
 
     if (trimmedText.length > MAX_TEXT_LENGTH) {
-      return errorResponse(res, 413, 'TOO_LONG', 'Max 200 characters');
+      return errorResponse(res, 413, 'TOO_LONG', `Max ${MAX_TEXT_LENGTH} characters`);
     }
 
     const { prompt, systemPrompt, userContent } = isMinimax
