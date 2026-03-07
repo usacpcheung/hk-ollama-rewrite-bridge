@@ -10,6 +10,9 @@ It provides:
 -   A **model-ready status dot** (ready / loading / down)
 -   A **single shared model-status poller** across multiple widgets (no
     duplicated network requests)
+-   Canonical status-phase handling (`down` / `degraded` / `ready` /
+    `starting` / `unknown`) derived from backend `status` and
+    `serviceState`
 -   Secure API calls using browser cookies (`credentials: "include"`)
     for OIDC-protected endpoints
 -   Safe documentation templates (no sensitive information included)
@@ -64,6 +67,11 @@ app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-w
 `loginPageUrl` is optional and only used when you run a manual sign-in flow
 (`reloadOnLoginRequired: false`).
 
+You can also pass optional tuning flags:
+
+- `statusPollIntervalMs` (number, min 1000) to change shared poll interval
+- `pollModelStatus` (boolean, default `true`) to skip the initial forced poll
+
 ------------------------------------------------------------------------
 
 # Multiple Widgets on One Page
@@ -84,6 +92,27 @@ model-status poller (no duplicated API calls).
 
 ------------------------------------------------------------------------
 
+# Widget API
+
+`RewriteWidget.mount(config)` returns an instance with:
+
+- `rewrite()` – manually trigger rewrite
+- `undo()` – restore last pre-rewrite text
+- `pollStatusOnce()` – force immediate shared status poll
+- `getCurrentText()` – read current textarea content
+- `onRewriteStart(callback)` – subscribe before each rewrite call
+- `onRewriteComplete(callback)` – subscribe after rewrite attempt
+- `onTextChange(callback)` – subscribe on textarea input changes
+- `destroy()` – unsubscribe + remove widget DOM
+
+Event payloads:
+
+- `onRewriteStart`: `{ text }`
+- `onRewriteComplete`: `{ before, after, changed, success, errorMessage }`
+- `onTextChange`: `{ text }`
+
+------------------------------------------------------------------------
+
 # Front-end Status Behavior Notes
 
 The widget polls `GET /api/rewrite-bridge/model-status` and reads both:
@@ -93,14 +122,20 @@ The widget polls `GET /api/rewrite-bridge/model-status` and reads both:
 
 Important behavior:
 
--   **Rewrite button readiness is driven by `status === "ready"`**.
--   `serviceState` is still shown in status text / hints for operator
-    visibility.
--   If `status === "degraded"`, the widget surfaces degraded messaging,
-    even if `serviceState` still reports `"ready"`.
+-   The widget normalizes model state into a shared `phase` using both
+    `status` and `serviceState` with this precedence:
+    1. unreachable/down
+    2. degraded
+    3. ready
+    4. starting/warming/loading
+    5. unknown
+-   **Rewrite button readiness is driven by normalized phase `ready`**.
+-   `degraded` keeps Rewrite disabled and shows quality warning text.
+-   `starting`/`warming`/`loading` shows loading UI and disables Rewrite.
+-   `down` (or unreachable API) shows retry messaging and auto-retry polling.
 
-This separation helps avoid enabling rewrites when the backend reports a
-non-ready model state.
+This keeps all widget instances consistent and avoids per-widget drift in
+status interpretation.
 
 ------------------------------------------------------------------------
 
