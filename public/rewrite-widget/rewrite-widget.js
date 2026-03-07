@@ -425,6 +425,33 @@
     let sharedModelReady = false;
     let sharedPhase = "unknown";
 
+    function makeEmitter() {
+      const listeners = new Set();
+      return {
+        on(callback) {
+          if (typeof callback !== "function") return () => {};
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
+        emit(payload) {
+          for (const cb of listeners) {
+            try { cb(payload); } catch { /* ignore */ }
+          }
+        },
+        clear() {
+          listeners.clear();
+        }
+      };
+    }
+
+    const rewriteStart = makeEmitter();
+    const rewriteComplete = makeEmitter();
+    const textChange = makeEmitter();
+
+    function getCurrentText() {
+      return String(ui.ta.value || "");
+    }
+
     function toast(msg, type = "") {
       ui.toast.textContent = msg || "";
       ui.toast.className = "rw-toast" + (type ? " " + type : "");
@@ -438,7 +465,8 @@
     }
 
     function updateCount() {
-      ui.countSpan.textContent = String((ui.ta.value || "").length);
+      ui.countSpan.textContent = String(getCurrentText().length);
+      textChange.emit({ text: getCurrentText() });
       syncButtons();
     }
 
@@ -536,6 +564,10 @@
     async function rewrite() {
       const original = (ui.ta.value || "").trim();
       if (!original) return;
+      const before = getCurrentText();
+      let success = false;
+      let errorMessage = "";
+      rewriteStart.emit({ text: before });
 
       inFlight = true;
       lastOriginalText = original;
@@ -598,6 +630,7 @@
           ui.ta.value = data.result;
           updateCount();
           toast("Done.", "ok");
+          success = true;
 
           // After rewrite, re-apply shared state (may flip to ready)
           applySharedState(poller.getState());
@@ -607,11 +640,14 @@
         throw new Error("Model not ready after multiple retries. Please try again.");
       } catch (err) {
         const msg = (err?.name === "AbortError") ? "Timeout. Please retry." : (err?.message || "Unknown error.");
+        errorMessage = msg;
         toast(msg, "error");
         setDot(ui.dot, "down");
         ui.statusText.textContent = "Rewrite failed";
         ui.hint.textContent = "Check logs then retry";
       } finally {
+        const after = getCurrentText();
+        rewriteComplete.emit({ before, after, changed: after !== before, success, errorMessage });
         inFlight = false;
         ui.ta.disabled = false;
         await poller.pollOnce();     // shared poll
@@ -642,8 +678,15 @@
       pollStatusOnce: () => poller.pollOnce(),
       rewrite,
       undo,
+      getCurrentText,
+      onRewriteStart: (callback) => rewriteStart.on(callback),
+      onRewriteComplete: (callback) => rewriteComplete.on(callback),
+      onTextChange: (callback) => textChange.on(callback),
       destroy: () => {
         unsubscribe();
+        rewriteStart.clear();
+        rewriteComplete.clear();
+        textChange.clear();
         container.innerHTML = "";
       }
     };
