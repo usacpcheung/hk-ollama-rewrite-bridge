@@ -77,13 +77,70 @@
 
       // Shared state
       let state = {
+        phase: "unknown",
         status: "unknown",
         serviceState: "unknown",
+        statusText: "Checking model…",
         modelReady: false,
         reachable: true,
         lastError: "",
         lastUpdatedMs: 0
       };
+
+      // Canonical model-state normalization used by all subscribers.
+      //
+      // Precedence (highest -> lowest):
+      // 1) unreachable/down
+      // 2) degraded
+      // 3) ready (either field)
+      // 4) starting/warming/loading (either field)
+      // 5) unknown
+      //
+      // Sample mapping table:
+      // | status      | serviceState | reachable | phase    | modelReady |
+      // |------------ |------------- |---------- |--------- |----------- |
+      // | ready       | starting     | true      | ready    | true       |
+      // | warming     | unknown      | true      | starting | false      |
+      // | loading     | unknown      | true      | starting | false      |
+      // | unknown     | degraded     | true      | degraded | false      |
+      // | ready       | ready        | false     | down     | false      |
+      function normalizeModelState(data = {}, opts = {}) {
+        const status = String(data?.status || "unknown").toLowerCase();
+        const serviceState = String(data?.serviceState || "unknown").toLowerCase();
+        const reachable = opts.reachable !== undefined ? !!opts.reachable : true;
+        const lastError = opts.lastError || "";
+
+        const isDown = !reachable || status === "down" || serviceState === "down" || status === "unreachable" || serviceState === "unreachable";
+        const isDegraded = status === "degraded" || serviceState === "degraded";
+        const isReady = status === "ready" || serviceState === "ready";
+        const isStarting = status === "starting" || serviceState === "starting" || status === "warming" || serviceState === "warming" || status === "loading" || serviceState === "loading";
+
+        let phase = "unknown";
+        if (isDown) phase = "down";
+        else if (isDegraded) phase = "degraded";
+        else if (isReady) phase = "ready";
+        else if (isStarting) phase = "starting";
+
+        const statusText = phase === "down"
+          ? "API unreachable"
+          : phase === "degraded"
+            ? "Model degraded"
+            : phase === "ready"
+              ? "Model ready"
+              : phase === "starting"
+                ? "Model loading…"
+                : "Checking model…";
+
+        return {
+          phase,
+          status,
+          serviceState,
+          statusText,
+          modelReady: phase === "ready",
+          reachable,
+          lastError
+        };
+      }
 
       // Subscribers: Map<id, callback(state)>
       const subs = new Map();
@@ -105,29 +162,19 @@
         inFlight = true;
 
         try {
+          // Poll response is normalized into canonical `phase/modelReady/statusText`
+          // from API `status` + `serviceState`, so widget instances do not drift
+          // with ad-hoc per-widget checks.
           const res = await fetchWithTimeout(statusUrl, { method: "GET" }, 8000);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data = await res.json();
-          const status = String(data?.status || "unknown");
-          const serviceState = String(data?.serviceState || "unknown");
-          const modelReady = (status === "ready");
-
-          setState({
-            reachable: true,
-            lastError: "",
-            status,
-            serviceState,
-            modelReady
-          });
+          setState(normalizeModelState(data, { reachable: true, lastError: "" }));
         } catch (e) {
-          setState({
-            reachable: false,
-            lastError: e?.message || "Model status error",
-            status: "down",
-            serviceState: "down",
-            modelReady: false
-          });
+          setState(normalizeModelState(
+            { status: "down", serviceState: "down" },
+            { reachable: false, lastError: e?.message || "Model status error" }
+          ));
         } finally {
           inFlight = false;
         }
@@ -376,9 +423,34 @@
     let inFlight = false;
     let lastOriginalText = "";
     let sharedModelReady = false;
-    let sharedStatus = "unknown";
-    let sharedServiceState = "unknown";
-    let sharedReachable = true;
+    let sharedPhase = "unknown";
+
+    function makeEmitter() {
+      const listeners = new Set();
+      return {
+        on(callback) {
+          if (typeof callback !== "function") return () => {};
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
+        emit(payload) {
+          for (const cb of listeners) {
+            try { cb(payload); } catch { /* ignore */ }
+          }
+        },
+        clear() {
+          listeners.clear();
+        }
+      };
+    }
+
+    const rewriteStart = makeEmitter();
+    const rewriteComplete = makeEmitter();
+    const textChange = makeEmitter();
+
+    function getCurrentText() {
+      return String(ui.ta.value || "");
+    }
 
     function toast(msg, type = "") {
       ui.toast.textContent = msg || "";
@@ -393,46 +465,42 @@
     }
 
     function updateCount() {
-      ui.countSpan.textContent = String((ui.ta.value || "").length);
+      ui.countSpan.textContent = String(getCurrentText().length);
+      textChange.emit({ text: getCurrentText() });
       syncButtons();
     }
 
     // Apply shared status to UI
     function applySharedState(st) {
+      // UI rendering reads the canonical phase computed in pollOnce().
+      // Keep this switch aligned with normalizeModelState() precedence.
       sharedModelReady = !!st.modelReady;
-      sharedStatus = st.status || "unknown";
-      sharedServiceState = st.serviceState || "unknown";
-      sharedReachable = !!st.reachable;
+      sharedPhase = st.phase || "unknown";
 
-      if (!sharedReachable) {
+      if (sharedPhase === "down") {
         setDot(ui.dot, "down");
-        ui.statusText.textContent = "API unreachable";
+        ui.statusText.textContent = st.statusText || "API unreachable";
         ui.hint.textContent = "Will retry automatically";
         toast(st.lastError ? `Cannot reach API. ${st.lastError}` : "Cannot reach API.", "error");
-      } else if (sharedStatus === "degraded") {
+      } else if (sharedPhase === "degraded") {
         setDot(ui.dot, "busy");
-        ui.statusText.textContent = "Model degraded";
+        ui.statusText.textContent = st.statusText || "Model degraded";
         ui.hint.textContent = "Reduced quality mode (retry if output looks off)";
         if (!inFlight) toast("Model is degraded. Results may be lower quality.", "error");
-      } else if (sharedServiceState === "ready") {
+      } else if (sharedPhase === "ready") {
         setDot(ui.dot, "ready");
-        ui.statusText.textContent = "Model ready";
+        ui.statusText.textContent = st.statusText || "Model ready";
         ui.hint.textContent = "Click Rewrite to convert";
         // don't clear toast if we're mid-flight; keep "Working…"
         if (!inFlight) toast("");
-      } else if (sharedServiceState === "starting") {
+      } else if (sharedPhase === "starting") {
         setDot(ui.dot, "busy");
-        ui.statusText.textContent = "Model loading…";
+        ui.statusText.textContent = st.statusText || "Model loading…";
         ui.hint.textContent = "Rewrite disabled while loading";
         if (!inFlight) toast("Please wait for model to be ready.");
-      } else if (sharedServiceState === "degraded") {
-        setDot(ui.dot, "down");
-        ui.statusText.textContent = "Model degraded";
-        ui.hint.textContent = "Operator action needed (retry later)";
-        if (!inFlight) toast("Service degraded. Try again later.", "error");
       } else {
         setDot(ui.dot, "busy");
-        ui.statusText.textContent = `State: ${sharedServiceState}`;
+        ui.statusText.textContent = st.statusText || "Checking model…";
         ui.hint.textContent = "Waiting for ready…";
         if (!inFlight) toast("");
       }
@@ -496,6 +564,10 @@
     async function rewrite() {
       const original = (ui.ta.value || "").trim();
       if (!original) return;
+      const before = getCurrentText();
+      let success = false;
+      let errorMessage = "";
+      rewriteStart.emit({ text: before });
 
       inFlight = true;
       lastOriginalText = original;
@@ -558,6 +630,7 @@
           ui.ta.value = data.result;
           updateCount();
           toast("Done.", "ok");
+          success = true;
 
           // After rewrite, re-apply shared state (may flip to ready)
           applySharedState(poller.getState());
@@ -567,11 +640,14 @@
         throw new Error("Model not ready after multiple retries. Please try again.");
       } catch (err) {
         const msg = (err?.name === "AbortError") ? "Timeout. Please retry." : (err?.message || "Unknown error.");
+        errorMessage = msg;
         toast(msg, "error");
         setDot(ui.dot, "down");
         ui.statusText.textContent = "Rewrite failed";
         ui.hint.textContent = "Check logs then retry";
       } finally {
+        const after = getCurrentText();
+        rewriteComplete.emit({ before, after, changed: after !== before, success, errorMessage });
         inFlight = false;
         ui.ta.disabled = false;
         await poller.pollOnce();     // shared poll
@@ -602,8 +678,15 @@
       pollStatusOnce: () => poller.pollOnce(),
       rewrite,
       undo,
+      getCurrentText,
+      onRewriteStart: (callback) => rewriteStart.on(callback),
+      onRewriteComplete: (callback) => rewriteComplete.on(callback),
+      onTextChange: (callback) => textChange.on(callback),
       destroy: () => {
         unsubscribe();
+        rewriteStart.clear();
+        rewriteComplete.clear();
+        textChange.clear();
         container.innerHTML = "";
       }
     };
