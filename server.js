@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
+const { createRewriteHeaderAuth } = require('./auth/header-auth');
 
 const app = express();
 const HOST = '127.0.0.1';
@@ -229,34 +230,12 @@ function errorResponse(res, status, code, message, extra = {}) {
   });
 }
 
-function requireAuthenticatedEmail(req, res) {
-  const trustHeader = (req.get('X-Bridge-Auth') || '').trim();
+const rewriteHeaderAuth = createRewriteHeaderAuth({
+  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
+  errorResponse
+});
 
-  if (!BRIDGE_INTERNAL_AUTH_SECRET || trustHeader !== BRIDGE_INTERNAL_AUTH_SECRET) {
-    errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
-    return null;
-  }
 
-  const rawHeader = req.get('X-Authenticated-Email');
-  const email = (rawHeader || '').trim().toLowerCase();
-
-  if (!email) {
-    errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
-    return null;
-  }
-
-  if (email.includes(',')) {
-    errorResponse(res, 401, 'AUTH_HEADER_INVALID', 'Invalid authentication header');
-    return null;
-  }
-
-  if (!email.endsWith('@hs.edu.hk')) {
-    errorResponse(res, 403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
-    return null;
-  }
-
-  return email;
-}
 
 function setLastError(code, message) {
   lastError = { code, message, at: new Date().toISOString() };
@@ -549,7 +528,7 @@ app.get('/readyz', async (_req, res) => {
   return res.status(503).json({ ok: false, serviceState, reason });
 });
 
-app.post('/rewrite', async (req, res) => {
+app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
@@ -564,10 +543,7 @@ app.post('/rewrite', async (req, res) => {
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
-    email = requireAuthenticatedEmail(req, res);
-    if (email === null) {
-      return;
-    }
+    email = req.auth?.email || null;
 
     const { text, stream } = req.body || {};
     const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
