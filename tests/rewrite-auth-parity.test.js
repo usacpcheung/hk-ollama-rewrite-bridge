@@ -121,6 +121,19 @@ test('POST /rewrite auth baseline parity matrix', async (t) => {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
+  const logLines = [];
+  const collectLogs = (chunk) => {
+    const lines = String(chunk)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    logLines.push(...lines);
+  };
+
+  serverProcess.stdout.on('data', collectLogs);
+  serverProcess.stderr.on('data', collectLogs);
+
   t.after(() => {
     if (!serverProcess.killed) {
       serverProcess.kill('SIGTERM');
@@ -136,6 +149,25 @@ test('POST /rewrite auth baseline parity matrix', async (t) => {
     assert.equal(result.body?.error?.code, scenario.expected.errorCode, `${scenario.name} error.code mismatch`);
     assert.equal(result.body?.error?.message, scenario.expected.errorMessage, `${scenario.name} error.message mismatch`);
   }
+
+  const authFailureLogLines = logLines.filter((line) => line.includes('"auth":{'));
+  assert.ok(authFailureLogLines.length >= AUTH_BASELINE_MATRIX.length, 'auth failures should still emit request logs');
+
+  const authFailureCodes = new Set(
+    authFailureLogLines
+      .map((line) => {
+        try {
+          return JSON.parse(line)?.auth?.code || null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+  );
+
+  assert.ok(authFailureCodes.has('AUTH_REQUIRED'));
+  assert.ok(authFailureCodes.has('AUTH_HEADER_INVALID'));
+  assert.ok(authFailureCodes.has('FORBIDDEN_DOMAIN'));
 
   const validHeadersResult = await postRewrite({
     'X-Bridge-Auth': AUTH_SECRET,
