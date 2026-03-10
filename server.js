@@ -230,9 +230,64 @@ function errorResponse(res, status, code, message, extra = {}) {
   });
 }
 
+const logRewriteRequest = ({
+  req,
+  requestId,
+  startedAt,
+  email = null,
+  inputLength = 0,
+  requestPhase = modelPhase,
+  selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS,
+  probeReady = lastProbeReady,
+  probeError = null,
+  warmupTriggeredNow = false,
+  minimaxRecoveryAttempt = false,
+  auth = null
+}) => {
+  const elapsedMs = Date.now() - startedAt;
+  const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+
+  console.log(
+    JSON.stringify({
+      requestId,
+      ip,
+      email,
+      inputLength,
+      elapsedMs,
+      phase: requestPhase,
+      selectedTimeoutMs,
+      probeReady,
+      probeAgeMs,
+      probeError,
+      warmupTriggeredNow,
+      minimaxRecoveryAttempt,
+      warmupInFlight,
+      lastWarmupResult,
+      lastWarmupError,
+      lastWarmupTriggerAtMs,
+      auth
+    })
+  );
+};
+
 const rewriteHeaderAuth = createRewriteHeaderAuth({
   bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
-  errorResponse
+  errorResponse,
+  onAuthFailure: (req, authFailure) => {
+    logRewriteRequest({
+      req,
+      requestId: crypto.randomUUID(),
+      startedAt: Date.now(),
+      requestPhase: modelPhase,
+      selectedTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      probeReady: lastProbeReady,
+      auth: {
+        status: authFailure.status,
+        code: authFailure.code
+      }
+    });
+  }
 });
 
 
@@ -531,7 +586,6 @@ app.get('/readyz', async (_req, res) => {
 app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   let email = null;
   let inputLength = 0;
   let requestPhase = modelPhase;
@@ -845,28 +899,19 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     const finalText = toHK(modelText);
     return res.json({ ok: true, result: finalText });
   } finally {
-    const elapsedMs = Date.now() - startedAt;
-    const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
-    console.log(
-      JSON.stringify({
-        requestId,
-        ip,
-        email,
-        inputLength,
-        elapsedMs,
-        phase: requestPhase,
-        selectedTimeoutMs,
-        probeReady,
-        probeAgeMs,
-        probeError,
-        warmupTriggeredNow,
-        minimaxRecoveryAttempt,
-        warmupInFlight,
-        lastWarmupResult,
-        lastWarmupError,
-        lastWarmupTriggerAtMs
-      })
-    );
+    logRewriteRequest({
+      req,
+      requestId,
+      startedAt,
+      email,
+      inputLength,
+      requestPhase,
+      selectedTimeoutMs,
+      probeReady,
+      probeError,
+      warmupTriggeredNow,
+      minimaxRecoveryAttempt
+    });
   }
 });
 

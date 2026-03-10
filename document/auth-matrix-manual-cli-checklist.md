@@ -1,11 +1,11 @@
 # Manual CLI Auth Matrix Validation (Post-Extraction)
 
-This runbook verifies that the `/rewrite` authentication contract is identical in both request paths after extraction/deployment:
+This runbook verifies that backend auth behavior and external gateway behavior remain correct after extraction/deployment:
 
 1. **Server-side CLI path** (direct local backend reachability).
 2. **External CLI path** (through reverse proxy + OIDC gateway).
 
-Use this before rollout. **If any scenario returns a different status/error contract between the two paths, block rollout immediately.**
+Use this before rollout. **Block rollout if local backend auth expectations fail, if hardened external behavior is not observed, or if gateway/OIDC controls are bypassed.**
 
 ---
 
@@ -19,7 +19,7 @@ Use this before rollout. **If any scenario returns a different status/error cont
 
 ## 2) Expected Auth Contract (Baseline)
 
-For `POST /rewrite` with JSON body (`{"text":"測試文字"}`), expected auth outcomes are:
+For local backend `POST /rewrite` with JSON body (`{"text":"測試文字"}`), expected auth outcomes are:
 
 | Scenario | Required headers | Expected HTTP | Expected `error.code` | Expected `error.message` |
 |---|---|---:|---|---|
@@ -32,6 +32,7 @@ For `POST /rewrite` with JSON body (`{"text":"測試文字"}`), expected auth ou
 
 > Notes:
 > - In the valid-auth scenario, downstream provider behavior may still return a non-2xx for non-auth reasons. The auth acceptance check is that it must not fail with the auth-specific 401/403 contracts above.
+> - These header-driven scenarios are for direct backend validation (`LOCAL_BASE_URL`) only. On the external path, trusted headers are injected by the reverse proxy and inbound spoofed values are stripped.
 
 ---
 
@@ -79,7 +80,7 @@ call_external() {
   local tag="$1"
   shift
   echo "\n===== EXTERNAL :: ${tag} ====="
-  curl -sS -i -X POST "${EXTERNAL_BASE_URL}/rewrite" \
+  curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${OIDC_TOKEN}" \
     "$@" \
@@ -89,9 +90,9 @@ call_external() {
 
 ---
 
-## 5) Execute Full Matrix in Both Contexts
+## 5) Execute Matrices by Boundary (Do Not Mix Contracts)
 
-Run each scenario twice: once with `call_local`, once with `call_external`.
+Run A–F against `call_local` only (direct backend contract). Run G–I against `call_external` only (gateway/proxy contract).
 
 ### A. Missing `X-Bridge-Auth`
 
@@ -99,11 +100,9 @@ Run each scenario twice: once with `call_local`, once with `call_external`.
 call_local "missing bridge auth" \
   -H 'X-Authenticated-Email: tester@hs.edu.hk'
 
-call_external "missing bridge auth" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
 ```
 
-Expected for both paths:
+Expected:
 - HTTP `401`
 - JSON error: `code=AUTH_REQUIRED`, `message=Login required`
 
@@ -114,12 +113,9 @@ call_local "wrong bridge auth" \
   -H 'X-Bridge-Auth: wrong-secret' \
   -H 'X-Authenticated-Email: tester@hs.edu.hk'
 
-call_external "wrong bridge auth" \
-  -H 'X-Bridge-Auth: wrong-secret' \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
 ```
 
-Expected for both paths:
+Expected:
 - HTTP `401`
 - JSON error: `code=AUTH_REQUIRED`, `message=Login required`
 
@@ -129,11 +125,9 @@ Expected for both paths:
 call_local "missing authenticated email" \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}"
 
-call_external "missing authenticated email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}"
 ```
 
-Expected for both paths:
+Expected:
 - HTTP `401`
 - JSON error: `code=AUTH_REQUIRED`, `message=Login required`
 
@@ -144,12 +138,9 @@ call_local "malformed multi email" \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
   -H 'X-Authenticated-Email: tester@hs.edu.hk,other@hs.edu.hk'
 
-call_external "malformed multi email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk,other@hs.edu.hk'
 ```
 
-Expected for both paths:
+Expected:
 - HTTP `401`
 - JSON error: `code=AUTH_HEADER_INVALID`, `message=Invalid authentication header`
 
@@ -160,12 +151,9 @@ call_local "forbidden domain" \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
   -H 'X-Authenticated-Email: tester@example.com'
 
-call_external "forbidden domain" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@example.com'
 ```
 
-Expected for both paths:
+Expected:
 - HTTP `403`
 - JSON error: `code=FORBIDDEN_DOMAIN`, `message=Only hs.edu.hk accounts are allowed`
 
@@ -176,25 +164,22 @@ call_local "valid headers" \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
   -H 'X-Authenticated-Email: tester@hs.edu.hk'
 
-call_external "valid headers" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
 ```
 
-Expected for both paths:
+Expected:
 - Request is accepted by auth layer (must **not** return auth-specific `401/403` contracts above).
 - If non-auth failures appear (provider/network), investigate separately but do not classify as auth drift.
 
 ---
 
-## 6) OIDC Boundary-Specific Negative Checks (External Path)
+## 6) OIDC + Proxy-Hardening Checks (External Path)
 
-These checks ensure the reverse proxy/auth gateway is actually enforcing OIDC.
+These checks ensure the reverse proxy/auth gateway is enforcing OIDC and trusted-header injection.
 
 ### G. Missing OIDC bearer token (external only)
 
 ```bash
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/rewrite" \
+curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
   -H 'Content-Type: application/json' \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
   -H 'X-Authenticated-Email: tester@hs.edu.hk' \
@@ -208,7 +193,7 @@ Expected:
 ### H. Invalid/expired OIDC bearer token (external only)
 
 ```bash
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/rewrite" \
+curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer invalid-or-expired-token' \
   -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
@@ -220,24 +205,36 @@ Expected:
 - Rejected by gateway with unauthorized response.
 - Must not be treated as a valid authenticated call.
 
+### I. Spoofed trusted headers must not influence external outcome
+
+```bash
+# Deliberately send values that should be stripped/overwritten by proxy hardening.
+call_external "spoofed trusted headers" \
+  -H 'X-Bridge-Auth: wrong-secret' \
+  -H 'X-Authenticated-Email: attacker@example.com'
+```
+
+Expected:
+- Outcome must reflect gateway-injected trusted identity/secret, not caller-supplied spoofed headers.
+- Do **not** require this case to return backend `AUTH_REQUIRED`/`FORBIDDEN_DOMAIN`; hardened deployments typically strip/replace inbound header values before forwarding.
+- If this call behaves as if spoofed headers were trusted end-to-end, treat as proxy hardening failure and **BLOCK** rollout.
+
 ---
 
 ## 7) Drift Detection and Rollout Gate
 
 A rollout **must be blocked** if any of these is true:
 
-- Status code mismatch between local and external for scenarios A–F.
-- `error.code` mismatch between local and external for scenarios A–F.
-- `error.message` mismatch between local and external for scenarios A–F.
-- External OIDC negative checks (G/H) are not rejected at gateway boundary.
+- Any local scenario A–F fails backend contract checks.
+- External OIDC checks (G/H) are not rejected at gateway boundary.
+- External spoofing check (I) indicates caller-supplied `X-Bridge-Auth` / `X-Authenticated-Email` can drive backend auth decisions.
 
 Minimal manual gate checklist:
 
 ```text
-[ ] A–F local results captured
-[ ] A–F external results captured
-[ ] A–F parity confirmed (status + error.code + error.message)
-[ ] G/H rejected by OIDC gateway
+[ ] A–F local backend-contract results captured
+[ ] G/H rejected by OIDC gateway on `/api/rewrite-bridge/rewrite`
+[ ] I confirms proxy strips/overwrites spoofed trusted headers
 [ ] No auth contract drift detected
 ```
 
@@ -250,7 +247,6 @@ If any item fails: **STOP rollout**, file incident, and compare gateway header f
 Store evidence in CI artifact or change ticket:
 
 - Timestamp and environment identifier.
-- Sanitized command transcript for A–H.
+- Sanitized command transcript for A–I.
 - Per-scenario decision: `PASS` / `FAIL`.
 - Final gate verdict: `ROLL OUT` or `BLOCK`.
-
