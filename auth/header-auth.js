@@ -1,9 +1,28 @@
-function createRewriteHeaderAuth({ bridgeInternalAuthSecret, errorResponse }) {
+function createRewriteHeaderAuth({ bridgeInternalAuthSecret, errorResponse, onAuthFailure }) {
   return function rewriteHeaderAuth(req, res, next) {
+    const reject = (status, code, message) => {
+      if (typeof onAuthFailure === 'function') {
+        try {
+          onAuthFailure(req, { status, code, message });
+        } catch (error) {
+          console.warn(
+            JSON.stringify({
+              level: 'warn',
+              msg: 'rewrite auth failure logging callback failed',
+              code,
+              error: error && error.message ? error.message : 'unknown'
+            })
+          );
+        }
+      }
+
+      errorResponse(res, status, code, message);
+    };
+
     const trustHeader = (req.get('X-Bridge-Auth') || '').trim();
 
     if (!bridgeInternalAuthSecret || trustHeader !== bridgeInternalAuthSecret) {
-      errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+      reject(401, 'AUTH_REQUIRED', 'Login required');
       return;
     }
 
@@ -11,17 +30,17 @@ function createRewriteHeaderAuth({ bridgeInternalAuthSecret, errorResponse }) {
     const email = (rawHeader || '').trim().toLowerCase();
 
     if (!email) {
-      errorResponse(res, 401, 'AUTH_REQUIRED', 'Login required');
+      reject(401, 'AUTH_REQUIRED', 'Login required');
       return;
     }
 
     if (email.includes(',')) {
-      errorResponse(res, 401, 'AUTH_HEADER_INVALID', 'Invalid authentication header');
+      reject(401, 'AUTH_HEADER_INVALID', 'Invalid authentication header');
       return;
     }
 
     if (!email.endsWith('@hs.edu.hk')) {
-      errorResponse(res, 403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
+      reject(403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
       return;
     }
 
