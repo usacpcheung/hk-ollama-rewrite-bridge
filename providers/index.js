@@ -8,6 +8,8 @@ function createProvider({
   ollamaModel,
   ollamaKeepAlive,
   minimaxApiUrl,
+  minimaxApiStyle,
+  minimaxOpenaiBaseUrl,
   minimaxModel,
   minimaxApiKey,
   minimaxSystemPrompt,
@@ -25,6 +27,8 @@ function createProvider({
   if (provider === 'minimax') {
     return createMinimaxProvider({
       apiUrl: minimaxApiUrl,
+      apiStyle: minimaxApiStyle,
+      openaiBaseUrl: minimaxOpenaiBaseUrl,
       model: minimaxModel,
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,

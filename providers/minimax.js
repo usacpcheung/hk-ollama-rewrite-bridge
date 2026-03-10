@@ -1,12 +1,23 @@
 const { randomUUID } = require('crypto');
+const OpenAI = require('openai');
 
 function createMinimaxProvider({
   apiUrl,
+  apiStyle = 'legacy',
+  openaiBaseUrl = 'https://api.minimax.io/v1',
   model,
   apiKey,
   systemPrompt,
   userTemplate
 }) {
+  const resolvedApiStyle = apiStyle === 'openai_compatible' ? 'openai_compatible' : 'legacy';
+  const isOpenAiCompatibleStyle = resolvedApiStyle === 'openai_compatible';
+  const openaiClient = isOpenAiCompatibleStyle
+    ? new OpenAI({
+      apiKey,
+      baseURL: openaiBaseUrl
+    })
+    : null;
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
@@ -14,6 +25,10 @@ function createMinimaxProvider({
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    if (isOpenAiCompatibleStyle) {
+      return checkReadinessOpenaiCompatible({ timeoutMs, controller, timeout });
+    }
 
     try {
       const response = await fetch(apiUrl, {
@@ -90,6 +105,17 @@ function createMinimaxProvider({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+    if (isOpenAiCompatibleStyle) {
+      return generateOpenaiCompatible({
+        prompt,
+        runtimeSystemPrompt,
+        userContent,
+        maxTokens,
+        controller,
+        timeout
+      });
+    }
+
     try {
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -155,6 +181,18 @@ function createMinimaxProvider({
         await onChunk(event);
       }
     };
+
+    if (isOpenAiCompatibleStyle) {
+      return generateStreamOpenaiCompatible({
+        prompt,
+        runtimeSystemPrompt,
+        userContent,
+        maxTokens,
+        emit,
+        controller,
+        timeout
+      });
+    }
 
     try {
       const response = await fetch(apiUrl, {
@@ -332,6 +370,195 @@ function createMinimaxProvider({
     }
   }
 
+
+  async function checkReadinessOpenaiCompatible({ controller, timeout }) {
+    try {
+      await openaiClient.chat.completions.create(
+        {
+          model,
+          messages: buildMessages({
+            prompt: 'ping',
+            systemPrompt,
+            userContent: renderUserContent(userTemplate, 'ping')
+          }),
+          max_completion_tokens: 1,
+          stream: false
+        },
+        {
+          signal: controller.signal
+        }
+      );
+
+      return { ready: true, error: null };
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        return { ready: false, error: 'minimax_auth_failed' };
+      }
+
+      if (err?.name === 'AbortError') {
+        return { ready: false, error: 'minimax_readiness_timeout' };
+      }
+
+      if (typeof err?.status === 'number') {
+        return { ready: false, error: `minimax_readiness_http_${err.status}` };
+      }
+
+      return { ready: false, error: 'minimax_readiness_fetch_failed' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function generateOpenaiCompatible({
+    prompt,
+    runtimeSystemPrompt,
+    userContent,
+    maxTokens,
+    controller,
+    timeout
+  }) {
+    try {
+      const data = await openaiClient.chat.completions.create(
+        {
+          model,
+          messages: buildMessages({
+            prompt,
+            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+            userContent
+          }),
+          stream: false,
+          max_completion_tokens: maxTokens,
+          temperature: 0.15
+        },
+        {
+          signal: controller.signal
+        }
+      );
+
+      const responseText =
+        data?.reply ||
+        data?.choices?.[0]?.message?.content ||
+        data?.choices?.[0]?.text ||
+        '';
+
+      return { ok: true, data: { response: responseText } };
+    } catch (err) {
+      if (typeof err?.status === 'number') {
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: err.status })
+        };
+      }
+
+      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function generateStreamOpenaiCompatible({
+    prompt,
+    runtimeSystemPrompt,
+    userContent,
+    maxTokens,
+    emit,
+    controller,
+    timeout
+  }) {
+    let streamedText = '';
+    let finalCompletionEvent = null;
+    const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
+
+    const emitMappedChunk = async (chunk) => {
+      await emit({ type: 'chunk', chunk });
+    };
+
+    try {
+      const stream = await openaiClient.chat.completions.create(
+        {
+          model,
+          messages: buildMessages({
+            prompt,
+            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+            userContent
+          }),
+          stream: true,
+          max_completion_tokens: maxTokens,
+          temperature: 0.15
+        },
+        {
+          signal: controller.signal
+        }
+      );
+
+      for await (const eventData of stream) {
+        finalCompletionEvent = eventData;
+        const choice = eventData?.choices?.[0] || {};
+        const token = choice?.delta?.content || '';
+
+        if (token) {
+          streamedText += token;
+          await emitMappedChunk(buildMappedChunk({
+            id: streamId,
+            model,
+            response: token,
+            done: false
+          }));
+        }
+
+        if (choice?.finish_reason) {
+          await emitMappedChunk(buildMappedChunk({
+            id: streamId,
+            model,
+            response: '',
+            done: true,
+            doneReason: choice.finish_reason
+          }));
+        }
+      }
+
+      if (!streamedText) {
+        const finalMessage = finalCompletionEvent?.choices?.[0]?.message?.content || '';
+        if (finalMessage) {
+          streamedText = finalMessage;
+          await emitMappedChunk(buildMappedChunk({
+            id: streamId,
+            model,
+            response: finalMessage,
+            done: false
+          }));
+        }
+      }
+
+      await emit({
+        type: 'final',
+        response: streamedText,
+        usage: finalCompletionEvent?.usage || null,
+        completion: finalCompletionEvent || null
+      });
+
+      return {
+        ok: true,
+        data: {
+          response: streamedText,
+          usage: finalCompletionEvent?.usage || null,
+          completion: finalCompletionEvent || null
+        }
+      };
+    } catch (err) {
+      if (typeof err?.status === 'number') {
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: err.status })
+        };
+      }
+
+      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   function mapError(err, context = {}) {
     if (context.kind === 'http') {
       if (context.status === 401 || context.status === 403) {
@@ -381,6 +608,8 @@ function createMinimaxProvider({
     getInfo: () => ({
       provider: 'minimax',
       minimaxApiUrl: apiUrl,
+      minimaxApiStyle: resolvedApiStyle,
+      minimaxOpenaiBaseUrl: openaiBaseUrl,
       minimaxModel: model,
       minimaxApiKeySet: Boolean(apiKey),
       minimaxSystemPrompt: systemPrompt || null,

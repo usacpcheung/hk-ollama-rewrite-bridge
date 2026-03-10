@@ -138,6 +138,22 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
 
 
 const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
+const MINIMAX_API_STYLE_RAW = (process.env.MINIMAX_API_STYLE || 'legacy').trim().toLowerCase();
+const MINIMAX_API_STYLE =
+  MINIMAX_API_STYLE_RAW === 'legacy' || MINIMAX_API_STYLE_RAW === 'openai_compatible'
+    ? MINIMAX_API_STYLE_RAW
+    : 'legacy';
+if (MINIMAX_API_STYLE_RAW !== MINIMAX_API_STYLE) {
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: 'Invalid MINIMAX_API_STYLE; using default',
+      provided: process.env.MINIMAX_API_STYLE,
+      fallback: 'legacy'
+    })
+  );
+}
+const MINIMAX_OPENAI_BASE_URL = process.env.MINIMAX_OPENAI_BASE_URL || 'https://api.minimax.io/v1';
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
@@ -195,6 +211,8 @@ const provider = createProvider({
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
   minimaxApiUrl: MINIMAX_API_URL,
+  minimaxApiStyle: MINIMAX_API_STYLE,
+  minimaxOpenaiBaseUrl: MINIMAX_OPENAI_BASE_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
   minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
