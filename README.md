@@ -26,6 +26,8 @@ Server binds to `127.0.0.1:3001` only.
 
 All automated tests are centralized under `tests/` so they are easy to discover and run.
 
+- `tests/rewrite-validation.test.js`: validates input and body-parsing guards (`INVALID_INPUT`, `TOO_LONG`, `INVALID_JSON`).
+- `tests/rewrite-auth-parity.test.js`: validates auth and domain policy behavior for rewrite access control headers.
 - `tests/providers/ollama.test.js`: validates Ollama stream parsing/error handling for malformed or incomplete JSONL responses.
 - `tests/providers/minimax.test.js`: validates Minimax SSE frame normalization and done/fallback streaming behavior.
 
@@ -54,6 +56,7 @@ Tune runtime behavior without code changes:
 | `WARMUP_RETRY_AFTER_SEC` | auto `2-3` | Optional override for `Retry-After` in warming `202` responses. |
 | `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Timeout (ms) for each warm-up trigger call; higher helps cold loads complete on tiny VPS. |
 | `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Cooldown window (ms) before another warm-up trigger is allowed; recommend `5000-15000` (max `120000`). |
+| `READY_REWRITE_STRICT_PROBE_MAX_AGE_MS` | `min(1000, OLLAMA_PS_CACHE_MS)` | When service state is `ready`, forces a fresh Ollama readiness probe if cached probe age exceeds this limit. Helps avoid stale-ready rewrites after upstream restarts. |
 | `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. |
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
