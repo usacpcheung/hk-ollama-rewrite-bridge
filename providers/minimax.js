@@ -14,6 +14,7 @@ function createMinimaxProvider({
   const resolvedApiKey = process.env.MINIMAX_API_KEY || apiKey;
   const resolvedApiStyle = apiStyle === 'openai_compatible' ? 'openai_compatible' : 'legacy';
   const isOpenAiCompatibleStyle = resolvedApiStyle === 'openai_compatible';
+  const openaiReasoningBody = isOpenAiCompatibleStyle ? { reasoning_split: true } : null;
   const openaiClient = new OpenAI({
     apiKey: resolvedApiKey,
     baseURL: resolvedOpenaiBaseUrl
@@ -116,7 +117,8 @@ function createMinimaxProvider({
           }),
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.15
+          temperature: 0.15,
+          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
         },
         {
           signal: controller.signal
@@ -361,7 +363,8 @@ function createMinimaxProvider({
             userContent: renderUserContent(userTemplate, 'ping')
           }),
           max_completion_tokens: 1,
-          stream: false
+          stream: false,
+          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
         },
         {
           signal: controller.signal
@@ -407,7 +410,8 @@ function createMinimaxProvider({
           }),
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.15
+          temperature: 0.15,
+          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
         },
         {
           signal: controller.signal
@@ -480,7 +484,8 @@ function createMinimaxProvider({
           }),
           stream: true,
           max_completion_tokens: maxTokens,
-          temperature: 0.15
+          temperature: 0.15,
+          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
         },
         {
           signal: controller.signal
