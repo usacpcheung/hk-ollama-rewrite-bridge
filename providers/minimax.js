@@ -10,16 +10,16 @@ function createMinimaxProvider({
   systemPrompt,
   userTemplate
 }) {
+  const resolvedOpenaiBaseUrl = process.env.MINIMAX_OPENAI_BASE_URL || openaiBaseUrl;
+  const resolvedApiKey = process.env.MINIMAX_API_KEY || apiKey;
   const resolvedApiStyle = apiStyle === 'openai_compatible' ? 'openai_compatible' : 'legacy';
   const isOpenAiCompatibleStyle = resolvedApiStyle === 'openai_compatible';
-  const openaiClient = isOpenAiCompatibleStyle
-    ? new OpenAI({
-      apiKey,
-      baseURL: openaiBaseUrl
-    })
-    : null;
+  const openaiClient = new OpenAI({
+    apiKey: resolvedApiKey,
+    baseURL: resolvedOpenaiBaseUrl
+  });
   async function checkReadiness({ timeoutMs }) {
-    if (!apiKey) {
+    if (!resolvedApiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
     }
 
@@ -35,7 +35,7 @@ function createMinimaxProvider({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${resolvedApiKey}`
         },
         body: JSON.stringify({
           model,
@@ -105,25 +105,9 @@ function createMinimaxProvider({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (isOpenAiCompatibleStyle) {
-      return generateOpenaiCompatible({
-        prompt,
-        runtimeSystemPrompt,
-        userContent,
-        maxTokens,
-        controller,
-        timeout
-      });
-    }
-
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
+      const data = await openaiClient.chat.completions.create(
+        {
           model,
           messages: buildMessages({
             prompt,
@@ -133,23 +117,11 @@ function createMinimaxProvider({
           stream: false,
           max_completion_tokens: maxTokens,
           temperature: 0.15
-        }),
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
-      }
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (_err) {
-        return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
-      }
+        },
+        {
+          signal: controller.signal
+        }
+      );
 
       const responseText =
         data?.reply ||
@@ -159,6 +131,13 @@ function createMinimaxProvider({
 
       return { ok: true, data: { response: responseText } };
     } catch (err) {
+      if (typeof err?.status === 'number') {
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: err.status })
+        };
+      }
+
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
       clearTimeout(timeout);
@@ -199,7 +178,7 @@ function createMinimaxProvider({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${resolvedApiKey}`
         },
         body: JSON.stringify({
           model,
@@ -467,10 +446,27 @@ function createMinimaxProvider({
   }) {
     let streamedText = '';
     let finalCompletionEvent = null;
+    let finalMessageContent = '';
+    let doneEventEmitted = false;
     const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
 
     const emitMappedChunk = async (chunk) => {
       await emit({ type: 'chunk', chunk });
+    };
+
+    const emitDone = async (reason) => {
+      if (doneEventEmitted) {
+        return;
+      }
+
+      doneEventEmitted = true;
+      await emitMappedChunk(buildMappedChunk({
+        id: streamId,
+        model,
+        response: '',
+        done: true,
+        doneReason: reason || 'stop'
+      }));
     };
 
     try {
@@ -496,6 +492,10 @@ function createMinimaxProvider({
         const choice = eventData?.choices?.[0] || {};
         const token = choice?.delta?.content || '';
 
+        if (typeof choice?.message?.content === 'string' && choice.message.content.length > 0) {
+          finalMessageContent = choice.message.content;
+        }
+
         if (token) {
           streamedText += token;
           await emitMappedChunk(buildMappedChunk({
@@ -507,32 +507,29 @@ function createMinimaxProvider({
         }
 
         if (choice?.finish_reason) {
-          await emitMappedChunk(buildMappedChunk({
-            id: streamId,
-            model,
-            response: '',
-            done: true,
-            doneReason: choice.finish_reason
-          }));
+          await emitDone(choice.finish_reason);
         }
       }
 
-      if (!streamedText) {
-        const finalMessage = finalCompletionEvent?.choices?.[0]?.message?.content || '';
-        if (finalMessage) {
-          streamedText = finalMessage;
-          await emitMappedChunk(buildMappedChunk({
-            id: streamId,
-            model,
-            response: finalMessage,
-            done: false
-          }));
-        }
+      const finalResponseText =
+        streamedText ||
+        finalMessageContent ||
+        finalCompletionEvent?.choices?.[0]?.message?.content ||
+        '';
+
+      if (!streamedText && finalResponseText && !doneEventEmitted) {
+        await emitMappedChunk(buildMappedChunk({
+          id: streamId,
+          model,
+          response: finalResponseText,
+          done: false
+        }));
       }
 
+      await emitDone('stop');
       await emit({
         type: 'final',
-        response: streamedText,
+        response: finalResponseText,
         usage: finalCompletionEvent?.usage || null,
         completion: finalCompletionEvent || null
       });
@@ -540,7 +537,7 @@ function createMinimaxProvider({
       return {
         ok: true,
         data: {
-          response: streamedText,
+          response: finalResponseText,
           usage: finalCompletionEvent?.usage || null,
           completion: finalCompletionEvent || null
         }
@@ -609,9 +606,9 @@ function createMinimaxProvider({
       provider: 'minimax',
       minimaxApiUrl: apiUrl,
       minimaxApiStyle: resolvedApiStyle,
-      minimaxOpenaiBaseUrl: openaiBaseUrl,
+      minimaxOpenaiBaseUrl: resolvedOpenaiBaseUrl,
       minimaxModel: model,
-      minimaxApiKeySet: Boolean(apiKey),
+      minimaxApiKeySet: Boolean(resolvedApiKey),
       minimaxSystemPrompt: systemPrompt || null,
       minimaxUserTemplate: userTemplate || null
     })
