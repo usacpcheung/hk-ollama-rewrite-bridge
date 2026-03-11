@@ -96,6 +96,11 @@ const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAUL
   max: ABSOLUTE_MAX_TEXT_LENGTH
 });
 
+const REWRITE_MAX_OUTPUT_TOKENS = parseEnvBoundedInteger('REWRITE_MAX_OUTPUT_TOKENS', 3000, {
+  min: 1,
+  max: 32768
+});
+
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
   max: 600_000
@@ -221,6 +226,7 @@ const provider = createProvider({
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+  rewriteMaxTokens: REWRITE_MAX_OUTPUT_TOKENS,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,

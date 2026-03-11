@@ -5,7 +5,8 @@ function createMinimaxProvider({
   model,
   apiKey,
   systemPrompt,
-  userTemplate
+  userTemplate,
+  rewriteMaxTokens = 3000
 }) {
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
@@ -71,7 +72,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300
+      maxTokens: rewriteMaxTokens
     });
   }
 
@@ -81,7 +82,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300,
+      maxTokens: rewriteMaxTokens,
       onChunk
     });
   }

@@ -67,3 +67,33 @@ test('rewriteStream fails with invalid_json when stream ends without done frame'
   assert.equal(result.error.code, 'OLLAMA_ERROR');
   assert.equal(result.error.message, 'Invalid model response');
 });
+
+
+test('rewrite uses configurable rewriteMaxTokens for num_predict', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedBody = null;
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ response: 'ok' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  const provider = createOllamaProvider({
+    generateUrl: 'http://ollama.test/api/generate',
+    psUrl: 'http://ollama.test/api/ps',
+    model: 'qwen2.5:3b-instruct',
+    keepAlive: '30m',
+    rewriteMaxTokens: 4096
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, true);
+  assert.equal(capturedBody.options.num_predict, 4096);
+});
