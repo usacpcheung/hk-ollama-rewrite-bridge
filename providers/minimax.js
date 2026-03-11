@@ -54,12 +54,12 @@ function stripThinkSegments(text) {
   return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
-function extractCompletionArtifacts({ completion, streamAccumulation = '' }) {
+function extractCompletionArtifacts({ completion, streamAccumulation = '', streamReasoningDetails = null }) {
   const choice = completion?.choices?.[0] || {};
   const normalizedContent = normalizeCompletionMessageContent(choice?.message?.content);
-  const reasoningDetails = Array.isArray(choice?.message?.reasoning_details)
-    ? choice.message.reasoning_details
-    : [];
+  const reasoningDetails = Array.isArray(streamReasoningDetails) && streamReasoningDetails.length > 0
+    ? streamReasoningDetails
+    : (Array.isArray(choice?.message?.reasoning_details) ? choice.message.reasoning_details : []);
   const shouldStripThink = reasoningDetails.length > 0;
   const normalizedAnswer = shouldStripThink ? stripThinkSegments(normalizedContent) : normalizedContent;
 
@@ -602,6 +602,7 @@ function createMinimaxProvider({
     let finalCompletionEvent = null;
     let finalMessageContent = '';
     let doneEventEmitted = false;
+    const streamReasoningDetails = [];
     const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
 
     const emitMappedChunk = async (chunk) => {
@@ -662,6 +663,10 @@ function createMinimaxProvider({
           }));
         }
 
+        if (Array.isArray(choice?.delta?.reasoning_details) && choice.delta.reasoning_details.length > 0) {
+          streamReasoningDetails.push(...choice.delta.reasoning_details);
+        }
+
         if (choice?.finish_reason) {
           await emitDone(choice.finish_reason);
         }
@@ -680,7 +685,8 @@ function createMinimaxProvider({
 
       const extracted = extractCompletionArtifacts({
         completion: finalCompletionEvent,
-        streamAccumulation: streamedText || finalMessageContent || ''
+        streamAccumulation: streamedText || finalMessageContent || '',
+        streamReasoningDetails
       });
       const finalResponseText = extracted.response;
 

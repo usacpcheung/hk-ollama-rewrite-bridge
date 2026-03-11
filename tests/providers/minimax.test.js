@@ -400,10 +400,10 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive'
         });
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書' }, finish_reason: null }] })}
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理1' }] }, finish_reason: null }] })}
 
 `);
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '面' }, finish_reason: null }] })}
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '面', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理2' }] }, finish_reason: null }] })}
 
 `);
         res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}
@@ -461,7 +461,8 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
   assert.equal(streamResult.ok, true);
   assert.equal(streamResult.data.response, '書面');
   assert.equal(streamResult.data.reasoning.splitRequested, true);
-  assert.equal(typeof streamResult.data.reasoning.splitAvailable, 'boolean');
+  assert.equal(streamResult.data.reasoning.splitAvailable, true);
+  assert.equal(streamResult.data.reasoning.detailsCount, 2);
 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].stream, false);
