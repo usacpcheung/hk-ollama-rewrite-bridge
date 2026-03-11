@@ -292,3 +292,167 @@ test('rewrite uses OpenAI client path when apiStyle is openai_compatible', async
   assert.equal(openaiCalls, 1);
   assert.equal(legacyCalls, 0);
 });
+
+
+test('regression: legacy-routing bug - rewrite(legacy) sends expected payload to legacy endpoint and extracts response', async (t) => {
+  let legacyRequestBody = null;
+  const legacyServer = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      legacyRequestBody = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        choices: [{ message: { content: '正式中文結果' } }],
+        usage: { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 }
+      }));
+    });
+  });
+  await new Promise((resolve) => legacyServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => legacyServer.close());
+
+  const legacyAddress = legacyServer.address();
+  const provider = createMinimaxProvider({
+    apiUrl: `http://127.0.0.1:${legacyAddress.port}/v1/text/chatcompletion_v2`,
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    apiStyle: 'legacy',
+    systemPrompt: '你是改寫助手'
+  });
+
+  const result = await provider.rewrite({
+    prompt: '原文提示',
+    userContent: '原文：我聽日請假',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '正式中文結果');
+  assert.deepEqual(result.data.usage, { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 });
+
+  assert.equal(legacyRequestBody.model, 'MiniMax-Text-01');
+  assert.equal(legacyRequestBody.max_completion_tokens, 5000);
+  assert.deepEqual(legacyRequestBody.messages, [
+    { role: 'system', content: '你是改寫助手' },
+    { role: 'user', content: '原文：我聽日請假' }
+  ]);
+});
+
+test('matrix: rewriteStream(legacy) preserves SSE parsing and done-chunk behavior', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(createSseStream([
+    JSON.stringify({ choices: [{ delta: { content: '正' }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ delta: { content: '式' }, finish_reason: null }] }),
+    JSON.stringify({ object: 'chat.completion', choices: [{ message: { content: '正式' }, finish_reason: 'stop' }] }),
+    '[DONE]'
+  ]), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    apiStyle: 'legacy'
+  });
+
+  const events = [];
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async (event) => events.push(event)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '正式');
+
+  const chunkEvents = events.filter((event) => event.type === 'chunk');
+  assert.equal(chunkEvents.length, 3);
+  assert.equal(chunkEvents[0].chunk.response, '正');
+  assert.equal(chunkEvents[1].chunk.response, '式');
+  assert.equal(chunkEvents[2].chunk.done, true);
+});
+
+test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible endpoint', async (t) => {
+  const requestBodies = [];
+  const openaiServer = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const parsed = JSON.parse(raw || '{}');
+      requestBodies.push(parsed);
+
+      if (parsed.stream) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive'
+        });
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書' }, finish_reason: null }] })}
+
+`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '面' }, finish_reason: null }] })}
+
+`);
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}
+
+`);
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'chatcmpl-openai-sync',
+        choices: [{ message: { content: '書面中文' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }
+      }));
+    });
+  });
+  await new Promise((resolve) => openaiServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => openaiServer.close());
+
+  const openaiAddress = openaiServer.address();
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://127.0.0.1:9/v1/text/chatcompletion_v2',
+    openaiBaseUrl: `http://127.0.0.1:${openaiAddress.port}`,
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    apiStyle: 'openai_compatible'
+  });
+
+  const syncResult = await provider.rewrite({
+    prompt: 'sync prompt',
+    timeoutMs: 5_000
+  });
+  assert.equal(syncResult.ok, true);
+  assert.equal(syncResult.data.response, '書面中文');
+
+  const streamEvents = [];
+  const streamResult = await provider.rewriteStream({
+    prompt: 'stream prompt',
+    timeoutMs: 5_000,
+    onChunk: async (event) => streamEvents.push(event)
+  });
+  assert.equal(streamResult.ok, true);
+  assert.equal(streamResult.data.response, '書面');
+
+  assert.equal(requestBodies.length, 2);
+  assert.equal(requestBodies[0].stream, false);
+  assert.equal(requestBodies[1].stream, true);
+
+  const streamChunkEvents = streamEvents.filter((event) => event.type === 'chunk');
+  assert.equal(streamChunkEvents.length, 3);
+  assert.equal(streamChunkEvents[0].chunk.response, '書');
+  assert.equal(streamChunkEvents[1].chunk.response, '面');
+  assert.equal(streamChunkEvents[2].chunk.done, true);
+});
