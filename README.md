@@ -62,7 +62,7 @@ Tune runtime behavior without code changes:
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
 | `REWRITE_MAX_OUTPUT_TOKENS` | `3000` | Global rewrite output-token cap (`num_predict` for Ollama). Values outside valid range fall back to default. |
-| `MINIMAX_MAX_OUTPUT_TOKENS` | `300` (or lower if `REWRITE_MAX_OUTPUT_TOKENS` is lower) | Minimax rewrite `max_completion_tokens` cap. Defaults conservatively for Minimax compatibility and remains configurable. |
+| `MINIMAX_MAX_OUTPUT_TOKENS` | `3000` (inherits `REWRITE_MAX_OUTPUT_TOKENS`) | Minimax rewrite `max_completion_tokens` cap. Set this key to override Minimax independently when needed. |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
 | `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable debug logging of raw provider rewrite output (pre-OpenCC conversion) to stdout/stderr so it appears in systemd journal. |
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
