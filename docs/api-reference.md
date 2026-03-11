@@ -84,6 +84,8 @@ In Minimax mode, the bridge sends a role-split payload:
 
 If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
 
+`max_completion_tokens` defaults to `5000` and can be configured with env `MINIMAX_MAX_COMPLETION_TOKENS`.
+
 ### Debug raw payload gate
 
 `POST /rewrite` supports an internal diagnostics mode for provider raw-shape visibility.

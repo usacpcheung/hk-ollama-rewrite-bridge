@@ -13,7 +13,8 @@ function createProvider({
   minimaxModel,
   minimaxApiKey,
   minimaxSystemPrompt,
-  minimaxUserTemplate
+  minimaxUserTemplate,
+  minimaxMaxCompletionTokens
 }) {
   if (provider === 'ollama') {
     return createOllamaProvider({
@@ -32,7 +33,8 @@ function createProvider({
       model: minimaxModel,
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
-      userTemplate: minimaxUserTemplate
+      userTemplate: minimaxUserTemplate,
+      maxCompletionTokens: minimaxMaxCompletionTokens
     });
   }
 

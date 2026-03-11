@@ -24,13 +24,17 @@ function createMinimaxProvider({
   model,
   apiKey,
   systemPrompt,
-  userTemplate
+  userTemplate,
+  maxCompletionTokens = 5000
 }) {
   const resolvedOpenaiBaseUrl = process.env.MINIMAX_OPENAI_BASE_URL || openaiBaseUrl;
   const resolvedApiKey = process.env.MINIMAX_API_KEY || apiKey;
   const resolvedApiStyle = apiStyle === 'openai_compatible' ? 'openai_compatible' : 'legacy';
   const isOpenAiCompatibleStyle = resolvedApiStyle === 'openai_compatible';
   const openaiReasoningBody = isOpenAiCompatibleStyle ? { reasoning_split: true } : null;
+  const resolvedMaxCompletionTokens = Number.isInteger(maxCompletionTokens) && maxCompletionTokens > 0
+    ? maxCompletionTokens
+    : 5000;
   const openaiClient = new OpenAI({
     apiKey: resolvedApiKey,
     baseURL: resolvedOpenaiBaseUrl
@@ -103,7 +107,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300
+      maxTokens: resolvedMaxCompletionTokens
     });
   }
 
@@ -113,7 +117,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300,
+      maxTokens: resolvedMaxCompletionTokens,
       onChunk
     });
   }
@@ -677,7 +681,8 @@ function createMinimaxProvider({
       minimaxModel: model,
       minimaxApiKeySet: Boolean(resolvedApiKey),
       minimaxSystemPrompt: systemPrompt || null,
-      minimaxUserTemplate: userTemplate || null
+      minimaxUserTemplate: userTemplate || null,
+      minimaxMaxCompletionTokens: resolvedMaxCompletionTokens
     })
   };
 }

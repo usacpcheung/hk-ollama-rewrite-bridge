@@ -158,6 +158,10 @@ if (MINIMAX_API_STYLE_RAW !== MINIMAX_API_STYLE) {
 const MINIMAX_OPENAI_BASE_URL = process.env.MINIMAX_OPENAI_BASE_URL || 'https://api.minimax.io/v1';
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
+const MINIMAX_MAX_COMPLETION_TOKENS = parseEnvBoundedInteger('MINIMAX_MAX_COMPLETION_TOKENS', 5000, {
+  min: 1,
+  max: 32_000
+});
 
 const REWRITE_SYSTEM_PROMPT = process.env.REWRITE_SYSTEM_PROMPT ||
   '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
@@ -251,7 +255,8 @@ const provider = createProvider({
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
   minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
-  minimaxUserTemplate: MINIMAX_USER_TEMPLATE
+  minimaxUserTemplate: MINIMAX_USER_TEMPLATE,
+  minimaxMaxCompletionTokens: MINIMAX_MAX_COMPLETION_TOKENS
 });
 
 let modelPhase = 'unknown';
@@ -1019,7 +1024,8 @@ app.listen(PORT, HOST, () => {
       minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
       minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
       minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
-      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
+      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
+      minimaxMaxCompletionTokens: MINIMAX_MAX_COMPLETION_TOKENS
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);

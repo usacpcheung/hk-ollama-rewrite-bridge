@@ -65,6 +65,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
+| `MINIMAX_MAX_COMPLETION_TOKENS` | `5000` | Max completion token budget sent to Minimax rewrite calls (`max_completion_tokens`). Tune down/up as needed (1-32000). |
 | `REWRITE_DEBUG_RAW_RESPONSE` | `false` | Allows request-scoped debug payloads on `/rewrite` when client sends `X-Debug-Raw: 1`. Keep disabled for public production traffic. |
 | `MINIMAX_DEBUG_RAW_LOG` | `false` | Emits structured per-call/per-stream Minimax raw-shape metadata logs (lengths/types only; no API keys/full user text). |
 | `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
