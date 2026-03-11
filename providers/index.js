@@ -8,6 +8,7 @@ function createProvider({
   ollamaModel,
   ollamaKeepAlive,
   rewriteMaxTokens,
+  minimaxMaxTokens,
   minimaxApiUrl,
   minimaxModel,
   minimaxApiKey,
@@ -31,7 +32,7 @@ function createProvider({
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
       userTemplate: minimaxUserTemplate,
-      rewriteMaxTokens
+      rewriteMaxTokens: minimaxMaxTokens
     });
   }
 

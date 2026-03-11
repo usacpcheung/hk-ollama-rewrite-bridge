@@ -101,6 +101,12 @@ const REWRITE_MAX_OUTPUT_TOKENS = parseEnvBoundedInteger('REWRITE_MAX_OUTPUT_TOK
   max: 32768
 });
 
+const MINIMAX_MAX_OUTPUT_TOKENS = parseEnvBoundedInteger(
+  'MINIMAX_MAX_OUTPUT_TOKENS',
+  Math.min(REWRITE_MAX_OUTPUT_TOKENS, 300),
+  { min: 1, max: 4096 }
+);
+
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
   max: 600_000
@@ -227,6 +233,7 @@ const provider = createProvider({
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
   rewriteMaxTokens: REWRITE_MAX_OUTPUT_TOKENS,
+  minimaxMaxTokens: MINIMAX_MAX_OUTPUT_TOKENS,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,

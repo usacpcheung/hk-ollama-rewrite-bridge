@@ -54,7 +54,8 @@ journalctl -u rewrite-bridge -n 200 --no-pager | rg "Raw provider rewrite output
 ```
 
 - `text` (required): string, trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters (default 200; capped at 600).
-- Output token cap: `REWRITE_MAX_OUTPUT_TOKENS` controls rewrite max completion tokens (default 3000; used as Ollama `num_predict` and Minimax `max_completion_tokens`).
+- Output token cap (Ollama/global): `REWRITE_MAX_OUTPUT_TOKENS` (default 3000) sets Ollama `num_predict`.
+- Output token cap (Minimax): `MINIMAX_MAX_OUTPUT_TOKENS` (default 300, or lower if `REWRITE_MAX_OUTPUT_TOKENS` is lower) sets Minimax `max_completion_tokens` for compatibility.
 - `stream` (optional): supports `true`, `"true"`, `1`, `"1"` to enable NDJSON streaming.
 
 ### Calling methods
