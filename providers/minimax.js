@@ -128,7 +128,7 @@ function createMinimaxProvider({
 
       const responseText =
         data?.reply ||
-        data?.choices?.[0]?.message?.content ||
+        extractTextContent(data?.choices?.[0]?.message?.content) ||
         data?.choices?.[0]?.text ||
         '';
 
@@ -296,7 +296,7 @@ function createMinimaxProvider({
       const finalResponseText =
         finalCompletionEvent?.reply ||
         finalMessageContent ||
-        finalCompletionEvent?.choices?.[0]?.message?.content ||
+        extractTextContent(finalCompletionEvent?.choices?.[0]?.message?.content) ||
         finalCompletionEvent?.choices?.[0]?.text ||
         streamedText ||
         '';
@@ -402,6 +402,48 @@ function buildMappedChunk({ id, model, response, done, doneReason }) {
   };
 }
 
+function extractTextContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((entry) => {
+        if (typeof entry === 'string') {
+          return entry;
+        }
+
+        if (!entry || typeof entry !== 'object') {
+          return '';
+        }
+
+        if (typeof entry.text === 'string') {
+          return entry.text;
+        }
+
+        if (typeof entry.content === 'string') {
+          return entry.content;
+        }
+
+        return '';
+      })
+      .join('');
+  }
+
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') {
+      return content.text;
+    }
+
+    if (typeof content.content === 'string') {
+      return content.content;
+    }
+  }
+
+  return '';
+}
+
 function parseMinimaxSseFrame(payload) {
   let eventData;
   try {
@@ -412,9 +454,9 @@ function parseMinimaxSseFrame(payload) {
 
   const completion = eventData?.object === 'chat.completion' ? eventData : null;
   const choice = eventData?.choices?.[0] || {};
-  const deltaText = choice?.delta?.content;
+  const deltaText = extractTextContent(choice?.delta?.content);
   const finishReason = choice?.finish_reason;
-  const finalMessageContent = choice?.message?.content;
+  const finalMessageContent = extractTextContent(choice?.message?.content);
 
   if (typeof deltaText === 'string' && deltaText.length > 0) {
     return {
@@ -432,7 +474,7 @@ function parseMinimaxSseFrame(payload) {
     };
   }
 
-  if (typeof finalMessageContent === 'string' && finalMessageContent.length > 0) {
+  if (finalMessageContent.length > 0) {
     return {
       completion,
       finalMessageContent,
@@ -477,6 +519,7 @@ function buildMessages({ prompt, systemPrompt, userContent }) {
 module.exports = {
   createMinimaxProvider,
   parseMinimaxSseFrame,
+  extractTextContent,
   buildMappedChunk,
   buildMessages,
   renderUserContent

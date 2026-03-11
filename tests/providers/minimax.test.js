@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createMinimaxProvider, parseMinimaxSseFrame } = require('../../providers/minimax');
+const { createMinimaxProvider, parseMinimaxSseFrame, extractTextContent } = require('../../providers/minimax');
 
 function createSseStream(frames) {
   const encoder = new TextEncoder();
@@ -203,4 +203,52 @@ test('rewrite uses configurable rewriteMaxTokens for max_completion_tokens', asy
 
   assert.equal(result.ok, true);
   assert.equal(capturedBody.max_completion_tokens, 4096);
+});
+
+
+test('extractTextContent handles array/object structured content', () => {
+  assert.equal(extractTextContent([{ text: '你' }, { text: '好' }]), '你好');
+  assert.equal(extractTextContent({ text: '測試' }), '測試');
+});
+
+test('rewrite reads structured message content from non-stream response', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: [{ text: '正式' }, { text: '中文' }] } }]
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({
+    prompt: 'legacy prompt',
+    userContent: '原文：測試內容',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '正式中文');
+});
+
+test('parseMinimaxSseFrame supports structured delta content', () => {
+  const payload = JSON.stringify({
+    object: 'chat.completion.chunk',
+    choices: [{ delta: { content: [{ text: '你' }, { text: '好' }] }, finish_reason: null }]
+  });
+
+  const parsed = parseMinimaxSseFrame(payload);
+
+  assert.ok(parsed);
+  assert.equal(parsed.chunk.response, '你好');
+  assert.equal(parsed.chunk.done, false);
 });
