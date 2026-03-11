@@ -44,6 +44,15 @@ Example journal check:
 journalctl -u rewrite-bridge -n 200 --no-pager | rg "Raw provider rewrite output"
 ```
 
+### Runtime token-limit configuration
+
+- `REWRITE_MAX_COMPLETION_TOKENS` controls provider output token budget for both `stream=false` and `stream=true` rewrite paths.
+- Default: `300`.
+- Validation: must be a positive integer in range `1-8192`; empty/invalid/out-of-range values are ignored and default is used.
+- Provider mapping:
+  - Ollama: forwarded as `options.num_predict`.
+  - Minimax: forwarded as `max_completion_tokens`.
+
 ### Request body
 
 ```json

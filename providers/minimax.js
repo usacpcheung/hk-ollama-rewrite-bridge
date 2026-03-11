@@ -5,7 +5,8 @@ function createMinimaxProvider({
   model,
   apiKey,
   systemPrompt,
-  userTemplate
+  userTemplate,
+  maxCompletionTokens = 300
 }) {
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
@@ -71,7 +72,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300
+      maxTokens: maxCompletionTokens
     });
   }
 
@@ -81,7 +82,7 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300,
+      maxTokens: maxCompletionTokens,
       onChunk
     });
   }

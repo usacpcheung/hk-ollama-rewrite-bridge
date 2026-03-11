@@ -171,3 +171,67 @@ test('rewriteStream falls back to single user message when system prompt is miss
     { role: 'user', content: '原文：測試內容' }
   ]);
 });
+
+
+test('rewrite uses configured max_completion_tokens', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedBody = null;
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ reply: 'ok' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    maxCompletionTokens: 512
+  });
+
+  const result = await provider.rewrite({
+    prompt: 'test',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(capturedBody.max_completion_tokens, 512);
+});
+
+test('rewriteStream uses configured max_completion_tokens', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedBody = null;
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(createSseStream(['[DONE]']), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    maxCompletionTokens: 640
+  });
+
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(capturedBody.max_completion_tokens, 640);
+});

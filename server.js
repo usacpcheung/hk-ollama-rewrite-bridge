@@ -9,6 +9,8 @@ const HOST = '127.0.0.1';
 const PORT = 3001;
 const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 600;
+const DEFAULT_MAX_COMPLETION_TOKENS = 300;
+const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
@@ -95,6 +97,14 @@ const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAUL
   min: 1,
   max: ABSOLUTE_MAX_TEXT_LENGTH
 });
+const REWRITE_MAX_COMPLETION_TOKENS = parseEnvBoundedInteger(
+  'REWRITE_MAX_COMPLETION_TOKENS',
+  DEFAULT_MAX_COMPLETION_TOKENS,
+  {
+    min: 1,
+    max: ABSOLUTE_MAX_COMPLETION_TOKENS
+  }
+);
 
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
@@ -221,6 +231,7 @@ const provider = createProvider({
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+  rewriteMaxCompletionTokens: REWRITE_MAX_COMPLETION_TOKENS,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,

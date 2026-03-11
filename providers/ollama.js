@@ -2,7 +2,8 @@ function createOllamaProvider({
   generateUrl,
   psUrl,
   model,
-  keepAlive
+  keepAlive,
+  maxCompletionTokens = 300
 }) {
   async function checkReadiness({ timeoutMs }) {
     const controller = new AbortController();
@@ -57,7 +58,7 @@ function createOllamaProvider({
       timeoutMs,
       options: {
         temperature: 0.15,
-        num_predict: 300
+        num_predict: maxCompletionTokens
       }
     });
   }
@@ -68,7 +69,7 @@ function createOllamaProvider({
       timeoutMs,
       options: {
         temperature: 0.15,
-        num_predict: 300
+        num_predict: maxCompletionTokens
       },
       onChunk
     });
