@@ -334,6 +334,7 @@ test('regression: legacy-routing bug - rewrite(legacy) sends expected payload to
 
   assert.equal(legacyRequestBody.model, 'MiniMax-Text-01');
   assert.equal(legacyRequestBody.max_completion_tokens, 5000);
+  assert.equal('extra_body' in legacyRequestBody, false);
   assert.deepEqual(legacyRequestBody.messages, [
     { role: 'system', content: '你是改寫助手' },
     { role: 'user', content: '原文：我聽日請假' }
@@ -449,6 +450,8 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].stream, false);
   assert.equal(requestBodies[1].stream, true);
+  assert.deepEqual(requestBodies[0].extra_body, { reasoning_split: true });
+  assert.deepEqual(requestBodies[1].extra_body, { reasoning_split: true });
 
   const streamChunkEvents = streamEvents.filter((event) => event.type === 'chunk');
   assert.equal(streamChunkEvents.length, 3);

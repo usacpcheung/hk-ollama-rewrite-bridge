@@ -31,7 +31,6 @@ function createMinimaxProvider({
   const resolvedApiKey = process.env.MINIMAX_API_KEY || apiKey;
   const resolvedApiStyle = apiStyle === 'openai_compatible' ? 'openai_compatible' : 'legacy';
   const isOpenAiCompatibleStyle = resolvedApiStyle === 'openai_compatible';
-  const openaiReasoningBody = isOpenAiCompatibleStyle ? { reasoning_split: true } : null;
   const resolvedMaxCompletionTokens = Number.isInteger(maxCompletionTokens) && maxCompletionTokens > 0
     ? maxCompletionTokens
     : 5000;
@@ -39,6 +38,35 @@ function createMinimaxProvider({
     apiKey: resolvedApiKey,
     baseURL: resolvedOpenaiBaseUrl
   });
+  function buildOpenaiCompatibleRequestOptions(payload = {}) {
+    return {
+      ...payload,
+      extra_body: {
+        reasoning_split: true
+      }
+    };
+  }
+
+  function buildLegacyRequestPayload({
+    prompt,
+    runtimeSystemPrompt,
+    userContent,
+    maxTokens,
+    stream
+  }) {
+    return {
+      model,
+      messages: buildMessages({
+        prompt,
+        systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+        userContent
+      }),
+      stream,
+      max_completion_tokens: maxTokens,
+      temperature: 0.15
+    };
+  }
+
   async function checkReadiness({ timeoutMs }) {
     if (!resolvedApiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
@@ -144,17 +172,13 @@ function createMinimaxProvider({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${resolvedApiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt,
-            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
-            userContent
-          }),
-          stream: false,
-          max_completion_tokens: maxTokens,
-          temperature: 0.15
-        }),
+        body: JSON.stringify(buildLegacyRequestPayload({
+          prompt,
+          runtimeSystemPrompt,
+          userContent,
+          maxTokens,
+          stream: false
+        })),
         signal: controller.signal
       });
 
@@ -228,17 +252,13 @@ function createMinimaxProvider({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${resolvedApiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt,
-            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
-            userContent
-          }),
-          stream: true,
-          max_completion_tokens: maxTokens,
-          temperature: 0.15
-        }),
+        body: JSON.stringify(buildLegacyRequestPayload({
+          prompt,
+          runtimeSystemPrompt,
+          userContent,
+          maxTokens,
+          stream: true
+        })),
         signal: controller.signal
       });
 
@@ -401,7 +421,7 @@ function createMinimaxProvider({
   async function checkReadinessOpenaiCompatible({ controller, timeout }) {
     try {
       await openaiClient.chat.completions.create(
-        {
+        buildOpenaiCompatibleRequestOptions({
           model,
           messages: buildMessages({
             prompt: 'ping',
@@ -409,9 +429,8 @@ function createMinimaxProvider({
             userContent: renderUserContent(userTemplate, 'ping')
           }),
           max_completion_tokens: 1,
-          stream: false,
-          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
-        },
+          stream: false
+        }),
         {
           signal: controller.signal
         }
@@ -447,7 +466,7 @@ function createMinimaxProvider({
   }) {
     try {
       const data = await openaiClient.chat.completions.create(
-        {
+        buildOpenaiCompatibleRequestOptions({
           model,
           messages: buildMessages({
             prompt,
@@ -456,9 +475,8 @@ function createMinimaxProvider({
           }),
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.15,
-          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
-        },
+          temperature: 0.15
+        }),
         {
           signal: controller.signal
         }
@@ -521,7 +539,7 @@ function createMinimaxProvider({
 
     try {
       const stream = await openaiClient.chat.completions.create(
-        {
+        buildOpenaiCompatibleRequestOptions({
           model,
           messages: buildMessages({
             prompt,
@@ -530,9 +548,8 @@ function createMinimaxProvider({
           }),
           stream: true,
           max_completion_tokens: maxTokens,
-          temperature: 0.15,
-          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
-        },
+          temperature: 0.15
+        }),
         {
           signal: controller.signal
         }
