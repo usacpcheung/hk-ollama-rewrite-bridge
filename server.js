@@ -65,6 +65,32 @@ function parseEnvMilliseconds(name, fallback, bounds = {}) {
   return parsed;
 }
 
+function parseEnvBoolean(name, fallback = false) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue.trim() === '') {
+    return fallback;
+  }
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: `Invalid ${name}; using default`,
+      provided: rawValue,
+      fallback
+    })
+  );
+  return fallback;
+}
+
 const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
   min: 1,
   max: ABSOLUTE_MAX_TEXT_LENGTH
@@ -135,6 +161,7 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   min: 1,
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
+const REWRITE_DEBUG_RAW_OUTPUT = parseEnvBoolean('REWRITE_DEBUG_RAW_OUTPUT', false);
 
 
 const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
@@ -270,6 +297,23 @@ const logRewriteRequest = ({
     })
   );
 };
+
+function logRawProviderOutput({ requestId, stream, providerResponse }) {
+  if (!REWRITE_DEBUG_RAW_OUTPUT || typeof providerResponse !== 'string') {
+    return;
+  }
+
+  console.log(
+    JSON.stringify({
+      level: 'debug',
+      msg: 'Raw provider rewrite output',
+      requestId,
+      provider: REWRITE_PROVIDER,
+      stream,
+      providerResponse
+    })
+  );
+}
 
 const rewriteHeaderAuth = createRewriteHeaderAuth({
   bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
@@ -853,6 +897,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
       const streamResponse = finalResponse || streamedText.trim();
+      logRawProviderOutput({ requestId, stream: true, providerResponse: streamResponse });
       if (streamResponse && !streamedChunkEmitted) {
         const finalText = toHK(streamResponse);
         writeStreamChunk({ response: finalText, done: false });
@@ -891,6 +936,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     lastError = null;
 
     const modelText = (rewriteResult.data.response || '').trim();
+    logRawProviderOutput({ requestId, stream: false, providerResponse: modelText });
     if (!modelText) {
       setLastError('OLLAMA_ERROR', 'Empty model response');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
@@ -939,6 +985,7 @@ app.listen(PORT, HOST, () => {
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
       warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS,
+      rewriteDebugRawOutput: REWRITE_DEBUG_RAW_OUTPUT,
       warmupOnStart: WARMUP_ON_START,
       warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,
       warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,

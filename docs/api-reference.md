@@ -34,6 +34,16 @@ Reverse proxy must unset these headers from inbound client traffic and set them 
 
 Rewrite HK colloquial Cantonese into formal Traditional Chinese.
 
+### Debug logging toggle
+
+Set environment variable `REWRITE_DEBUG_RAW_OUTPUT=true` to write raw provider output (before HK conversion) into service logs.
+
+Example journal check:
+
+```bash
+journalctl -u rewrite-bridge -n 200 --no-pager | rg "Raw provider rewrite output"
+```
+
 ### Request body
 
 ```json
