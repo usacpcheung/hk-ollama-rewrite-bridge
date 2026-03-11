@@ -84,6 +84,24 @@ In Minimax mode, the bridge sends a role-split payload:
 
 If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
 
+### Debug raw payload gate
+
+`POST /rewrite` supports an internal diagnostics mode for provider raw-shape visibility.
+
+Requirements (both required):
+
+- Env: `REWRITE_DEBUG_RAW_RESPONSE=true`
+- Request header: `X-Debug-Raw: 1`
+
+When enabled:
+
+- Non-stream responses add a top-level `debug` object.
+- Stream responses include `debug` on the terminal `done:true` NDJSON line.
+
+`debug` contains bounded metadata only: raw type markers, usage (if available), finish reason, response length, and a truncated raw snippet (max 500 chars).
+
+Security note: this mode is for internal troubleshooting only and should remain disabled on public production exposure.
+
 ### Success (`stream=false`)
 
 `200 OK`
@@ -92,6 +110,25 @@ If Minimax system prompt is unset/empty, it falls back to one `user` message for
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。"
+}
+```
+
+With debug gate enabled:
+
+```json
+{
+  "ok": true,
+  "result": "我今天身體不適，想請半天假。",
+  "debug": {
+    "rawType": "object",
+    "isArray": false,
+    "isObject": true,
+    "snippetLength": 312,
+    "snippet": "{\"id\":\"chatcmpl-...\"}",
+    "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 },
+    "finishReason": "stop",
+    "responseLength": 14
+  }
 }
 ```
 
@@ -106,6 +143,12 @@ Each line is JSON. Canonical chunk format:
 {"response":"身體不適，","done":false}
 {"response":"想請半天假。","done":false}
 {"response":"","done":true,"done_reason":"stop"}
+```
+
+With debug gate enabled, the terminal line includes a `debug` object:
+
+```json
+{"response":"","done":true,"done_reason":"stop","debug":{"rawType":"object","snippetLength":312,"finishReason":"stop"}}
 ```
 
 ### Warming/startup responses

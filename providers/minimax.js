@@ -1,6 +1,22 @@
 const { randomUUID } = require('crypto');
 const OpenAI = require('openai');
 
+function envFlagEnabled(name) {
+  return String(process.env[name] || '').trim().toLowerCase() === 'true';
+}
+
+function safeStringLength(value) {
+  return typeof value === 'string' ? value.length : 0;
+}
+
+function logMinimaxDebug(payload) {
+  if (!envFlagEnabled('MINIMAX_DEBUG_RAW_LOG')) {
+    return;
+  }
+
+  console.log(JSON.stringify({ level: 'debug', provider: 'minimax', ...payload }));
+}
+
 function createMinimaxProvider({
   apiUrl,
   apiStyle = 'legacy',
@@ -131,7 +147,24 @@ function createMinimaxProvider({
         data?.choices?.[0]?.text ||
         '';
 
-      return { ok: true, data: { response: responseText } };
+      const firstChoice = data?.choices?.[0] || {};
+      const messageContent = firstChoice?.message?.content;
+      const reasoningDetails = Array.isArray(firstChoice?.message?.reasoning_details)
+        ? firstChoice.message.reasoning_details
+        : [];
+
+      logMinimaxDebug({
+        event: 'openai_compatible_completion',
+        model,
+        stream: false,
+        finishReason: firstChoice?.finish_reason || null,
+        usage: data?.usage || null,
+        contentType: Array.isArray(messageContent) ? 'array' : typeof messageContent,
+        contentLength: safeStringLength(responseText),
+        reasoningDetailsCount: reasoningDetails.length
+      });
+
+      return { ok: true, data: { response: responseText, usage: data?.usage || null, completion: data || null } };
     } catch (err) {
       if (typeof err?.status === 'number') {
         return {
@@ -424,7 +457,7 @@ function createMinimaxProvider({
         data?.choices?.[0]?.text ||
         '';
 
-      return { ok: true, data: { response: responseText } };
+      return { ok: true, data: { response: responseText, usage: data?.usage || null, completion: data || null } };
     } catch (err) {
       if (typeof err?.status === 'number') {
         return {
@@ -496,6 +529,8 @@ function createMinimaxProvider({
         finalCompletionEvent = eventData;
         const choice = eventData?.choices?.[0] || {};
         const token = choice?.delta?.content || '';
+        const deltaKeys = choice?.delta && typeof choice.delta === 'object' ? Object.keys(choice.delta) : [];
+        const previousDoneState = doneEventEmitted;
 
         if (typeof choice?.message?.content === 'string' && choice.message.content.length > 0) {
           finalMessageContent = choice.message.content;
@@ -514,6 +549,17 @@ function createMinimaxProvider({
         if (choice?.finish_reason) {
           await emitDone(choice.finish_reason);
         }
+
+        logMinimaxDebug({
+          event: 'openai_compatible_stream_event',
+          model,
+          stream: true,
+          deltaKeys,
+          deltaContentLength: safeStringLength(token),
+          finishReason: choice?.finish_reason || null,
+          finishReasonTransitioned: !previousDoneState && doneEventEmitted,
+          accumulatedOutputLength: streamedText.length
+        });
       }
 
       const finalResponseText =
@@ -521,6 +567,22 @@ function createMinimaxProvider({
         finalMessageContent ||
         finalCompletionEvent?.choices?.[0]?.message?.content ||
         '';
+
+      const finalChoice = finalCompletionEvent?.choices?.[0] || {};
+      const finalReasoningDetails = Array.isArray(finalChoice?.message?.reasoning_details)
+        ? finalChoice.message.reasoning_details
+        : [];
+
+      logMinimaxDebug({
+        event: 'openai_compatible_stream_final',
+        model,
+        stream: true,
+        finishReason: finalChoice?.finish_reason || null,
+        usage: finalCompletionEvent?.usage || null,
+        contentType: Array.isArray(finalResponseText) ? 'array' : typeof finalResponseText,
+        contentLength: safeStringLength(finalResponseText),
+        reasoningDetailsCount: finalReasoningDetails.length
+      });
 
       if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({

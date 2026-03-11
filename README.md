@@ -65,6 +65,8 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
+| `REWRITE_DEBUG_RAW_RESPONSE` | `false` | Allows request-scoped debug payloads on `/rewrite` when client sends `X-Debug-Raw: 1`. Keep disabled for public production traffic. |
+| `MINIMAX_DEBUG_RAW_LOG` | `false` | Emits structured per-call/per-stream Minimax raw-shape metadata logs (lengths/types only; no API keys/full user text). |
 | `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
 | `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
 | `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
@@ -154,6 +156,41 @@ Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 ## API
 
 Detailed endpoint contracts, response formats, streaming behavior, and provider-specific result normalization are documented in `docs/api-reference.md`.
+
+### Debug raw response mode (restricted)
+
+For troubleshooting provider normalization, `/rewrite` can expose a bounded `debug` payload **only** when both conditions are met:
+
+1. Server env `REWRITE_DEBUG_RAW_RESPONSE=true`
+2. Request header `X-Debug-Raw: 1`
+
+Non-stream response example:
+
+```json
+{
+  "ok": true,
+  "result": "我今天身體不適，想請半天假。",
+  "debug": {
+    "rawType": "object",
+    "isArray": false,
+    "isObject": true,
+    "snippetLength": 312,
+    "snippet": "{\"id\":\"chatcmpl-...\"}",
+    "usage": { "prompt_tokens": 12, "completion_tokens": 5, "total_tokens": 17 },
+    "finishReason": "stop",
+    "responseLength": 14
+  }
+}
+```
+
+Stream mode (`application/x-ndjson`) includes debug on the done chunk:
+
+```json
+{"response":"...","done":false}
+{"response":"","done":true,"done_reason":"stop","debug":{"rawType":"object","snippetLength":312,"finishReason":"stop"}}
+```
+
+Security note: debug mode is intended for internal diagnostics and should not be exposed on public-facing production traffic.
 
 ## Deployment
 

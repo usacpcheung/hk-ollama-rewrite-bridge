@@ -11,6 +11,8 @@ const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 600;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
+const REWRITE_DEBUG_RAW_RESPONSE = String(process.env.REWRITE_DEBUG_RAW_RESPONSE || '').trim().toLowerCase() === 'true';
+const DEBUG_RAW_SNIPPET_MAX_LENGTH = 500;
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -202,6 +204,39 @@ function buildRewritePrompt(systemPrompt, userTemplate, text) {
 
 function countUnicodeCharacters(value) {
   return [...value].length;
+}
+
+function isDebugRawRequested(req) {
+  const debugHeader = req.get('X-Debug-Raw');
+  return REWRITE_DEBUG_RAW_RESPONSE && typeof debugHeader === 'string' && debugHeader.trim() === '1';
+}
+
+function summarizeRawDebug(rawValue) {
+  const isArray = Array.isArray(rawValue);
+  const isObject = rawValue !== null && typeof rawValue === 'object' && !isArray;
+  const serialized = typeof rawValue === 'string' ? rawValue : (rawValue == null ? '' : JSON.stringify(rawValue));
+
+  return {
+    rawType: typeof rawValue,
+    isArray,
+    isObject,
+    snippetLength: serialized.length,
+    snippet: serialized.slice(0, DEBUG_RAW_SNIPPET_MAX_LENGTH)
+  };
+}
+
+function buildRewriteDebugPayload(data = {}, { fallbackText = '', finishReason = null } = {}) {
+  const completion = data?.completion || null;
+  const responseText = typeof data?.response === 'string' ? data.response : fallbackText;
+  const rawCandidate = completion ?? responseText;
+  const summary = summarizeRawDebug(rawCandidate);
+
+  return {
+    ...summary,
+    usage: data?.usage || completion?.usage || null,
+    finishReason: finishReason || completion?.choices?.[0]?.finish_reason || null,
+    responseLength: typeof responseText === 'string' ? responseText.length : 0
+  };
 }
 
 const provider = createProvider({
@@ -759,6 +794,8 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       );
     }
 
+    const debugRawEnabled = isDebugRawRequested(req);
+
     if (streamRequested) {
       res.status(200);
       res.set({
@@ -775,6 +812,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       let streamDoneSent = false;
       let streamedText = '';
       let streamedChunkEmitted = false;
+      let providerDoneReason = null;
 
       const writeStreamChunk = (payload) => {
         if (res.writableEnded) {
@@ -817,8 +855,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
                 }
 
                 if (chunk.done) {
-                  const { done_reason: doneReason } = chunk;
-                  writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
+                  providerDoneReason = chunk.done_reason || providerDoneReason;
                   return;
                 }
 
@@ -841,7 +878,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
               }
 
               if (event.type === 'done') {
-                writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
+                providerDoneReason = event.reason || providerDoneReason;
               }
             }
           })
@@ -876,7 +913,16 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         writeStreamChunk({ response: finalText, done: false });
       }
 
-      writeDoneChunk({ done_reason: 'stop' });
+      const doneReason = providerDoneReason || 'stop';
+      const doneExtras = { done_reason: doneReason };
+      if (debugRawEnabled) {
+        doneExtras.debug = buildRewriteDebugPayload(rewriteResult.data, {
+          fallbackText: streamResponse,
+          finishReason: doneReason
+        });
+      }
+
+      writeDoneChunk(doneExtras);
       return res.end();
     }
 
@@ -915,6 +961,14 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     }
 
     const finalText = toHK(modelText);
+    if (debugRawEnabled) {
+      return res.json({
+        ok: true,
+        result: finalText,
+        debug: buildRewriteDebugPayload(rewriteResult.data, { fallbackText: modelText })
+      });
+    }
+
     return res.json({ ok: true, result: finalText });
   } finally {
     logRewriteRequest({
