@@ -403,7 +403,7 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理1' }] }, finish_reason: null }] })}
 
 `);
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '面', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理2' }] }, finish_reason: null }] })}
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書面', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理2' }] }, finish_reason: null }] })}
 
 `);
         res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}

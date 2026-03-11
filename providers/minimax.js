@@ -642,12 +642,21 @@ function createMinimaxProvider({
         }
       );
 
+      let previousDeltaContent = '';
+
       for await (const eventData of stream) {
         finalCompletionEvent = eventData;
         const choice = eventData?.choices?.[0] || {};
-        const token = choice?.delta?.content || '';
+        const rawToken = choice?.delta?.content || '';
+        const token = typeof rawToken === 'string' && rawToken.startsWith(previousDeltaContent)
+          ? rawToken.slice(previousDeltaContent.length)
+          : rawToken;
         const deltaKeys = choice?.delta && typeof choice.delta === 'object' ? Object.keys(choice.delta) : [];
         const previousDoneState = doneEventEmitted;
+
+        if (typeof rawToken === 'string' && rawToken.length > 0) {
+          previousDeltaContent = rawToken;
+        }
 
         if (typeof choice?.message?.content === 'string' && choice.message.content.length > 0) {
           finalMessageContent = choice.message.content;
