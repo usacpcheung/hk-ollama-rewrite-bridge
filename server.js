@@ -239,7 +239,8 @@ function buildRewriteDebugPayload(data = {}, { fallbackText = '', finishReason =
     ...summary,
     usage: data?.usage || completion?.usage || null,
     finishReason: finishReason || completion?.choices?.[0]?.finish_reason || null,
-    responseLength: typeof responseText === 'string' ? responseText.length : 0
+    responseLength: typeof responseText === 'string' ? responseText.length : 0,
+    reasoning: data?.reasoning || null
   };
 }
 

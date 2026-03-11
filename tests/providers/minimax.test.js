@@ -331,6 +331,8 @@ test('regression: legacy-routing bug - rewrite(legacy) sends expected payload to
   assert.equal(result.ok, true);
   assert.equal(result.data.response, '正式中文結果');
   assert.deepEqual(result.data.usage, { prompt_tokens: 11, completion_tokens: 3, total_tokens: 14 });
+  assert.equal(result.data.reasoning.splitRequested, false);
+  assert.equal(result.data.reasoning.splitAvailable, false);
 
   assert.equal(legacyRequestBody.model, 'MiniMax-Text-01');
   assert.equal(legacyRequestBody.max_completion_tokens, 5000);
@@ -414,7 +416,15 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         id: 'chatcmpl-openai-sync',
-        choices: [{ message: { content: '書面中文' } }],
+        choices: [{
+          message: {
+            content: [
+              { type: 'text', text: '<think>中間推理</think>' },
+              { type: 'text', text: '書面中文' }
+            ],
+            reasoning_details: [{ type: 'reasoning.summary', text: '中間推理' }]
+          }
+        }],
         usage: { prompt_tokens: 5, completion_tokens: 4, total_tokens: 9 }
       }));
     });
@@ -437,6 +447,10 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
   });
   assert.equal(syncResult.ok, true);
   assert.equal(syncResult.data.response, '書面中文');
+  assert.equal(syncResult.data.reasoning.splitRequested, true);
+  assert.equal(syncResult.data.reasoning.splitAvailable, true);
+  assert.equal(syncResult.data.reasoning.detailsCount, 1);
+  assert.equal(syncResult.data.reasoning.thinkSegmentsStripped, true);
 
   const streamEvents = [];
   const streamResult = await provider.rewriteStream({
@@ -446,6 +460,8 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
   });
   assert.equal(streamResult.ok, true);
   assert.equal(streamResult.data.response, '書面');
+  assert.equal(streamResult.data.reasoning.splitRequested, true);
+  assert.equal(typeof streamResult.data.reasoning.splitAvailable, 'boolean');
 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].stream, false);

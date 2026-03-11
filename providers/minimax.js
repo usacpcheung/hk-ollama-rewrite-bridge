@@ -9,6 +9,80 @@ function safeStringLength(value) {
   return typeof value === 'string' ? value.length : 0;
 }
 
+
+function normalizeCompletionMessageContent(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+
+      if (!part || typeof part !== 'object') {
+        return '';
+      }
+
+      if (typeof part.text === 'string') {
+        return part.text;
+      }
+
+      if (typeof part.content === 'string') {
+        return part.content;
+      }
+
+      if (typeof part.output_text === 'string') {
+        return part.output_text;
+      }
+
+      return '';
+    })
+    .join('');
+}
+
+function stripThinkSegments(text) {
+  if (typeof text !== 'string' || text.length === 0) {
+    return text;
+  }
+
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
+
+function extractCompletionArtifacts({ completion, streamAccumulation = '' }) {
+  const choice = completion?.choices?.[0] || {};
+  const normalizedContent = normalizeCompletionMessageContent(choice?.message?.content);
+  const reasoningDetails = Array.isArray(choice?.message?.reasoning_details)
+    ? choice.message.reasoning_details
+    : [];
+  const shouldStripThink = reasoningDetails.length > 0;
+  const normalizedAnswer = shouldStripThink ? stripThinkSegments(normalizedContent) : normalizedContent;
+
+  const response =
+    completion?.reply ||
+    normalizedAnswer ||
+    choice?.text ||
+    streamAccumulation ||
+    '';
+
+  return {
+    response,
+    usage: completion?.usage || null,
+    reasoning: {
+      splitRequested: true,
+      splitAvailable: reasoningDetails.length > 0,
+      detailsCount: reasoningDetails.length,
+      details: reasoningDetails,
+      thinkSegmentsStripped: shouldStripThink && normalizedAnswer !== normalizedContent
+    }
+  };
+}
+
 function logMinimaxDebug(payload) {
   if (!envFlagEnabled('MINIMAX_DEBUG_RAW_LOG')) {
     return;
@@ -190,14 +264,20 @@ function createMinimaxProvider({
       }
 
       const data = await response.json();
+      const extracted = extractCompletionArtifacts({ completion: data });
 
-      const responseText =
-        data?.reply ||
-        data?.choices?.[0]?.message?.content ||
-        data?.choices?.[0]?.text ||
-        '';
-
-      return { ok: true, data: { response: responseText, usage: data?.usage || null, completion: data || null } };
+      return {
+        ok: true,
+        data: {
+          response: extracted.response,
+          usage: extracted.usage,
+          completion: data || null,
+          reasoning: {
+            ...extracted.reasoning,
+            splitRequested: false
+          }
+        }
+      };
     } catch (err) {
       if (err instanceof SyntaxError) {
         return { ok: false, error: mapError(err, { kind: 'invalid_json' }) };
@@ -377,13 +457,11 @@ function createMinimaxProvider({
         await processSseFrame(buffer);
       }
 
-      const finalResponseText =
-        finalCompletionEvent?.reply ||
-        finalMessageContent ||
-        finalCompletionEvent?.choices?.[0]?.message?.content ||
-        finalCompletionEvent?.choices?.[0]?.text ||
-        streamedText ||
-        '';
+      const extracted = extractCompletionArtifacts({
+        completion: finalCompletionEvent,
+        streamAccumulation: streamedText || finalMessageContent || ''
+      });
+      const finalResponseText = extracted.response;
 
       if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({
@@ -398,7 +476,7 @@ function createMinimaxProvider({
       await emit({
         type: 'final',
         response: finalResponseText,
-        usage: finalCompletionEvent?.usage || null,
+        usage: extracted.usage,
         completion: finalCompletionEvent || null
       });
 
@@ -406,8 +484,12 @@ function createMinimaxProvider({
         ok: true,
         data: {
           response: finalResponseText,
-          usage: finalCompletionEvent?.usage || null,
-          completion: finalCompletionEvent || null
+          usage: extracted.usage,
+          completion: finalCompletionEvent || null,
+          reasoning: {
+            ...extracted.reasoning,
+            splitRequested: false
+          }
         }
       };
     } catch (err) {
@@ -482,13 +564,17 @@ function createMinimaxProvider({
         }
       );
 
-      const responseText =
-        data?.reply ||
-        data?.choices?.[0]?.message?.content ||
-        data?.choices?.[0]?.text ||
-        '';
+      const extracted = extractCompletionArtifacts({ completion: data });
 
-      return { ok: true, data: { response: responseText, usage: data?.usage || null, completion: data || null } };
+      return {
+        ok: true,
+        data: {
+          response: extracted.response,
+          usage: extracted.usage,
+          completion: data || null,
+          reasoning: extracted.reasoning
+        }
+      };
     } catch (err) {
       if (typeof err?.status === 'number') {
         return {
@@ -592,16 +678,14 @@ function createMinimaxProvider({
         });
       }
 
-      const finalResponseText =
-        streamedText ||
-        finalMessageContent ||
-        finalCompletionEvent?.choices?.[0]?.message?.content ||
-        '';
+      const extracted = extractCompletionArtifacts({
+        completion: finalCompletionEvent,
+        streamAccumulation: streamedText || finalMessageContent || ''
+      });
+      const finalResponseText = extracted.response;
 
       const finalChoice = finalCompletionEvent?.choices?.[0] || {};
-      const finalReasoningDetails = Array.isArray(finalChoice?.message?.reasoning_details)
-        ? finalChoice.message.reasoning_details
-        : [];
+      const finalReasoningDetails = extracted.reasoning.details;
 
       logMinimaxDebug({
         event: 'openai_compatible_stream_final',
@@ -627,7 +711,7 @@ function createMinimaxProvider({
       await emit({
         type: 'final',
         response: finalResponseText,
-        usage: finalCompletionEvent?.usage || null,
+        usage: extracted.usage,
         completion: finalCompletionEvent || null
       });
 
@@ -635,8 +719,9 @@ function createMinimaxProvider({
         ok: true,
         data: {
           response: finalResponseText,
-          usage: finalCompletionEvent?.usage || null,
-          completion: finalCompletionEvent || null
+          usage: extracted.usage,
+          completion: finalCompletionEvent || null,
+          reasoning: extracted.reasoning
         }
       };
     } catch (err) {
