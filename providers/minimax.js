@@ -54,12 +54,33 @@ function stripThinkSegments(text) {
   return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
+
+function resolveReasoningDetails({ streamReasoningDetails, messageReasoningDetails }) {
+  const hasStreamReasoning = Array.isArray(streamReasoningDetails) && streamReasoningDetails.length > 0;
+  const hasMessageReasoning = Array.isArray(messageReasoningDetails) && messageReasoningDetails.length > 0;
+
+  if (hasStreamReasoning) {
+    if (!hasMessageReasoning) {
+      return streamReasoningDetails;
+    }
+
+    return [...streamReasoningDetails, ...messageReasoningDetails];
+  }
+
+  if (hasMessageReasoning) {
+    return messageReasoningDetails;
+  }
+
+  return [];
+}
+
 function extractCompletionArtifacts({ completion, streamAccumulation = '', streamReasoningDetails = null }) {
   const choice = completion?.choices?.[0] || {};
   const normalizedContent = normalizeCompletionMessageContent(choice?.message?.content);
-  const reasoningDetails = Array.isArray(streamReasoningDetails) && streamReasoningDetails.length > 0
-    ? streamReasoningDetails
-    : (Array.isArray(choice?.message?.reasoning_details) ? choice.message.reasoning_details : []);
+  const reasoningDetails = resolveReasoningDetails({
+    streamReasoningDetails,
+    messageReasoningDetails: choice?.message?.reasoning_details
+  });
   const shouldStripThink = reasoningDetails.length > 0;
   const normalizedAnswer = shouldStripThink ? stripThinkSegments(normalizedContent) : normalizedContent;
 

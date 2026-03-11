@@ -406,7 +406,7 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: '書面', reasoning_details: [{ type: 'reasoning.summary', text: '流式推理2' }] }, finish_reason: null }] })}
 
 `);
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop', message: { reasoning_details: [{ type: 'reasoning.summary', text: '最終推理' }] } }] })}
 
 `);
         res.end('data: [DONE]\n\n');
@@ -462,7 +462,7 @@ test('matrix: openai_compatible sync + stream continue to use OpenAI-compatible 
   assert.equal(streamResult.data.response, '書面');
   assert.equal(streamResult.data.reasoning.splitRequested, true);
   assert.equal(streamResult.data.reasoning.splitAvailable, true);
-  assert.equal(streamResult.data.reasoning.detailsCount, 2);
+  assert.equal(streamResult.data.reasoning.detailsCount, 3);
 
   assert.equal(requestBodies.length, 2);
   assert.equal(requestBodies[0].stream, false);
