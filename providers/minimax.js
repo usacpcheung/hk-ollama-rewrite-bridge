@@ -126,9 +126,25 @@ function createMinimaxProvider({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+    if (isOpenAiCompatibleStyle) {
+      return generateOpenaiCompatible({
+        prompt,
+        runtimeSystemPrompt,
+        userContent,
+        maxTokens,
+        controller,
+        timeout
+      });
+    }
+
     try {
-      const data = await openaiClient.chat.completions.create(
-        {
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${resolvedApiKey}`
+        },
+        body: JSON.stringify({
           model,
           messages: buildMessages({
             prompt,
@@ -137,13 +153,19 @@ function createMinimaxProvider({
           }),
           stream: false,
           max_completion_tokens: maxTokens,
-          temperature: 0.15,
-          ...(openaiReasoningBody ? { extra_body: openaiReasoningBody } : {})
-        },
-        {
-          signal: controller.signal
-        }
-      );
+          temperature: 0.15
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
+        };
+      }
+
+      const data = await response.json();
 
       const responseText =
         data?.reply ||
@@ -151,25 +173,12 @@ function createMinimaxProvider({
         data?.choices?.[0]?.text ||
         '';
 
-      const firstChoice = data?.choices?.[0] || {};
-      const messageContent = firstChoice?.message?.content;
-      const reasoningDetails = Array.isArray(firstChoice?.message?.reasoning_details)
-        ? firstChoice.message.reasoning_details
-        : [];
-
-      logMinimaxDebug({
-        event: 'openai_compatible_completion',
-        model,
-        stream: false,
-        finishReason: firstChoice?.finish_reason || null,
-        usage: data?.usage || null,
-        contentType: Array.isArray(messageContent) ? 'array' : typeof messageContent,
-        contentLength: safeStringLength(responseText),
-        reasoningDetailsCount: reasoningDetails.length
-      });
-
       return { ok: true, data: { response: responseText, usage: data?.usage || null, completion: data || null } };
     } catch (err) {
+      if (err instanceof SyntaxError) {
+        return { ok: false, error: mapError(err, { kind: 'invalid_json' }) };
+      }
+
       if (typeof err?.status === 'number') {
         return {
           ok: false,

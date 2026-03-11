@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 
 const { createMinimaxProvider, parseMinimaxSseFrame } = require('../../providers/minimax');
 
@@ -204,4 +205,90 @@ test('rewrite honors custom maxCompletionTokens override', async (t) => {
 
   assert.equal(result.ok, true);
   assert.equal(capturedBody.max_completion_tokens, 1234);
+});
+
+test('rewrite uses fetch transport and not OpenAI client when apiStyle is legacy', async (t) => {
+  let legacyCalls = 0;
+  const legacyServer = http.createServer((req, res) => {
+    legacyCalls += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ reply: 'legacy-ok' }));
+  });
+  await new Promise((resolve) => legacyServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => legacyServer.close());
+
+  let openaiCalls = 0;
+  const openaiServer = http.createServer((req, res) => {
+    openaiCalls += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: 'openai-path' } }] }));
+  });
+  await new Promise((resolve) => openaiServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => openaiServer.close());
+
+  const legacyAddress = legacyServer.address();
+  const openaiAddress = openaiServer.address();
+
+  const provider = createMinimaxProvider({
+    apiUrl: `http://127.0.0.1:${legacyAddress.port}/v1/text/chatcompletion_v2`,
+    openaiBaseUrl: `http://127.0.0.1:${openaiAddress.port}`,
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    apiStyle: 'legacy'
+  });
+
+  const result = await provider.rewrite({
+    prompt: 'legacy prompt',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, 'legacy-ok');
+  assert.equal(legacyCalls, 1);
+  assert.equal(openaiCalls, 0);
+});
+
+test('rewrite uses OpenAI client path when apiStyle is openai_compatible', async (t) => {
+  let legacyCalls = 0;
+  const legacyServer = http.createServer((req, res) => {
+    legacyCalls += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ reply: 'legacy-path' }));
+  });
+  await new Promise((resolve) => legacyServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => legacyServer.close());
+
+  let openaiCalls = 0;
+  const openaiServer = http.createServer((req, res) => {
+    openaiCalls += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      id: 'chatcmpl-123',
+      choices: [{ message: { content: 'openai-ok' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    }));
+  });
+  await new Promise((resolve) => openaiServer.listen(0, '127.0.0.1', resolve));
+  t.after(() => openaiServer.close());
+
+  const legacyAddress = legacyServer.address();
+  const openaiAddress = openaiServer.address();
+
+  const provider = createMinimaxProvider({
+    apiUrl: `http://127.0.0.1:${legacyAddress.port}/v1/text/chatcompletion_v2`,
+    openaiBaseUrl: `http://127.0.0.1:${openaiAddress.port}`,
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    apiStyle: 'openai_compatible'
+  });
+
+  const result = await provider.rewrite({
+    prompt: 'openai prompt',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, 'openai-ok');
+  assert.equal(openaiCalls, 1);
+  assert.equal(legacyCalls, 0);
 });
