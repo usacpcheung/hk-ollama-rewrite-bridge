@@ -162,3 +162,19 @@ test('redactSensitiveValue removes secrets from debug payloads', () => {
   assert.equal(redacted.nested.BRIDGE_INTERNAL_AUTH_SECRET, '[REDACTED]');
   assert.equal(redacted.headers['Content-Type'], 'application/json');
 });
+
+test('redactSensitiveValue keeps usage token counters visible', () => {
+  const redacted = redactSensitiveValue({
+    usage: {
+      total_tokens: 42,
+      prompt_tokens: 21,
+      completion_tokens: 21
+    }
+  });
+
+  assert.deepEqual(redacted.usage, {
+    total_tokens: 42,
+    prompt_tokens: 21,
+    completion_tokens: 21
+  });
+});

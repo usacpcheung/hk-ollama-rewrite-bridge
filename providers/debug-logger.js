@@ -1,5 +1,5 @@
 function isSensitiveKey(key) {
-  return /authorization|api[-_]?key|token|secret|x-bridge-auth|cookie|set-cookie|passwd|password/i.test(String(key));
+  return /^(authorization|proxy-authorization|api[-_]?key|x-bridge-auth|bridge_internal_auth_secret|access_token|refresh_token|id_token|token|secret|cookie|set-cookie|passwd|password)$/i.test(String(key));
 }
 
 function redactSensitiveValue(value) {
