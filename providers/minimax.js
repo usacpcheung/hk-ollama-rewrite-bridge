@@ -139,6 +139,17 @@ function createMinimaxProvider({
         return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
       }
 
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: false,
+          response: data
+        }
+      });
+
       const responseText =
         data?.reply ||
         data?.choices?.[0]?.message?.content ||
@@ -324,6 +335,17 @@ function createMinimaxProvider({
         finalCompletionEvent?.choices?.[0]?.text ||
         streamedText ||
         '';
+
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: true,
+          completion: finalCompletionEvent || null
+        }
+      });
 
       if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({
