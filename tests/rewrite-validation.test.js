@@ -105,7 +105,71 @@ function startMockMinimaxServer(handler) {
 
 
 
-test('POST /rewrite sends one user message with minimax default template when system prompt is empty', async (t) => {
+test('POST /rewrite uses REWRITE_USER_TEMPLATE when MINIMAX_USER_TEMPLATE is absent', async (t) => {
+  let capturedMessages = null;
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const payload = JSON.parse(raw || '{}');
+      capturedMessages = payload.messages;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ reply: '改寫完成' }));
+    });
+  });
+
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const env = {
+    ...process.env,
+    REWRITE_PROVIDER: 'minimax',
+    WARMUP_ON_START: 'false',
+    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+    MINIMAX_API_KEY: 'minimax-test-key',
+    MINIMAX_SYSTEM_PROMPT: '',
+    REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}'
+  };
+  delete env.MINIMAX_USER_TEMPLATE;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '我今日唔係好舒服，想請半日假。' })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(capturedMessages, [
+    {
+      role: 'user',
+      content: 'Legacy：我今日唔係好舒服，想請半日假。'
+    }
+  ]);
+});
+
+test('POST /rewrite uses MINIMAX_USER_TEMPLATE over REWRITE_USER_TEMPLATE when both are set', async (t) => {
   let capturedMessages = null;
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
     let raw = '';
@@ -133,8 +197,74 @@ test('POST /rewrite sends one user message with minimax default template when sy
       BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
       MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
       MINIMAX_API_KEY: 'minimax-test-key',
-      MINIMAX_SYSTEM_PROMPT: ''
+      MINIMAX_SYSTEM_PROMPT: '',
+      REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}',
+      MINIMAX_USER_TEMPLATE: 'Minimax：{TEXT}'
     },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '我今日唔係好舒服，想請半日假。' })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(capturedMessages, [
+    {
+      role: 'user',
+      content: 'Minimax：我今日唔係好舒服，想請半日假。'
+    }
+  ]);
+});
+
+test('POST /rewrite sends one user message with minimax default template when system prompt is empty', async (t) => {
+  let capturedMessages = null;
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const payload = JSON.parse(raw || '{}');
+      capturedMessages = payload.messages;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ reply: '改寫完成' }));
+    });
+  });
+
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const env = {
+    ...process.env,
+    REWRITE_PROVIDER: 'minimax',
+    WARMUP_ON_START: 'false',
+    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+    MINIMAX_API_KEY: 'minimax-test-key',
+    MINIMAX_SYSTEM_PROMPT: ''
+  };
+  delete env.REWRITE_USER_TEMPLATE;
+  delete env.MINIMAX_USER_TEMPLATE;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
