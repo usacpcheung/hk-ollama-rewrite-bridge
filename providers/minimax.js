@@ -9,6 +9,13 @@ function createMinimaxProvider({
   maxCompletionTokens = 300,
   debugLog
 }) {
+  const probeBody = {
+    model,
+    messages: buildProbeMessages(),
+    max_completion_tokens: 1,
+    stream: false
+  };
+
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
@@ -24,16 +31,7 @@ function createMinimaxProvider({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt: 'ping',
-            systemPrompt,
-            userContent: renderUserContent(userTemplate, 'ping')
-          }),
-          max_completion_tokens: 1,
-          stream: false
-        }),
+        body: JSON.stringify(probeBody),
         signal: controller.signal
       });
 
@@ -60,11 +58,7 @@ function createMinimaxProvider({
   }
 
   async function triggerWarmup({ timeoutMs }) {
-    return generate({
-      prompt: '你好',
-      timeoutMs,
-      maxTokens: 1
-    });
+    return { ok: true, data: { response: '', usage: null } };
   }
 
   async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
@@ -521,10 +515,15 @@ function buildMessages({ prompt, systemPrompt, userContent }) {
   ];
 }
 
+function buildProbeMessages() {
+  return [{ role: 'user', content: 'ping' }];
+}
+
 module.exports = {
   createMinimaxProvider,
   parseMinimaxSseFrame,
   buildMappedChunk,
   buildMessages,
-  renderUserContent
+  renderUserContent,
+  buildProbeMessages
 };

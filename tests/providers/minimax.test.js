@@ -344,3 +344,64 @@ test('rewriteStream emits provider_response_raw debug event with final completio
   assert.equal(rawEvent.requestId, 'req-stream-raw');
   assert.deepEqual(rawEvent.payload?.completion, completionEvent);
 });
+
+test('checkReadiness uses lightweight probe payload without rewrite prompts', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedBody = null;
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ reply: 'ok' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key',
+    systemPrompt: '你是改寫助手',
+    userTemplate: '把下方文字改寫為繁體書面語：\n{TEXT}'
+  });
+
+  const result = await provider.checkReadiness({ timeoutMs: 5_000 });
+
+  assert.equal(result.ready, true);
+  assert.equal(capturedBody.max_completion_tokens, 1);
+  assert.deepEqual(capturedBody.messages, [{ role: 'user', content: 'ping' }]);
+  assert.equal(JSON.stringify(capturedBody.messages).includes('你是改寫助手'), false);
+  assert.equal(JSON.stringify(capturedBody.messages).includes('把下方文字改寫為繁體書面語'), false);
+});
+
+test('triggerWarmup is a no-op success and does not send rewrite prompt payload', async () => {
+  let fetchCalled = false;
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    fetchCalled = true;
+    return new Response(JSON.stringify({ reply: 'ok' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  try {
+    const provider = createMinimaxProvider({
+      apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+      model: 'MiniMax-Text-01',
+      apiKey: 'test-key',
+      systemPrompt: '你是改寫助手',
+      userTemplate: '把下方文字改寫為繁體書面語：\n{TEXT}'
+    });
+
+    const result = await provider.triggerWarmup({ timeoutMs: 5_000 });
+
+    assert.deepEqual(result, { ok: true, data: { response: '', usage: null } });
+    assert.equal(fetchCalled, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
