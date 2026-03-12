@@ -105,7 +105,71 @@ function startMockMinimaxServer(handler) {
 
 
 
-test('POST /rewrite sends one user message with minimax default template when system prompt is empty', async (t) => {
+test('POST /rewrite uses REWRITE_USER_TEMPLATE when MINIMAX_USER_TEMPLATE is absent', async (t) => {
+  let capturedMessages = null;
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const payload = JSON.parse(raw || '{}');
+      capturedMessages = payload.messages;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ reply: '改寫完成' }));
+    });
+  });
+
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const env = {
+    ...process.env,
+    REWRITE_PROVIDER: 'minimax',
+    WARMUP_ON_START: 'false',
+    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+    MINIMAX_API_KEY: 'minimax-test-key',
+    MINIMAX_SYSTEM_PROMPT: '',
+    REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}'
+  };
+  delete env.MINIMAX_USER_TEMPLATE;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '我今日唔係好舒服，想請半日假。' })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(capturedMessages, [
+    {
+      role: 'user',
+      content: 'Legacy：我今日唔係好舒服，想請半日假。'
+    }
+  ]);
+});
+
+test('POST /rewrite uses MINIMAX_USER_TEMPLATE over REWRITE_USER_TEMPLATE when both are set', async (t) => {
   let capturedMessages = null;
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
     let raw = '';
@@ -133,8 +197,74 @@ test('POST /rewrite sends one user message with minimax default template when sy
       BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
       MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
       MINIMAX_API_KEY: 'minimax-test-key',
-      MINIMAX_SYSTEM_PROMPT: ''
+      MINIMAX_SYSTEM_PROMPT: '',
+      REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}',
+      MINIMAX_USER_TEMPLATE: 'Minimax：{TEXT}'
     },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '我今日唔係好舒服，想請半日假。' })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(capturedMessages, [
+    {
+      role: 'user',
+      content: 'Minimax：我今日唔係好舒服，想請半日假。'
+    }
+  ]);
+});
+
+test('POST /rewrite sends one user message with minimax default template when system prompt is empty', async (t) => {
+  let capturedMessages = null;
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const payload = JSON.parse(raw || '{}');
+      capturedMessages = payload.messages;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ reply: '改寫完成' }));
+    });
+  });
+
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const env = {
+    ...process.env,
+    REWRITE_PROVIDER: 'minimax',
+    WARMUP_ON_START: 'false',
+    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+    MINIMAX_API_KEY: 'minimax-test-key',
+    MINIMAX_SYSTEM_PROMPT: ''
+  };
+  delete env.REWRITE_USER_TEMPLATE;
+  delete env.MINIMAX_USER_TEMPLATE;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env,
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -172,7 +302,7 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
     req.on('end', () => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.write(`data: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [{ delta: { content: '你好' } }] })}\n\n`);
-      res.write(`data: ${JSON.stringify({ object: 'chat.completion', choices: [{ finish_reason: 'stop', message: { content: '你好' } }], usage: { total_tokens: 6 } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ object: 'chat.completion', choices: [{ finish_reason: 'stop', message: { content: '你好' } }], usage: { total_tokens: 6 }, api_key: 'provider-side-secret' })}\n\n`);
       res.end();
     });
   });
@@ -228,22 +358,40 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
   assert.ok(doneChunk);
   assert.deepEqual(doneChunk.usage, { total_tokens: 6 });
 
-  const providerRequestLog = logLines
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .find((entry) => entry && entry.eventType === 'provider_request');
+  let parsedLogs = [];
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    parsedLogs = logLines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (parsedLogs.find((entry) => entry.eventType === 'provider_response_raw')) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  const providerRequestLog = parsedLogs.find((entry) => entry.eventType === 'provider_request');
 
   assert.ok(providerRequestLog);
   const loggedHeaders = providerRequestLog.payload?.headers || providerRequestLog.headers;
   assert.ok(loggedHeaders);
   assert.equal(loggedHeaders.Authorization, '[REDACTED]');
 
+  const providerRawLog = parsedLogs.find((entry) => entry.eventType === 'provider_response_raw');
+  assert.ok(providerRawLog);
+  assert.equal(providerRawLog.stream, true);
+  assert.deepEqual(providerRawLog.completion?.usage, { total_tokens: 6 });
+  assert.equal(providerRawLog.completion?.api_key, '[REDACTED]');
+
   const allLogs = logLines.join('\n');
   assert.equal(allLogs.includes(minimaxSecret), false);
   assert.equal(allLogs.includes(AUTH_SECRET), false);
+  assert.equal(allLogs.includes('provider-side-secret'), false);
 });

@@ -107,6 +107,13 @@ In Minimax mode, the bridge sends a role-split payload:
 
 If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
 
+Minimax user-template resolution order during migration:
+1. `MINIMAX_USER_TEMPLATE`
+2. `REWRITE_USER_TEMPLATE` (legacy compatibility fallback; set `MINIMAX_USER_TEMPLATE` explicitly)
+3. built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
+
+When `REWRITE_PROVIDER=minimax` and `MINIMAX_USER_TEMPLATE` is unset while `REWRITE_USER_TEMPLATE` is set, startup emits a one-time warning so deployments can migrate to explicit `MINIMAX_USER_TEMPLATE`.
+
 ### Success (`stream=false`)
 
 `200 OK`
