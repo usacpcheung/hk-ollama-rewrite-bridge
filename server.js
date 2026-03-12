@@ -460,6 +460,44 @@ async function runStartupWarmupLoop() {
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
 
+  if (REWRITE_PROVIDER === 'minimax') {
+    startupWarmupAttempts += 1;
+    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(Date.now());
+
+    if (minimaxPassiveReadiness.ready) {
+      promoteServiceReady();
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          msg: 'Startup passive readiness evaluated',
+          provider: 'minimax',
+          serviceState,
+          startupWarmupAttempts,
+          startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+          passiveReady: true,
+          passiveReason: minimaxPassiveReadiness.reason
+        })
+      );
+      return;
+    }
+
+    modelPhase = 'warming';
+    serviceState = 'degraded';
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'Startup passive readiness evaluated',
+        provider: 'minimax',
+        serviceState,
+        startupWarmupAttempts,
+        startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+        passiveReady: false,
+        passiveReason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY'
+      })
+    );
+    return;
+  }
+
   while (Date.now() < startupWarmupDeadlineAtMs) {
     startupWarmupAttempts += 1;
     const attemptStartedAtMs = Date.now();
@@ -668,6 +706,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
   let probeError = null;
   let warmupTriggeredNow = false;
   let minimaxRecoveryAttempt = false;
+  let minimaxPassiveReason = null;
   const isMinimax = REWRITE_PROVIDER === 'minimax';
 
   try {
@@ -715,7 +754,8 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     if (isMinimax) {
       const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
       probeReady = minimaxPassiveReadiness.ready;
-      probeError = minimaxPassiveReadiness.reason;
+      minimaxPassiveReason = minimaxPassiveReadiness.reason;
+      probeError = minimaxPassiveReason;
       if (minimaxPassiveReadiness.ready) {
         promoteServiceReady();
       } else {
@@ -762,6 +802,15 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
           modelPhase = 'warming';
         }
       }
+    }
+
+    if (isMinimax && probeReady !== true && minimaxPassiveReason === 'MINIMAX_API_KEY_MISSING') {
+      return errorResponse(
+        res,
+        503,
+        'MINIMAX_API_KEY_MISSING',
+        'Minimax API key is missing; set MINIMAX_API_KEY to enable rewrite requests.'
+      );
     }
 
     requestPhase = modelPhase;
