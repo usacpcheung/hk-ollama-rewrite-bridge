@@ -172,7 +172,7 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
     req.on('end', () => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.write(`data: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [{ delta: { content: '你好' } }] })}\n\n`);
-      res.write(`data: ${JSON.stringify({ object: 'chat.completion', choices: [{ finish_reason: 'stop', message: { content: '你好' } }], usage: { total_tokens: 6 } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ object: 'chat.completion', choices: [{ finish_reason: 'stop', message: { content: '你好' } }], usage: { total_tokens: 6 }, api_key: 'provider-side-secret' })}\n\n`);
       res.end();
     });
   });
@@ -228,22 +228,40 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
   assert.ok(doneChunk);
   assert.deepEqual(doneChunk.usage, { total_tokens: 6 });
 
-  const providerRequestLog = logLines
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .find((entry) => entry && entry.eventType === 'provider_request');
+  let parsedLogs = [];
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    parsedLogs = logLines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    if (parsedLogs.find((entry) => entry.eventType === 'provider_response_raw')) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  const providerRequestLog = parsedLogs.find((entry) => entry.eventType === 'provider_request');
 
   assert.ok(providerRequestLog);
   const loggedHeaders = providerRequestLog.payload?.headers || providerRequestLog.headers;
   assert.ok(loggedHeaders);
   assert.equal(loggedHeaders.Authorization, '[REDACTED]');
 
+  const providerRawLog = parsedLogs.find((entry) => entry.eventType === 'provider_response_raw');
+  assert.ok(providerRawLog);
+  assert.equal(providerRawLog.stream, true);
+  assert.deepEqual(providerRawLog.completion?.usage, { total_tokens: 6 });
+  assert.equal(providerRawLog.completion?.api_key, '[REDACTED]');
+
   const allLogs = logLines.join('\n');
   assert.equal(allLogs.includes(minimaxSecret), false);
   assert.equal(allLogs.includes(AUTH_SECRET), false);
+  assert.equal(allLogs.includes('provider-side-secret'), false);
 });
