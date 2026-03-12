@@ -3,12 +3,15 @@ const crypto = require('crypto');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
+const { createDebugLogger } = require('./providers/debug-logger');
 
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 600;
+const DEFAULT_MAX_COMPLETION_TOKENS = 300;
+const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
@@ -95,6 +98,14 @@ const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAUL
   min: 1,
   max: ABSOLUTE_MAX_TEXT_LENGTH
 });
+const REWRITE_MAX_COMPLETION_TOKENS = parseEnvBoundedInteger(
+  'REWRITE_MAX_COMPLETION_TOKENS',
+  DEFAULT_MAX_COMPLETION_TOKENS,
+  {
+    min: 1,
+    max: ABSOLUTE_MAX_COMPLETION_TOKENS
+  }
+);
 
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
@@ -181,10 +192,26 @@ const MINIMAX_SYSTEM_PROMPT =
   process.env.MINIMAX_SYSTEM_PROMPT !== undefined
     ? process.env.MINIMAX_SYSTEM_PROMPT
     : REWRITE_SYSTEM_PROMPT;
+const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
 const MINIMAX_USER_TEMPLATE =
   process.env.MINIMAX_USER_TEMPLATE !== undefined
     ? process.env.MINIMAX_USER_TEMPLATE
-    : REWRITE_USER_TEMPLATE;
+    : process.env.REWRITE_USER_TEMPLATE !== undefined
+      ? process.env.REWRITE_USER_TEMPLATE
+      : MINIMAX_DEFAULT_USER_TEMPLATE;
+
+if (
+  REWRITE_PROVIDER === 'minimax'
+  && process.env.MINIMAX_USER_TEMPLATE === undefined
+  && process.env.REWRITE_USER_TEMPLATE !== undefined
+) {
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: 'Using legacy Minimax user-template fallback from REWRITE_USER_TEMPLATE; set MINIMAX_USER_TEMPLATE explicitly.'
+    })
+  );
+}
 
 function renderUserContent(userTemplate, text) {
   if (typeof userTemplate !== 'string' || userTemplate.length === 0) {
@@ -215,17 +242,25 @@ function countUnicodeCharacters(value) {
   return [...value].length;
 }
 
+
+const debugLog = createDebugLogger({
+  enabled: REWRITE_DEBUG_RAW_OUTPUT,
+  defaultProvider: REWRITE_PROVIDER
+});
+
 const provider = createProvider({
   provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+  rewriteMaxCompletionTokens: REWRITE_MAX_COMPLETION_TOKENS,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
   minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
-  minimaxUserTemplate: MINIMAX_USER_TEMPLATE
+  minimaxUserTemplate: MINIMAX_USER_TEMPLATE,
+  debugLog
 });
 
 let modelPhase = 'unknown';
@@ -298,21 +333,16 @@ const logRewriteRequest = ({
   );
 };
 
-function logRawProviderOutput({ requestId, stream, providerResponse }) {
-  if (!REWRITE_DEBUG_RAW_OUTPUT || typeof providerResponse !== 'string') {
-    return;
-  }
-
-  console.log(
-    JSON.stringify({
-      level: 'debug',
-      msg: 'Raw provider rewrite output',
-      requestId,
-      provider: REWRITE_PROVIDER,
-      stream,
-      providerResponse
-    })
-  );
+function logProviderResponseMeta({ requestId, stream, usage, doneReason }) {
+  debugLog({
+    requestId,
+    stream,
+    eventType: 'provider_response_meta',
+    payload: {
+      usage: usage || null,
+      ...(doneReason ? { doneReason } : {})
+    }
+  });
 }
 
 const rewriteHeaderAuth = createRewriteHeaderAuth({
@@ -801,6 +831,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       let streamDoneSent = false;
       let streamedText = '';
       let streamedChunkEmitted = false;
+      let finalUsage = null;
 
       const writeStreamChunk = (payload) => {
         if (res.writableEnded) {
@@ -819,11 +850,12 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         }
 
         streamDoneSent = true;
-        writeStreamChunk({ response: '', done: true, ...extra });
+        writeStreamChunk({ response: '', done: true, ...(finalUsage ? { usage: finalUsage } : {}), ...extra });
       };
 
       const rewriteResult = provider.rewriteStream
         ? await provider.rewriteStream({
+            requestId,
             prompt,
             systemPrompt,
             userContent,
@@ -844,6 +876,20 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
 
                 if (chunk.done) {
                   const { done_reason: doneReason } = chunk;
+                  if (!finalUsage && chunk.usage && typeof chunk.usage === 'object') {
+                    finalUsage = chunk.usage;
+                  }
+
+                  if (!finalUsage) {
+                    const usageFields = ['prompt_eval_count', 'prompt_eval_duration', 'eval_count', 'eval_duration', 'total_duration', 'load_duration'];
+                    const chunkUsage = {};
+                    for (const field of usageFields) {
+                      if (typeof chunk[field] === 'number') {
+                        chunkUsage[field] = chunk[field];
+                      }
+                    }
+                    finalUsage = Object.keys(chunkUsage).length > 0 ? chunkUsage : finalUsage;
+                  }
                   writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
                   return;
                 }
@@ -867,11 +913,19 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
               }
 
               if (event.type === 'done') {
+                if (event.usage) {
+                  finalUsage = event.usage;
+                }
                 writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
+                return;
+              }
+
+              if (event.type === 'final' && event.usage) {
+                finalUsage = event.usage;
               }
             }
           })
-        : await provider.rewrite({ prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+        : await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
@@ -896,8 +950,14 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       lastError = null;
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
+      finalUsage = rewriteResult.data?.usage || finalUsage;
+      logProviderResponseMeta({
+        requestId,
+        stream: true,
+        usage: finalUsage,
+        doneReason: 'stop'
+      });
       const streamResponse = finalResponse || streamedText.trim();
-      logRawProviderOutput({ requestId, stream: true, providerResponse: streamResponse });
       if (streamResponse && !streamedChunkEmitted) {
         const finalText = toHK(streamResponse);
         writeStreamChunk({ response: finalText, done: false });
@@ -907,7 +967,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       return res.end();
     }
 
-    const rewriteResult = await provider.rewrite({ prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+    const rewriteResult = await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
@@ -936,14 +996,15 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     lastError = null;
 
     const modelText = (rewriteResult.data.response || '').trim();
-    logRawProviderOutput({ requestId, stream: false, providerResponse: modelText });
+    const usage = rewriteResult.data?.usage || null;
+    logProviderResponseMeta({ requestId, stream: false, usage, doneReason: 'stop' });
     if (!modelText) {
       setLastError('OLLAMA_ERROR', 'Empty model response');
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
     const finalText = toHK(modelText);
-    return res.json({ ok: true, result: finalText });
+    return res.json({ ok: true, result: finalText, ...(usage ? { usage } : {}) });
   } finally {
     logRewriteRequest({
       req,

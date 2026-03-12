@@ -36,13 +36,26 @@ Rewrite HK colloquial Cantonese into formal Traditional Chinese.
 
 ### Debug logging toggle
 
-Set environment variable `REWRITE_DEBUG_RAW_OUTPUT=true` to write raw provider output (before HK conversion) into service logs.
+Set environment variable `REWRITE_DEBUG_RAW_OUTPUT=true` to emit structured provider debug logs:
+- `provider_request`: outbound provider payload shape (request body)
+- `provider_response_meta`: response-side metadata such as usage counters
+
+Sensitive values are redacted (`Authorization`, `apiKey`, `X-Bridge-Auth`, secrets/tokens).
 
 Example journal check:
 
 ```bash
-journalctl -u rewrite-bridge -n 200 --no-pager | rg "Raw provider rewrite output"
+journalctl -u rewrite-bridge -n 200 --no-pager | rg '"eventType":"provider_(request|response_meta)"'
 ```
+
+### Runtime token-limit configuration
+
+- `REWRITE_MAX_COMPLETION_TOKENS` controls provider output token budget for both `stream=false` and `stream=true` rewrite paths.
+- Default: `300`.
+- Validation: must be a positive integer in range `1-8192`; empty/invalid/out-of-range values are ignored and default is used.
+- Provider mapping:
+  - Ollama: forwarded as `options.num_predict`.
+  - Minimax: forwarded as `max_completion_tokens`.
 
 ### Request body
 
@@ -85,7 +98,7 @@ In Minimax mode, the bridge sends a role-split payload:
     },
     {
       "role": "user",
-      "content": "原文：我今日唔係好舒服，想請半日假。"
+      "content": "把下方文字改寫為繁體書面語：\n我今日唔係好舒服，想請半日假。"
     }
   ],
   "stream": false
@@ -94,6 +107,13 @@ In Minimax mode, the bridge sends a role-split payload:
 
 If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
 
+Minimax user-template resolution order during migration:
+1. `MINIMAX_USER_TEMPLATE`
+2. `REWRITE_USER_TEMPLATE` (legacy compatibility fallback; set `MINIMAX_USER_TEMPLATE` explicitly)
+3. built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
+
+When `REWRITE_PROVIDER=minimax` and `MINIMAX_USER_TEMPLATE` is unset while `REWRITE_USER_TEMPLATE` is set, startup emits a one-time warning so deployments can migrate to explicit `MINIMAX_USER_TEMPLATE`.
+
 ### Success (`stream=false`)
 
 `200 OK`
@@ -101,7 +121,11 @@ If Minimax system prompt is unset/empty, it falls back to one `user` message for
 ```json
 {
   "ok": true,
-  "result": "我今天身體不適，想請半天假。"
+  "result": "我今天身體不適，想請半天假。",
+  "usage": {
+    "prompt_eval_count": 18,
+    "eval_count": 24
+  }
 }
 ```
 
@@ -115,7 +139,7 @@ Each line is JSON. Canonical chunk format:
 {"response":"我今天","done":false}
 {"response":"身體不適，","done":false}
 {"response":"想請半天假。","done":false}
-{"response":"","done":true,"done_reason":"stop"}
+{"response":"","done":true,"done_reason":"stop","usage":{"total_tokens":42}}
 ```
 
 ### Warming/startup responses
@@ -348,8 +372,8 @@ Possible `reason` values:
 
 The bridge normalizes provider output before returning data to clients.
 
-- Non-stream result always emits `{"ok":true,"result":"..."}` on success.
-- Stream result always emits NDJSON chunks with `response` + `done` (+ optional `done_reason`).
+- Non-stream result always emits `{"ok":true,"result":"..."}` on success, with optional additive `usage` when provider metadata is available.
+- Stream result always emits NDJSON chunks with `response` + `done` (+ optional `done_reason`, and optional `usage` on terminal done chunk).
 
 Backend parsing coverage currently includes:
 

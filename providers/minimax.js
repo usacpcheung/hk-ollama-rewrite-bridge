@@ -5,7 +5,9 @@ function createMinimaxProvider({
   model,
   apiKey,
   systemPrompt,
-  userTemplate
+  userTemplate,
+  maxCompletionTokens = 300,
+  debugLog
 }) {
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
@@ -65,49 +67,61 @@ function createMinimaxProvider({
     });
   }
 
-  async function rewrite({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
+  async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
     return generate({
+      requestId,
       prompt,
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300
+      maxTokens: maxCompletionTokens
     });
   }
 
-  async function rewriteStream({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk }) {
+  async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk }) {
     return generateStream({
+      requestId,
       prompt,
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
-      maxTokens: 300,
+      maxTokens: maxCompletionTokens,
       onChunk
     });
   }
 
-  async function generate({ prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens }) {
+  async function generate({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      };
+      const body = {
+        model,
+        messages: buildMessages({
+          prompt,
+          systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+          userContent
+        }),
+        stream: false,
+        max_completion_tokens: maxTokens,
+        temperature: 0.15
+      };
+
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_request',
+        payload: { headers, body }
+      });
+
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt,
-            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
-            userContent
-          }),
-          stream: false,
-          max_completion_tokens: maxTokens,
-          temperature: 0.15
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal
       });
 
@@ -125,13 +139,24 @@ function createMinimaxProvider({
         return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
       }
 
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: false,
+          response: data
+        }
+      });
+
       const responseText =
         data?.reply ||
         data?.choices?.[0]?.message?.content ||
         data?.choices?.[0]?.text ||
         '';
 
-      return { ok: true, data: { response: responseText } };
+      return { ok: true, data: { response: responseText, usage: data?.usage || null } };
     } catch (err) {
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
@@ -140,6 +165,7 @@ function createMinimaxProvider({
   }
 
   async function generateStream({
+    requestId,
     prompt,
     systemPrompt: runtimeSystemPrompt,
     userContent,
@@ -157,23 +183,33 @@ function createMinimaxProvider({
     };
 
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      };
+      const body = {
+        model,
+        messages: buildMessages({
+          prompt,
+          systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
+          userContent
+        }),
+        stream: true,
+        max_completion_tokens: maxTokens,
+        temperature: 0.15
+      };
+
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_request',
+        payload: { headers, body }
+      });
+
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt,
-            systemPrompt: runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt,
-            userContent
-          }),
-          stream: true,
-          max_completion_tokens: maxTokens,
-          temperature: 0.15
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal
       });
 
@@ -300,6 +336,17 @@ function createMinimaxProvider({
         streamedText ||
         '';
 
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: true,
+          completion: finalCompletionEvent || null
+        }
+      });
+
       if (!streamedText && finalResponseText && !doneEventEmitted) {
         await emitMappedChunk(buildMappedChunk({
           id: streamId,
@@ -389,7 +436,7 @@ function createMinimaxProvider({
   };
 }
 
-function buildMappedChunk({ id, model, response, done, doneReason }) {
+function buildMappedChunk({ id, model, response, done, doneReason, usage }) {
   return {
     ...(id ? { id } : {}),
     object: 'chat.completion.chunk',
@@ -397,7 +444,8 @@ function buildMappedChunk({ id, model, response, done, doneReason }) {
     ...(model ? { model } : {}),
     response,
     done,
-    ...(done ? { done_reason: doneReason || 'stop' } : {})
+    ...(done ? { done_reason: doneReason || 'stop' } : {}),
+    ...(done && usage && typeof usage === 'object' ? { usage } : {})
   };
 }
 
@@ -427,7 +475,7 @@ function parseMinimaxSseFrame(payload) {
     return {
       completion,
       finalMessageContent,
-      chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason })
+      chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason, usage: completion?.usage || null })
     };
   }
 

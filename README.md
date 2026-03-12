@@ -61,15 +61,16 @@ Tune runtime behavior without code changes:
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Max completion tokens sent to both Ollama (`num_predict`) and Minimax (`max_completion_tokens`) for `POST /rewrite` stream and non-stream paths. Must be an integer in range `1-8192`; invalid/empty values fall back to `300`. |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
-| `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable debug logging of raw provider rewrite output (pre-OpenCC conversion) to stdout/stderr so it appears in systemd journal. |
+| `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
 | `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
 | `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
 | `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
-| `MINIMAX_USER_TEMPLATE` | fallback to `REWRITE_USER_TEMPLATE` | Minimax-only user role wrapper template. |
+| `MINIMAX_USER_TEMPLATE` | `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`) | Minimax-only user role wrapper template. Effective chain: `MINIMAX_USER_TEMPLATE` → `REWRITE_USER_TEMPLATE` (legacy compatibility fallback) → Minimax built-in default. Set `MINIMAX_USER_TEMPLATE` explicitly. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
@@ -80,7 +81,7 @@ Tune runtime behavior without code changes:
 ### Example startup with overrides
 
 ```bash
-OLLAMA_KEEP_ALIVE=10m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=60000 WARMUP_RETRIGGER_WINDOW_MS=10000 WARMUP_STARTUP_MAX_WAIT_MS=180000 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000 npm start
+OLLAMA_KEEP_ALIVE=10m OLLAMA_TIMEOUT_MS=45000 OLLAMA_COLD_TIMEOUT_MS=180000 REWRITE_MAX_COMPLETION_TOKENS=400 WARMUP_PS_CACHE_MS=3000 WARMUP_PS_TIMEOUT_MS=1200 WARMUP_RETRY_AFTER_SEC=3 WARMUP_TRIGGER_TIMEOUT_MS=60000 WARMUP_RETRIGGER_WINDOW_MS=10000 WARMUP_STARTUP_MAX_WAIT_MS=180000 WARMUP_STARTUP_RETRY_INTERVAL_MS=5000 npm start
 ```
 
 ## Small VPS recommended profile
@@ -117,6 +118,13 @@ When `REWRITE_PROVIDER=minimax`, requests are serialized as chat `messages`:
 ```
 
 If `MINIMAX_SYSTEM_PROMPT` is empty, the bridge safely falls back to a single `user` message.
+
+Minimax user-template resolution order during migration:
+- `MINIMAX_USER_TEMPLATE` (recommended explicit setting)
+- `REWRITE_USER_TEMPLATE` (legacy compatibility fallback)
+- built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
+
+When running with `REWRITE_PROVIDER=minimax`, if `MINIMAX_USER_TEMPLATE` is unset but `REWRITE_USER_TEMPLATE` is set, startup logs a one-time warning recommending migration to `MINIMAX_USER_TEMPLATE`.
 
 ## Public API path behind reverse proxy
 
@@ -172,7 +180,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - During startup warm-up (`serviceState=starting`), returns HTTP `202` and `Retry-After` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`.
 - If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
 - Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
-- Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }`.
+- Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 
 ### `GET /healthz` / `GET /readyz`
 

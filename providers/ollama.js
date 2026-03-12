@@ -2,7 +2,9 @@ function createOllamaProvider({
   generateUrl,
   psUrl,
   model,
-  keepAlive
+  keepAlive,
+  maxCompletionTokens = 300,
+  debugLog
 }) {
   async function checkReadiness({ timeoutMs }) {
     const controller = new AbortController();
@@ -51,44 +53,56 @@ function createOllamaProvider({
     });
   }
 
-  async function rewrite({ prompt, timeoutMs }) {
+  async function rewrite({ requestId, prompt, timeoutMs }) {
     return generate({
+      requestId,
       prompt,
       timeoutMs,
       options: {
         temperature: 0.15,
-        num_predict: 300
+        num_predict: maxCompletionTokens
       }
     });
   }
 
-  async function rewriteStream({ prompt, timeoutMs, onChunk }) {
+  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk }) {
     return generateStream({
+      requestId,
       prompt,
       timeoutMs,
       options: {
         temperature: 0.15,
-        num_predict: 300
+        num_predict: maxCompletionTokens
       },
       onChunk
     });
   }
 
-  async function generate({ prompt, timeoutMs, options }) {
+  async function generate({ requestId, prompt, timeoutMs, options }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const body = {
+        model,
+        prompt,
+        stream: false,
+        keep_alive: keepAlive,
+        options
+      };
+
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_request',
+        payload: { headers, body }
+      });
+
       const response = await fetch(generateUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          prompt,
-          stream: false,
-          keep_alive: keepAlive,
-          options
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal
       });
 
@@ -106,7 +120,7 @@ function createOllamaProvider({
         return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
       }
 
-      return { ok: true, data };
+      return { ok: true, data: { ...data, usage: extractOllamaUsage(data) } };
     } catch (err) {
       return { ok: false, error: mapError(err, { kind: 'fetch' }) };
     } finally {
@@ -114,7 +128,7 @@ function createOllamaProvider({
     }
   }
 
-  async function generateStream({ prompt, timeoutMs, options, onChunk }) {
+  async function generateStream({ requestId, prompt, timeoutMs, options, onChunk }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -125,16 +139,26 @@ function createOllamaProvider({
     };
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      const body = {
+        model,
+        prompt,
+        stream: true,
+        keep_alive: keepAlive,
+        options
+      };
+
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_request',
+        payload: { headers, body }
+      });
+
       const response = await fetch(generateUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          prompt,
-          stream: true,
-          keep_alive: keepAlive,
-          options
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal
       });
 
@@ -213,7 +237,8 @@ function createOllamaProvider({
         ok: true,
         data: {
           response: responseText,
-          completion: lastChunk
+          completion: lastChunk,
+          usage: extractOllamaUsage(lastChunk)
         }
       };
     } catch (err) {
@@ -274,4 +299,29 @@ function createOllamaProvider({
   };
 }
 
-module.exports = { createOllamaProvider };
+
+function extractOllamaUsage(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const usage = {};
+  const fields = [
+    'prompt_eval_count',
+    'prompt_eval_duration',
+    'eval_count',
+    'eval_duration',
+    'total_duration',
+    'load_duration'
+  ];
+
+  for (const field of fields) {
+    if (typeof payload[field] === 'number') {
+      usage[field] = payload[field];
+    }
+  }
+
+  return Object.keys(usage).length > 0 ? usage : null;
+}
+
+module.exports = { createOllamaProvider, extractOllamaUsage };

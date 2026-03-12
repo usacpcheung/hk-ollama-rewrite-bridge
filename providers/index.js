@@ -7,18 +7,22 @@ function createProvider({
   ollamaPsUrl,
   ollamaModel,
   ollamaKeepAlive,
+  rewriteMaxCompletionTokens,
   minimaxApiUrl,
   minimaxModel,
   minimaxApiKey,
   minimaxSystemPrompt,
-  minimaxUserTemplate
+  minimaxUserTemplate,
+  debugLog
 }) {
   if (provider === 'ollama') {
     return createOllamaProvider({
       generateUrl: ollamaUrl,
       psUrl: ollamaPsUrl,
       model: ollamaModel,
-      keepAlive: ollamaKeepAlive
+      keepAlive: ollamaKeepAlive,
+      maxCompletionTokens: rewriteMaxCompletionTokens,
+      debugLog
     });
   }
 
@@ -28,7 +32,9 @@ function createProvider({
       model: minimaxModel,
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
-      userTemplate: minimaxUserTemplate
+      userTemplate: minimaxUserTemplate,
+      maxCompletionTokens: rewriteMaxCompletionTokens,
+      debugLog
     });
   }
 
