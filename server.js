@@ -179,7 +179,7 @@ const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
-const REWRITE_SYSTEM_PROMPT = process.env.REWRITE_SYSTEM_PROMPT ||
+const REWRITE_SYSTEM_PROMPT =
   '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
   + '必須逐句保留原意與全部資訊（包括人物、時間、地點、數字、否定、因果、條件、語氣）。\n'
   + '只可改寫語體，不可新增、虛構、延伸、評論、解釋、總結或改變立場。\n'
@@ -187,31 +187,10 @@ const REWRITE_SYSTEM_PROMPT = process.env.REWRITE_SYSTEM_PROMPT ||
   + '若上述詞語出現在引號內容、專有名稱、品牌、口號、歌詞或其他關鍵語義位置，必須保留，不可硬改。\n'
   + '不得把內容寫成故事、對話續寫、創作文本或條列重組。\n'
   + '輸出格式：只輸出改寫後正文，不要標題、前言、註解、解釋、JSON、metadata 或引號。';
-const REWRITE_USER_TEMPLATE = process.env.REWRITE_USER_TEMPLATE || '原文：{TEXT}';
-const MINIMAX_SYSTEM_PROMPT =
-  process.env.MINIMAX_SYSTEM_PROMPT !== undefined
-    ? process.env.MINIMAX_SYSTEM_PROMPT
-    : REWRITE_SYSTEM_PROMPT;
+const REWRITE_USER_TEMPLATE = '原文：{TEXT}';
+const MINIMAX_SYSTEM_PROMPT = REWRITE_SYSTEM_PROMPT;
 const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
-const MINIMAX_USER_TEMPLATE =
-  process.env.MINIMAX_USER_TEMPLATE !== undefined
-    ? process.env.MINIMAX_USER_TEMPLATE
-    : process.env.REWRITE_USER_TEMPLATE !== undefined
-      ? process.env.REWRITE_USER_TEMPLATE
-      : MINIMAX_DEFAULT_USER_TEMPLATE;
-
-if (
-  REWRITE_PROVIDER === 'minimax'
-  && process.env.MINIMAX_USER_TEMPLATE === undefined
-  && process.env.REWRITE_USER_TEMPLATE !== undefined
-) {
-  console.warn(
-    JSON.stringify({
-      level: 'warn',
-      msg: 'Using legacy Minimax user-template fallback from REWRITE_USER_TEMPLATE; set MINIMAX_USER_TEMPLATE explicitly.'
-    })
-  );
-}
+const MINIMAX_USER_TEMPLATE = MINIMAX_DEFAULT_USER_TEMPLATE;
 
 function renderUserContent(userTemplate, text) {
   if (typeof userTemplate !== 'string' || userTemplate.length === 0) {

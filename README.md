@@ -67,10 +67,6 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
-| `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
-| `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
-| `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
-| `MINIMAX_USER_TEMPLATE` | `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`) | Minimax-only user role wrapper template. Effective chain: `MINIMAX_USER_TEMPLATE` → `REWRITE_USER_TEMPLATE` (legacy compatibility fallback) → Minimax built-in default. Set `MINIMAX_USER_TEMPLATE` explicitly. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
 | `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
@@ -117,14 +113,7 @@ When `REWRITE_PROVIDER=minimax`, requests are serialized as chat `messages`:
 ]
 ```
 
-If `MINIMAX_SYSTEM_PROMPT` is empty, the bridge safely falls back to a single `user` message.
-
-Minimax user-template resolution order during migration:
-- `MINIMAX_USER_TEMPLATE` (recommended explicit setting)
-- `REWRITE_USER_TEMPLATE` (legacy compatibility fallback)
-- built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
-
-When running with `REWRITE_PROVIDER=minimax`, if `MINIMAX_USER_TEMPLATE` is unset but `REWRITE_USER_TEMPLATE` is set, startup logs a one-time warning recommending migration to `MINIMAX_USER_TEMPLATE`.
+The bridge uses built-in prompt construction for Minimax and does not support runtime prompt-template overrides via environment variables.
 
 ## Public API path behind reverse proxy
 
