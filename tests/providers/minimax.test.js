@@ -127,14 +127,14 @@ test('rewrite serializes system and user messages when system prompt is configur
 
   const result = await provider.rewrite({
     prompt: 'legacy prompt',
-    userContent: '原文：你今日得唔得閒？',
+    userContent: '把下方文字改寫為繁體書面語：\n你今日得唔得閒？',
     timeoutMs: 5_000
   });
 
   assert.equal(result.ok, true);
   assert.deepEqual(capturedBody.messages, [
     { role: 'system', content: '你是改寫助手' },
-    { role: 'user', content: '原文：你今日得唔得閒？' }
+    { role: 'user', content: '把下方文字改寫為繁體書面語：\n你今日得唔得閒？' }
   ]);
 });
 
@@ -161,14 +161,14 @@ test('rewriteStream falls back to single user message when system prompt is miss
   });
 
   const result = await provider.rewriteStream({
-    prompt: '原文：測試內容',
+    prompt: '把下方文字改寫為繁體書面語：\n測試內容',
     timeoutMs: 5_000,
     onChunk: async () => {}
   });
 
   assert.equal(result.ok, true);
   assert.deepEqual(capturedBody.messages, [
-    { role: 'user', content: '原文：測試內容' }
+    { role: 'user', content: '把下方文字改寫為繁體書面語：\n測試內容' }
   ]);
 });
 

@@ -192,10 +192,11 @@ const MINIMAX_SYSTEM_PROMPT =
   process.env.MINIMAX_SYSTEM_PROMPT !== undefined
     ? process.env.MINIMAX_SYSTEM_PROMPT
     : REWRITE_SYSTEM_PROMPT;
+const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
 const MINIMAX_USER_TEMPLATE =
   process.env.MINIMAX_USER_TEMPLATE !== undefined
     ? process.env.MINIMAX_USER_TEMPLATE
-    : REWRITE_USER_TEMPLATE;
+    : MINIMAX_DEFAULT_USER_TEMPLATE;
 
 function renderUserContent(userTemplate, text) {
   if (typeof userTemplate !== 'string' || userTemplate.length === 0) {

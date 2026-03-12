@@ -98,7 +98,7 @@ In Minimax mode, the bridge sends a role-split payload:
     },
     {
       "role": "user",
-      "content": "原文：我今日唔係好舒服，想請半日假。"
+      "content": "把下方文字改寫為繁體書面語：\n我今日唔係好舒服，想請半日假。"
     }
   ],
   "stream": false
