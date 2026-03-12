@@ -90,3 +90,98 @@ test('POST /rewrite max-length validation counts Unicode characters instead of U
   assert.equal(surrogateOverLimit.status, 413);
   assert.equal(surrogateOverLimit.body?.error?.code, 'TOO_LONG');
 });
+
+const http = require('node:http');
+
+function startMockMinimaxServer(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({ server, port });
+    });
+  });
+}
+
+test('POST /rewrite stream done chunk includes usage and debug logs redact secrets', async (t) => {
+  const minimaxSecret = 'minimax-test-key';
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ object: 'chat.completion.chunk', choices: [{ delta: { content: '你好' } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ object: 'chat.completion', choices: [{ finish_reason: 'stop', message: { content: '你好' } }], usage: { total_tokens: 6 } })}\n\n`);
+      res.end();
+    });
+  });
+
+  t.after(() => {
+    mockServer.close();
+  });
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      REWRITE_DEBUG_RAW_OUTPUT: 'true',
+      MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+      MINIMAX_API_KEY: minimaxSecret
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  const logLines = [];
+  const collectLogs = (chunk) => {
+    const lines = String(chunk).split('\n').map((line) => line.trim()).filter(Boolean);
+    logLines.push(...lines);
+  };
+  serverProcess.stdout.on('data', collectLogs);
+  serverProcess.stderr.on('data', collectLogs);
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '測試', stream: true })
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  const chunks = body.trim().split('\n').map((line) => JSON.parse(line));
+  const doneChunk = chunks.find((chunk) => chunk.done === true);
+  assert.ok(doneChunk);
+  assert.deepEqual(doneChunk.usage, { total_tokens: 6 });
+
+  const providerRequestLog = logLines
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .find((entry) => entry && entry.eventType === 'provider_request');
+
+  assert.ok(providerRequestLog);
+  const loggedHeaders = providerRequestLog.payload?.headers || providerRequestLog.headers;
+  assert.ok(loggedHeaders);
+  assert.equal(loggedHeaders.Authorization, '[REDACTED]');
+
+  const allLogs = logLines.join('\n');
+  assert.equal(allLogs.includes(minimaxSecret), false);
+  assert.equal(allLogs.includes(AUTH_SECRET), false);
+});

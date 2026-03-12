@@ -12,7 +12,8 @@ function createProvider({
   minimaxModel,
   minimaxApiKey,
   minimaxSystemPrompt,
-  minimaxUserTemplate
+  minimaxUserTemplate,
+  debugLog
 }) {
   if (provider === 'ollama') {
     return createOllamaProvider({
@@ -20,7 +21,8 @@ function createProvider({
       psUrl: ollamaPsUrl,
       model: ollamaModel,
       keepAlive: ollamaKeepAlive,
-      maxCompletionTokens: rewriteMaxCompletionTokens
+      maxCompletionTokens: rewriteMaxCompletionTokens,
+      debugLog
     });
   }
 
@@ -31,7 +33,8 @@ function createProvider({
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
       userTemplate: minimaxUserTemplate,
-      maxCompletionTokens: rewriteMaxCompletionTokens
+      maxCompletionTokens: rewriteMaxCompletionTokens,
+      debugLog
     });
   }
 

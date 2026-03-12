@@ -235,3 +235,29 @@ test('rewriteStream uses configured max_completion_tokens', async (t) => {
   assert.equal(result.ok, true);
   assert.equal(capturedBody.max_completion_tokens, 640);
 });
+
+test('rewrite returns usage metadata when provider includes usage', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(
+    JSON.stringify({ reply: 'ok', usage: { total_tokens: 12, prompt_tokens: 7, completion_tokens: 5 } }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.usage, { total_tokens: 12, prompt_tokens: 7, completion_tokens: 5 });
+});

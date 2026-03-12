@@ -63,7 +63,7 @@ Tune runtime behavior without code changes:
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Max completion tokens sent to both Ollama (`num_predict`) and Minimax (`max_completion_tokens`) for `POST /rewrite` stream and non-stream paths. Must be an integer in range `1-8192`; invalid/empty values fall back to `300`. |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
-| `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable debug logging of raw provider rewrite output (pre-OpenCC conversion) to stdout/stderr so it appears in systemd journal. |
+| `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
@@ -173,7 +173,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - During startup warm-up (`serviceState=starting`), returns HTTP `202` and `Retry-After` with `MODEL_WARMUP_STARTED` or `MODEL_WARMING`.
 - If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
 - Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
-- Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }`.
+- Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 
 ### `GET /healthz` / `GET /readyz`
 
