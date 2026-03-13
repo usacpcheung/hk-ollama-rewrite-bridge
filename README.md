@@ -120,6 +120,7 @@ The bridge uses built-in prompt construction for Minimax and does not support ru
 Canonical public namespace is **`/api/rewrite-bridge/`**.
 
 - `POST /api/rewrite-bridge/rewrite`
+- `POST /api/rewrite` (legacy compatibility alias to rewrite endpoint)
 - `GET /api/rewrite-bridge/model-status`
 - `GET /api/rewrite-bridge/healthz`
 - `GET /api/rewrite-bridge/readyz`

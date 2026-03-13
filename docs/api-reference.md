@@ -81,7 +81,19 @@ curl -i -sS http://127.0.0.1:3001/rewrite \
 curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
   -H 'Content-Type: application/json' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
+
+# legacy BFF/proxy alias (non-stream JSON)
+curl -i -sS https://<your-domain>/api/rewrite \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"我今日唔係好舒服，想請半日假。"}'
+
+# legacy BFF/proxy alias (stream NDJSON pass-through)
+curl -N -sS https://<your-domain>/api/rewrite \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"我今日唔係好舒服，想請半日假。","stream":true}'
 ```
+
+`POST /api/rewrite` forwards to `POST /rewrite`, preserving auth headers (`X-Bridge-Auth`, `X-Authenticated-Email`) and forwarding `stream` unchanged. When `stream=true`, response chunks are proxied as NDJSON without full-body buffering.
 
 
 ### Minimax message-role example

@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const { Readable } = require('node:stream');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
@@ -221,6 +222,10 @@ function countUnicodeCharacters(value) {
   return [...value].length;
 }
 
+function isStreamRequested(stream) {
+  return stream === true || stream === 'true' || stream === 1 || stream === '1';
+}
+
 
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
@@ -341,6 +346,47 @@ const rewriteHeaderAuth = createRewriteHeaderAuth({
       }
     });
   }
+});
+
+app.post('/api/rewrite', async (req, res) => {
+  const { text, stream } = req.body || {};
+  const streamRequested = isStreamRequested(stream);
+  const upstreamHeaders = {
+    'Content-Type': 'application/json'
+  };
+
+  for (const headerName of ['x-bridge-auth', 'x-authenticated-email', 'x-auth-request-email', 'x-auth-request-user']) {
+    const headerValue = req.get(headerName);
+    if (headerValue) {
+      upstreamHeaders[headerName] = headerValue;
+    }
+  }
+
+  const upstreamResponse = await fetch(`http://${HOST}:${PORT}/rewrite`, {
+    method: 'POST',
+    headers: upstreamHeaders,
+    body: JSON.stringify({ text, stream })
+  });
+
+  const contentType = upstreamResponse.headers.get('content-type');
+  if (contentType) {
+    res.set('Content-Type', contentType);
+  }
+
+  const retryAfter = upstreamResponse.headers.get('retry-after');
+  if (retryAfter) {
+    res.set('Retry-After', retryAfter);
+  }
+
+  res.status(upstreamResponse.status);
+
+  if (streamRequested && upstreamResponse.body) {
+    Readable.fromWeb(upstreamResponse.body).pipe(res);
+    return;
+  }
+
+  const rawBody = await upstreamResponse.text();
+  return res.send(rawBody);
 });
 
 
@@ -692,7 +738,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     email = req.auth?.email || null;
 
     const { text, stream } = req.body || {};
-    const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
+    const streamRequested = isStreamRequested(stream);
 
     if (typeof text !== 'string') {
       return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
