@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
+const { createProviderAdapter } = require('./lib/provider-adapter');
+const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createDebugLogger } = require('./providers/debug-logger');
 const {
@@ -14,10 +16,6 @@ const {
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
-const DEFAULT_MAX_TEXT_LENGTH = 200;
-const ABSOLUTE_MAX_TEXT_LENGTH = 600;
-const DEFAULT_MAX_COMPLETION_TOKENS = 300;
-const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
 const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
@@ -100,19 +98,6 @@ function parseEnvBoolean(name, fallback = false) {
   return fallback;
 }
 
-const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
-  min: 1,
-  max: ABSOLUTE_MAX_TEXT_LENGTH
-});
-const REWRITE_MAX_COMPLETION_TOKENS = parseEnvBoundedInteger(
-  'REWRITE_MAX_COMPLETION_TOKENS',
-  DEFAULT_MAX_COMPLETION_TOKENS,
-  {
-    min: 1,
-    max: ABSOLUTE_MAX_COMPLETION_TOKENS
-  }
-);
-
 const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
 const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
   max: 600_000
@@ -185,68 +170,33 @@ const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
-const REWRITE_SYSTEM_PROMPT =
-  '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
-  + '必須逐句保留原意與全部資訊（包括人物、時間、地點、數字、否定、因果、條件、語氣）。\n'
-  + '只可改寫語體，不可新增、虛構、延伸、評論、解釋、總結或改變立場。\n'
-  + '請移除口語贅詞、語氣助詞與寒暄開場（例如：喂、係、嘅、啦、囉、呀、唉、哦、嗯、咩），但只可移除不影響語義者，不得刪除任何實質內容詞。\n'
-  + '若上述詞語出現在引號內容、專有名稱、品牌、口號、歌詞或其他關鍵語義位置，必須保留，不可硬改。\n'
-  + '不得把內容寫成故事、對話續寫、創作文本或條列重組。\n'
-  + '輸出格式：只輸出改寫後正文，不要標題、前言、註解、解釋、JSON、metadata 或引號。';
-const REWRITE_USER_TEMPLATE = '原文：{TEXT}';
-const MINIMAX_SYSTEM_PROMPT = REWRITE_SYSTEM_PROMPT;
-const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
-const MINIMAX_USER_TEMPLATE = MINIMAX_DEFAULT_USER_TEMPLATE;
-
-function renderUserContent(userTemplate, text) {
-  if (typeof userTemplate !== 'string' || userTemplate.length === 0) {
-    return text;
-  }
-
-  if (userTemplate.includes('{TEXT}')) {
-    return userTemplate.replace('{TEXT}', text);
-  }
-
-  return `${userTemplate}${text}`;
-}
-
-function buildRewritePrompt(systemPrompt, userTemplate, text) {
-  const userContent = renderUserContent(userTemplate, text);
-  const prompt = [systemPrompt, userContent]
-    .filter((entry) => typeof entry === 'string' && entry.length > 0)
-    .join('\n\n');
-
-  return {
-    prompt,
-    systemPrompt,
-    userContent
-  };
-}
-
-function countUnicodeCharacters(value) {
-  return [...value].length;
-}
-
-
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
   defaultProvider: REWRITE_PROVIDER
 });
 
-const provider = createProvider({
+const serviceRegistry = createServiceRegistry({
+  parseEnvBoundedInteger,
+  provider: REWRITE_PROVIDER,
+  readyTimeoutMs: OLLAMA_TIMEOUT_MS,
+  coldTimeoutMs: OLLAMA_COLD_TIMEOUT_MS
+});
+const rewriteService = serviceRegistry.get('rewrite');
+
+const providerAdapter = createProviderAdapter(createProvider({
   provider: REWRITE_PROVIDER,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  rewriteMaxCompletionTokens: REWRITE_MAX_COMPLETION_TOKENS,
+  rewriteMaxCompletionTokens: rewriteService.provider.maxCompletionTokens,
   minimaxApiUrl: MINIMAX_API_URL,
   minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
-  minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
-  minimaxUserTemplate: MINIMAX_USER_TEMPLATE,
+  minimaxSystemPrompt: rewriteService.prompts.minimaxSystemPrompt,
+  minimaxUserTemplate: rewriteService.prompts.minimaxUserTemplate,
   debugLog
-});
+}));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
@@ -378,7 +328,7 @@ function warmupWithinColdWindow(nowMs) {
 
 async function probeModelReady() {
   const timeoutMs = REWRITE_PROVIDER === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
-  return provider.checkReadiness({ timeoutMs });
+  return providerAdapter.checkReadiness({ timeoutMs });
 }
 
 function getMinimaxPassiveReadiness(nowMs = Date.now()) {
@@ -418,7 +368,7 @@ async function triggerWarmupIfNeeded(nowMs) {
   lastWarmupTriggerAtMs = nowMs;
 
   try {
-    const warmupResult = await provider.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
+    const warmupResult = await providerAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
     if (!warmupResult.ok) {
       lastWarmupResult = 'failed';
       lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
@@ -676,7 +626,7 @@ app.get('/readyz', async (_req, res) => {
   return res.status(503).json({ ok: false, serviceState, reason });
 });
 
-app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
+app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath], rewriteHeaderAuth, async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   let email = null;
@@ -693,28 +643,15 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
   try {
     email = req.auth?.email || null;
 
-    const { text, stream } = req.body || {};
-    const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
-
-    if (typeof text !== 'string') {
-      return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
+    const validationResult = rewriteService.validateRequest({ body: req.body });
+    if (!validationResult.ok) {
+      return errorResponse(res, validationResult.status, validationResult.code, validationResult.message);
     }
 
-    const trimmedText = text.trim();
-    const inputCharCount = countUnicodeCharacters(trimmedText);
+    const { trimmedText, streamRequested, inputCharCount } = validationResult.value;
     inputLength = inputCharCount;
 
-    if (!trimmedText) {
-      return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
-    }
-
-    if (inputCharCount > MAX_TEXT_LENGTH) {
-      return errorResponse(res, 413, 'TOO_LONG', `Max ${MAX_TEXT_LENGTH} characters`);
-    }
-
-    const { prompt, systemPrompt, userContent } = isMinimax
-      ? buildRewritePrompt(MINIMAX_SYSTEM_PROMPT, MINIMAX_USER_TEMPLATE, trimmedText)
-      : buildRewritePrompt(REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE, trimmedText);
+    const { prompt, systemPrompt, userContent } = rewriteService.buildPrompt({ text: trimmedText, isMinimax });
 
     const nowMs = Date.now();
     const probeAgeMs = lastProbeAtMs ? Math.max(0, nowMs - lastProbeAtMs) : Number.POSITIVE_INFINITY;
@@ -795,7 +732,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     }
 
     requestPhase = modelPhase;
-    selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
+    selectedTimeoutMs = requestPhase === 'ready' ? rewriteService.timeouts.readyMs : rewriteService.timeouts.coldMs;
 
     if (serviceState === 'starting') {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
@@ -855,8 +792,8 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
 
       const streamWriter = createStreamWriter(res);
 
-      const rewriteResult = provider.rewriteStream
-        ? await provider.rewriteStream({
+      const rewriteResult = providerAdapter.rewriteStream
+        ? await providerAdapter.rewriteStream({
             requestId,
             prompt,
             systemPrompt,
@@ -890,12 +827,12 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
               }
             }
           })
-        : await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+        : await providerAdapter.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
         consecutiveRewriteFailures += 1;
-        const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+        const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
         setLastError(mappedError.code, mappedError.message);
         streamWriter.writeError({
           code: mappedError.code,
@@ -932,11 +869,11 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       return res.end();
     }
 
-    const rewriteResult = await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+    const rewriteResult = await providerAdapter.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
-      const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+      const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
@@ -999,7 +936,7 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  const providerInfo = provider.getInfo ? provider.getInfo() : {};
+  const providerInfo = providerAdapter.getInfo();
   console.log(
     JSON.stringify({
       level: 'info',
