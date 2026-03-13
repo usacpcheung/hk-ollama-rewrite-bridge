@@ -4,6 +4,12 @@ const OpenCC = require('opencc-js');
 const { createProvider } = require('./providers');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createDebugLogger } = require('./providers/debug-logger');
+const {
+  writeJsonError,
+  writeJsonSuccess,
+  setStreamHeaders,
+  createStreamWriter
+} = require('./lib/output-writer');
 
 const app = express();
 const HOST = '127.0.0.1';
@@ -264,11 +270,7 @@ const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 app.use(express.json({ limit: '16kb' }));
 
 function errorResponse(res, status, code, message, extra = {}) {
-  return res.status(status).json({
-    ok: false,
-    error: { code, message },
-    ...extra
-  });
+  return writeJsonError(res, status, code, message, extra);
 }
 
 const logRewriteRequest = ({
@@ -620,7 +622,7 @@ app.get('/model-status', async (_req, res) => {
 });
 
 app.get('/healthz', (_req, res) => {
-  return res.json({ ok: true });
+  return writeJsonSuccess(res);
 });
 
 app.get('/readyz', async (_req, res) => {
@@ -632,7 +634,7 @@ app.get('/readyz', async (_req, res) => {
     const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
     if (minimaxPassiveReadiness.ready) {
       promoteServiceReady();
-      return res.json({ ok: true, serviceState, reason: null });
+      return writeJsonSuccess(res, { serviceState, reason: null });
     }
 
     modelPhase = 'warming';
@@ -654,7 +656,7 @@ app.get('/readyz', async (_req, res) => {
 
   if (serviceState === 'ready') {
     if (probeReady === true) {
-      return res.json({ ok: true, serviceState, reason: null });
+      return writeJsonSuccess(res, { serviceState, reason: null });
     }
 
     if (probeReady === false) {
@@ -844,42 +846,12 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     }
 
     if (streamRequested) {
-      res.status(200);
-      res.set({
-        'Content-Type': 'application/x-ndjson; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      });
-
-      if (typeof res.flushHeaders === 'function') {
-        res.flushHeaders();
-      }
-
-      let streamDoneSent = false;
+      setStreamHeaders(res);
       let streamedText = '';
       let streamedChunkEmitted = false;
       let finalUsage = null;
 
-      const writeStreamChunk = (payload) => {
-        if (res.writableEnded) {
-          return;
-        }
-
-        res.write(`${JSON.stringify(payload)}\n`);
-        if (typeof res.flush === 'function') {
-          res.flush();
-        }
-      };
-
-      const writeDoneChunk = (extra = {}) => {
-        if (streamDoneSent) {
-          return;
-        }
-
-        streamDoneSent = true;
-        writeStreamChunk({ response: '', done: true, ...(finalUsage ? { usage: finalUsage } : {}), ...extra });
-      };
+      const streamWriter = createStreamWriter(res);
 
       const rewriteResult = provider.rewriteStream
         ? await provider.rewriteStream({
@@ -894,14 +866,14 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
               }
 
               if (event.type === 'error' && event.error && typeof event.error === 'object') {
-                writeStreamChunk({ done: true, error: event.error });
+                streamWriter.writeError(event.error);
                 return;
               }
 
               if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
                 streamedText += event.text;
                 streamedChunkEmitted = true;
-                writeStreamChunk({ response: toHK(event.text), done: false });
+                streamWriter.writeChunk({ response: toHK(event.text), done: false });
                 return;
               }
 
@@ -918,6 +890,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
                   const { done_reason: doneReason } = chunk;
                   if (!finalUsage && chunk.usage && typeof chunk.usage === 'object') {
                     finalUsage = chunk.usage;
+                    streamWriter.setUsage(finalUsage);
                   }
 
                   if (!finalUsage) {
@@ -929,13 +902,14 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
                       }
                     }
                     finalUsage = Object.keys(chunkUsage).length > 0 ? chunkUsage : finalUsage;
+                    streamWriter.setUsage(finalUsage);
                   }
-                  writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
+                  streamWriter.writeDone(doneReason ? { done_reason: doneReason } : {});
                   return;
                 }
 
                 if (chunkResponse) {
-                  writeStreamChunk({
+                  streamWriter.writeChunk({
                     ...chunk,
                     response: toHK(chunkResponse),
                     done: false
@@ -948,20 +922,22 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
               if (event.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
                 streamedText += event.text;
                 streamedChunkEmitted = true;
-                writeStreamChunk({ response: toHK(event.text), done: false });
+                streamWriter.writeChunk({ response: toHK(event.text), done: false });
                 return;
               }
 
               if (event.type === 'done') {
                 if (event.usage) {
                   finalUsage = event.usage;
+                  streamWriter.setUsage(finalUsage);
                 }
-                writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
+                streamWriter.writeDone(event.reason ? { done_reason: event.reason } : {});
                 return;
               }
 
               if (event.type === 'final' && event.usage) {
                 finalUsage = event.usage;
+                streamWriter.setUsage(finalUsage);
               }
             }
           })
@@ -972,13 +948,10 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         consecutiveRewriteFailures += 1;
         const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
         setLastError(mappedError.code, mappedError.message);
-        writeStreamChunk({
-          done: true,
-          error: {
-            code: mappedError.code,
-            message: mappedError.message,
-            status: mappedError.status || 502
-          }
+        streamWriter.writeError({
+          code: mappedError.code,
+          message: mappedError.message,
+          status: mappedError.status || 502
         });
         return res.end();
       }
@@ -991,6 +964,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
       finalUsage = rewriteResult.data?.usage || finalUsage;
+      streamWriter.setUsage(finalUsage);
       logProviderResponseMeta({
         requestId,
         stream: true,
@@ -1000,10 +974,10 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
         const finalText = toHK(streamResponse);
-        writeStreamChunk({ response: finalText, done: false });
+        streamWriter.writeChunk({ response: finalText, done: false });
       }
 
-      writeDoneChunk({ done_reason: 'stop' });
+      streamWriter.writeDone({ done_reason: 'stop' });
       return res.end();
     }
 
@@ -1044,7 +1018,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     }
 
     const finalText = toHK(modelText);
-    return res.json({ ok: true, result: finalText, ...(usage ? { usage } : {}) });
+    return writeJsonSuccess(res, { result: finalText, ...(usage ? { usage } : {}) });
   } finally {
     logRewriteRequest({
       req,
