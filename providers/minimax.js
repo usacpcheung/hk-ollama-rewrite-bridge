@@ -4,7 +4,8 @@ const {
   successResult,
   failureResult,
   streamTextEvent,
-  streamDoneEvent
+  streamDoneEvent,
+  streamErrorEvent
 } = require('../lib/bridge-contract');
 
 function createMinimaxProvider({
@@ -224,6 +225,7 @@ function createMinimaxProvider({
       let buffer = '';
       let streamedText = '';
       let doneEventEmitted = false;
+      let doneReason = 'stop';
       let finalCompletionEvent = null;
       let finalMessageContent = '';
       const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
@@ -237,17 +239,18 @@ function createMinimaxProvider({
           return;
         }
 
+        doneReason = reason || doneReason || 'stop';
         doneEventEmitted = true;
         await emit(
           streamDoneEvent({
-            reason: reason || 'stop',
+            reason: doneReason,
             usage: finalCompletionEvent?.usage || null,
             raw: buildMappedChunk({
               id: streamId,
               model,
               response: '',
               done: true,
-              doneReason: reason || 'stop',
+              doneReason,
               usage: finalCompletionEvent?.usage || null
             })
           })
@@ -302,6 +305,23 @@ function createMinimaxProvider({
           }
 
           await emitMappedChunk(chunk);
+          return;
+        }
+
+        if (parsedFrame.chunk?.done) {
+          if (!streamedText && finalMessageContent) {
+            await emitMappedChunk(
+              buildMappedChunk({
+                id: streamId,
+                model,
+                response: finalMessageContent,
+                done: false
+              })
+            );
+            streamedText += finalMessageContent;
+          }
+
+          await emitDone(parsedFrame.chunk.done_reason || 'stop');
         }
       };
 
@@ -356,14 +376,16 @@ function createMinimaxProvider({
         );
       }
 
-      await emitDone('stop');
+      await emitDone(doneReason);
       return successResult({
         response: finalResponseText,
         usage: finalCompletionEvent?.usage || null,
-        doneReason: 'stop'
+        doneReason
       });
     } catch (err) {
-      return failureResult(mapError(err, { kind: 'fetch' }));
+      const mappedError = mapError(err, { kind: err?.code === 'INVALID_JSON_CHUNK' ? 'invalid_json' : 'fetch' });
+      await emit(streamErrorEvent({ error: mappedError }));
+      return failureResult(mappedError);
     } finally {
       clearTimeout(timeout);
     }

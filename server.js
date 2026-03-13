@@ -849,6 +849,8 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       setStreamHeaders(res);
       let streamedText = '';
       let streamedChunkEmitted = false;
+      let streamDoneEmitted = false;
+      let streamDoneReason = 'stop';
       let finalUsage = null;
 
       const streamWriter = createStreamWriter(res);
@@ -877,67 +879,14 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
                 return;
               }
 
-              if (event.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
-                const chunk = event.chunk;
-                const chunkResponse = typeof chunk.response === 'string' ? chunk.response : '';
-
-                if (chunkResponse && !chunk.done) {
-                  streamedText += chunkResponse;
-                  streamedChunkEmitted = true;
-                }
-
-                if (chunk.done) {
-                  const { done_reason: doneReason } = chunk;
-                  if (!finalUsage && chunk.usage && typeof chunk.usage === 'object') {
-                    finalUsage = chunk.usage;
-                    streamWriter.setUsage(finalUsage);
-                  }
-
-                  if (!finalUsage) {
-                    const usageFields = ['prompt_eval_count', 'prompt_eval_duration', 'eval_count', 'eval_duration', 'total_duration', 'load_duration'];
-                    const chunkUsage = {};
-                    for (const field of usageFields) {
-                      if (typeof chunk[field] === 'number') {
-                        chunkUsage[field] = chunk[field];
-                      }
-                    }
-                    finalUsage = Object.keys(chunkUsage).length > 0 ? chunkUsage : finalUsage;
-                    streamWriter.setUsage(finalUsage);
-                  }
-                  streamWriter.writeDone(doneReason ? { done_reason: doneReason } : {});
-                  return;
-                }
-
-                if (chunkResponse) {
-                  streamWriter.writeChunk({
-                    ...chunk,
-                    response: toHK(chunkResponse),
-                    done: false
-                  });
-                }
-
-                return;
-              }
-
-              if (event.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
-                streamedText += event.text;
-                streamedChunkEmitted = true;
-                streamWriter.writeChunk({ response: toHK(event.text), done: false });
-                return;
-              }
-
               if (event.type === 'done') {
                 if (event.usage) {
                   finalUsage = event.usage;
                   streamWriter.setUsage(finalUsage);
                 }
-                streamWriter.writeDone(event.reason ? { done_reason: event.reason } : {});
-                return;
-              }
-
-              if (event.type === 'final' && event.usage) {
-                finalUsage = event.usage;
-                streamWriter.setUsage(finalUsage);
+                streamDoneReason = event.reason || streamDoneReason;
+                streamDoneEmitted = true;
+                streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
               }
             }
           })
@@ -969,7 +918,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         requestId,
         stream: true,
         usage: finalUsage,
-        doneReason: 'stop'
+        doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
@@ -977,7 +926,9 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         streamWriter.writeChunk({ response: finalText, done: false });
       }
 
-      streamWriter.writeDone({ done_reason: 'stop' });
+      if (!streamDoneEmitted) {
+        streamWriter.writeDone({ done_reason: rewriteResult.data?.doneReason || streamDoneReason || 'stop' });
+      }
       return res.end();
     }
 
