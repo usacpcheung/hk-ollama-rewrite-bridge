@@ -1,3 +1,10 @@
+const {
+  successResult,
+  failureResult,
+  streamTextEvent,
+  streamDoneEvent
+} = require('../lib/bridge-contract');
+
 function createOllamaProvider({
   generateUrl,
   psUrl,
@@ -107,22 +114,19 @@ function createOllamaProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       let data;
       try {
         data = await response.json();
       } catch (_err) {
-        return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
       }
 
-      return { ok: true, data: { ...data, usage: extractOllamaUsage(data) } };
+      return successResult({ response: data?.response || '', usage: extractOllamaUsage(data) });
     } catch (err) {
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
       clearTimeout(timeout);
     }
@@ -163,14 +167,11 @@ function createOllamaProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       if (!response.body) {
-        return { ok: false, error: mapError(new Error('missing_body'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('missing_body'), { kind: 'invalid_json' }));
       }
 
       const reader = response.body.getReader();
@@ -202,11 +203,17 @@ function createOllamaProvider({
         const token = payload?.response;
         if (typeof token === 'string' && token.length > 0) {
           responseText += token;
-          await emit({ type: 'token', text: token, raw: payload });
+          await emit(streamTextEvent({ text: token, raw: payload }));
         }
 
         if (payload?.done) {
-          await emit({ type: 'done', reason: payload.done_reason || 'stop', raw: payload });
+          await emit(
+            streamDoneEvent({
+              reason: payload.done_reason || 'stop',
+              usage: extractOllamaUsage(payload),
+              raw: payload
+            })
+          );
         }
       };
 
@@ -233,20 +240,17 @@ function createOllamaProvider({
         throw invalidChunkError();
       }
 
-      return {
-        ok: true,
-        data: {
-          response: responseText,
-          completion: lastChunk,
-          usage: extractOllamaUsage(lastChunk)
-        }
-      };
+      return successResult({
+        response: responseText,
+        usage: extractOllamaUsage(lastChunk),
+        doneReason: lastChunk?.done_reason || 'stop'
+      });
     } catch (err) {
       if (err?.code === 'INVALID_JSON_CHUNK') {
-        return { ok: false, error: mapError(err, { kind: 'invalid_json' }) };
+        return failureResult(mapError(err, { kind: 'invalid_json' }));
       }
 
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
       clearTimeout(timeout);
     }

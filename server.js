@@ -893,6 +893,18 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
                 return;
               }
 
+              if (event.type === 'error' && event.error && typeof event.error === 'object') {
+                writeStreamChunk({ done: true, error: event.error });
+                return;
+              }
+
+              if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
+                streamedText += event.text;
+                streamedChunkEmitted = true;
+                writeStreamChunk({ response: toHK(event.text), done: false });
+                return;
+              }
+
               if (event.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
                 const chunk = event.chunk;
                 const chunkResponse = typeof chunk.response === 'string' ? chunk.response : '';

@@ -1,5 +1,12 @@
 const { randomUUID } = require('crypto');
 
+const {
+  successResult,
+  failureResult,
+  streamTextEvent,
+  streamDoneEvent
+} = require('../lib/bridge-contract');
+
 function createMinimaxProvider({
   apiUrl,
   model,
@@ -58,7 +65,7 @@ function createMinimaxProvider({
   }
 
   async function triggerWarmup({ timeoutMs }) {
-    return { ok: true, data: { response: '', usage: null } };
+    return successResult({ response: '', usage: null });
   }
 
   async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
@@ -120,17 +127,14 @@ function createMinimaxProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       let data;
       try {
         data = await response.json();
       } catch (_err) {
-        return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
       }
 
       debugLog?.({
@@ -150,9 +154,9 @@ function createMinimaxProvider({
         data?.choices?.[0]?.text ||
         '';
 
-      return { ok: true, data: { response: responseText, usage: data?.usage || null } };
+      return successResult({ response: responseText, usage: data?.usage || null });
     } catch (err) {
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
       clearTimeout(timeout);
     }
@@ -208,14 +212,11 @@ function createMinimaxProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       if (!response.body) {
-        return { ok: false, error: mapError(new Error('missing_body'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('missing_body'), { kind: 'invalid_json' }));
       }
 
       const reader = response.body.getReader();
@@ -228,7 +229,7 @@ function createMinimaxProvider({
       const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
 
       const emitMappedChunk = async (chunk) => {
-        await emit({ type: 'chunk', chunk });
+        await emit(streamTextEvent({ text: chunk?.response || '', raw: chunk }));
       };
 
       const emitDone = async (reason) => {
@@ -237,13 +238,20 @@ function createMinimaxProvider({
         }
 
         doneEventEmitted = true;
-        await emitMappedChunk(buildMappedChunk({
-          id: streamId,
-          model,
-          response: '',
-          done: true,
-          doneReason: reason || 'stop'
-        }));
+        await emit(
+          streamDoneEvent({
+            reason: reason || 'stop',
+            usage: finalCompletionEvent?.usage || null,
+            raw: buildMappedChunk({
+              id: streamId,
+              model,
+              response: '',
+              done: true,
+              doneReason: reason || 'stop',
+              usage: finalCompletionEvent?.usage || null
+            })
+          })
+        );
       };
 
       const processSseFrame = async (frame) => {
@@ -281,7 +289,7 @@ function createMinimaxProvider({
           finalMessageContent = parsedFrame.finalMessageContent;
         }
 
-        if (parsedFrame.chunk) {
+        if (parsedFrame.chunk && !parsedFrame.chunk.done) {
           const chunk = {
             ...parsedFrame.chunk,
             id: streamId,
@@ -294,10 +302,6 @@ function createMinimaxProvider({
           }
 
           await emitMappedChunk(chunk);
-
-          if (chunk.done) {
-            doneEventEmitted = true;
-          }
         }
       };
 
@@ -342,32 +346,24 @@ function createMinimaxProvider({
       });
 
       if (!streamedText && finalResponseText && !doneEventEmitted) {
-        await emitMappedChunk(buildMappedChunk({
-          id: streamId,
-          model,
-          response: finalResponseText,
-          done: false
-        }));
+        await emitMappedChunk(
+          buildMappedChunk({
+            id: streamId,
+            model,
+            response: finalResponseText,
+            done: false
+          })
+        );
       }
 
       await emitDone('stop');
-      await emit({
-        type: 'final',
+      return successResult({
         response: finalResponseText,
         usage: finalCompletionEvent?.usage || null,
-        completion: finalCompletionEvent || null
+        doneReason: 'stop'
       });
-
-      return {
-        ok: true,
-        data: {
-          response: finalResponseText,
-          usage: finalCompletionEvent?.usage || null,
-          completion: finalCompletionEvent || null
-        }
-      };
     } catch (err) {
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
       clearTimeout(timeout);
     }
