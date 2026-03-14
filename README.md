@@ -59,6 +59,7 @@ Legacy fallback emits a deprecation warning only when a new equivalent exists an
 |---|---|
 | `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` (or `REWRITE_PROVIDER_OLLAMA_MODEL`) |
 | `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` (or `REWRITE_PROVIDER_MINIMAX_MODEL`) |
+| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` (or `REWRITE_PROVIDER_MINIMAX_API_URL`) |
 | `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
 | `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `REWRITE_MAX_COMPLETION_TOKENS` (already service-scoped) |
@@ -72,6 +73,7 @@ Rewrite service today:
 ```bash
 REWRITE_PROVIDER=minimax \
 REWRITE_MINIMAX_MODEL=M2-her \
+REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2 \
 REWRITE_MAX_COMPLETION_TOKENS=400 \
 REWRITE_READY_TIMEOUT_MS=45000 \
 REWRITE_COLD_TIMEOUT_MS=180000 \
@@ -116,10 +118,12 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
 | `REWRITE_MINIMAX_MODEL` | `M2-her` | Preferred rewrite Minimax model key. |
 | `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate preferred rewrite Minimax model key. |
+| `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Preferred rewrite Minimax endpoint key. |
+| `REWRITE_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Alternate preferred rewrite Minimax endpoint key. |
 | `REWRITE_READY_TIMEOUT_MS` | `30000` | Preferred rewrite request timeout (ms) when model is in ready phase. |
 | `REWRITE_COLD_TIMEOUT_MS` | `120000` | Preferred rewrite request timeout (ms) during cold/warming phases. |
 | `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
-| `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
+| `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Legacy fallback for rewrite Minimax endpoint; prefer `REWRITE_MINIMAX_API_URL` or `REWRITE_PROVIDER_MINIMAX_API_URL`. |
 | `MINIMAX_MODEL` | `M2-her` | Legacy fallback for rewrite Minimax model; prefer `REWRITE_MINIMAX_MODEL` or `REWRITE_PROVIDER_MINIMAX_MODEL`. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |

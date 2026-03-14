@@ -49,6 +49,7 @@ Naming convention:
 |---|---|
 | `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` / `REWRITE_PROVIDER_OLLAMA_MODEL` |
 | `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` / `REWRITE_PROVIDER_MINIMAX_MODEL` |
+| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` / `REWRITE_PROVIDER_MINIMAX_API_URL` |
 | `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
 | `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
 
@@ -61,6 +62,7 @@ Rewrite service:
 ```bash
 REWRITE_PROVIDER=minimax \
 REWRITE_MINIMAX_MODEL=M2-her \
+REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2 \
 REWRITE_MAX_COMPLETION_TOKENS=400
 ```
 
@@ -431,4 +433,3 @@ Backend parsing coverage currently includes:
   - terminal `[DONE]`
 
 This allows clients to consume one stable external response contract regardless of selected provider.
-

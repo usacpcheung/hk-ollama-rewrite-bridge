@@ -197,6 +197,16 @@ function resolveRewriteConfig({
     warningLabel: 'minimaxModel'
   });
 
+  const minimaxApiUrlResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_MINIMAX_API_URL`, `${serviceId}_PROVIDER_MINIMAX_API_URL`],
+    legacyKeys: ['MINIMAX_API_URL'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'https://api.minimax.io/v1/text/chatcompletion_v2',
+    warnLegacyUsage,
+    warningLabel: 'minimaxApiUrl'
+  });
+
   const provider = providerResolution.value;
   const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
 
@@ -215,6 +225,7 @@ function resolveRewriteConfig({
       },
       minimax: {
         model: minimaxModelResolution.value,
+        apiUrl: minimaxApiUrlResolution.value,
         capabilities: providerCapabilities.minimax || { streaming: false }
       }
     },
@@ -226,7 +237,8 @@ function resolveRewriteConfig({
       readyTimeoutMs: readyTimeoutResolution.source,
       coldTimeoutMs: coldTimeoutResolution.source,
       ollamaModel: ollamaModelResolution.source,
-      minimaxModel: minimaxModelResolution.source
+      minimaxModel: minimaxModelResolution.source,
+      minimaxApiUrl: minimaxApiUrlResolution.source
     }
   };
 }

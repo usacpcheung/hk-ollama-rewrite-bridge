@@ -156,7 +156,6 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
 const REWRITE_DEBUG_RAW_OUTPUT = parseEnvBoolean('REWRITE_DEBUG_RAW_OUTPUT', false);
 
 
-const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
 function parseRawBoundedInteger(rawValue, fallback, bounds = {}, envName = 'value') {
@@ -203,7 +202,6 @@ const providerAdapter = createProviderAdapter(createProvider({
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  minimaxApiUrl: MINIMAX_API_URL,
   minimaxApiKey: MINIMAX_API_KEY,
   minimaxSystemPrompt: rewriteService.prompts.minimaxSystemPrompt,
   minimaxUserTemplate: rewriteService.prompts.minimaxUserTemplate,

@@ -60,4 +60,39 @@ test('defaults apply when both new and legacy keys are absent', () => {
   assert.equal(config.maxTextLength, 200);
   assert.equal(config.sources.maxCompletionTokens.type, 'default');
   assert.equal(config.sources.maxTextLength.type, 'default');
+  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
+  assert.equal(config.sources.minimaxApiUrl.type, 'default');
+});
+
+test('preferred minimax api url overrides legacy key', () => {
+  const env = {
+    REWRITE_MINIMAX_API_URL: 'https://preferred-minimax.example/v1/chat',
+    MINIMAX_API_URL: 'https://legacy-minimax.example/v1/chat'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.minimax.apiUrl, 'https://preferred-minimax.example/v1/chat');
+  assert.equal(config.sources.minimaxApiUrl.type, 'preferred');
+});
+
+test('legacy minimax api url works when preferred keys are absent', () => {
+  const env = {
+    MINIMAX_API_URL: 'https://legacy-minimax.example/v1/chat'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.minimax.apiUrl, 'https://legacy-minimax.example/v1/chat');
+  assert.equal(config.sources.minimaxApiUrl.type, 'legacy');
 });

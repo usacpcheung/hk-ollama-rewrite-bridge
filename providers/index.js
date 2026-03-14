@@ -15,7 +15,6 @@ function createProvider({
   ollamaUrl,
   ollamaPsUrl,
   ollamaKeepAlive,
-  minimaxApiUrl,
   minimaxApiKey,
   minimaxSystemPrompt,
   minimaxUserTemplate,
@@ -38,7 +37,7 @@ function createProvider({
 
   if (provider === 'minimax') {
     return createMinimaxProvider({
-      apiUrl: minimaxApiUrl,
+      apiUrl: selectedRuntime.apiUrl,
       model: selectedRuntime.model,
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
