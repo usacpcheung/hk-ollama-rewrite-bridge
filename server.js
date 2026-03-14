@@ -1,7 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
-const { createProvider } = require('./providers');
+const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
@@ -170,6 +170,8 @@ const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v
 const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
+const selectedProviderCapabilities = PROVIDER_CAPABILITIES[REWRITE_PROVIDER] || { streaming: false };
+
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
   defaultProvider: REWRITE_PROVIDER
@@ -178,6 +180,7 @@ const debugLog = createDebugLogger({
 const serviceRegistry = createServiceRegistry({
   parseEnvBoundedInteger,
   provider: REWRITE_PROVIDER,
+  providerCapabilities: selectedProviderCapabilities,
   readyTimeoutMs: OLLAMA_TIMEOUT_MS,
   coldTimeoutMs: OLLAMA_COLD_TIMEOUT_MS
 });
@@ -651,6 +654,15 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
     const { trimmedText, streamRequested, inputCharCount } = validationResult.value;
     inputLength = inputCharCount;
 
+    if (streamRequested && !rewriteService.capabilities.streaming) {
+      return errorResponse(
+        res,
+        501,
+        'STREAMING_UNSUPPORTED',
+        `Streaming is not supported for service "${rewriteService.id}" with provider "${rewriteService.provider.selected}".`
+      );
+    }
+
     const { prompt, systemPrompt, userContent } = rewriteService.buildPrompt({ text: trimmedText, isMinimax });
 
     const nowMs = Date.now();
@@ -782,7 +794,9 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
       );
     }
 
-    if (streamRequested) {
+    const streamEnabled = streamRequested && rewriteService.capabilities.streaming;
+
+    if (streamEnabled) {
       setStreamHeaders(res);
       let streamedText = '';
       let streamedChunkEmitted = false;

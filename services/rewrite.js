@@ -49,7 +49,8 @@ function createRewriteServiceDefinition({
   parseEnvBoundedInteger,
   provider,
   readyTimeoutMs,
-  coldTimeoutMs
+  coldTimeoutMs,
+  providerCapabilities = {}
 }) {
   const maxTextLength = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
     min: 1,
@@ -74,6 +75,9 @@ function createRewriteServiceDefinition({
     provider: {
       selected: provider,
       maxCompletionTokens
+    },
+    capabilities: {
+      streaming: providerCapabilities.streaming === true
     },
     prompts: {
       rewriteSystemPrompt: REWRITE_SYSTEM_PROMPT,

@@ -1,23 +1,33 @@
 const { createRewriteServiceDefinition } = require('./rewrite');
 
-function createServiceRegistry({ parseEnvBoundedInteger, provider, readyTimeoutMs, coldTimeoutMs }) {
+function createServiceRegistry({
+  parseEnvBoundedInteger,
+  provider,
+  providerCapabilities = {},
+  readyTimeoutMs,
+  coldTimeoutMs
+}) {
   const rewriteService = createRewriteServiceDefinition({
     parseEnvBoundedInteger,
     provider,
     readyTimeoutMs,
-    coldTimeoutMs
+    coldTimeoutMs,
+    providerCapabilities
   });
+
+  const services = [rewriteService].map((service) => ({
+    ...service,
+    capabilities: {
+      streaming: service.capabilities?.streaming === true
+    }
+  }));
 
   return {
     get(serviceId) {
-      if (serviceId === rewriteService.id) {
-        return rewriteService;
-      }
-
-      return null;
+      return services.find((service) => service.id === serviceId) || null;
     },
     list() {
-      return [rewriteService];
+      return services;
     }
   };
 }
