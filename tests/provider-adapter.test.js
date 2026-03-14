@@ -155,3 +155,35 @@ test('hasStreamHandler reflects availability and invokeStream returns null when 
   });
   assert.equal(result, null);
 });
+
+
+test('legacy rewriteStream shim remains null when rewrite stream handler is unavailable', () => {
+  const adapter = createProviderAdapter({
+    services: {
+      rewrite: {
+        sync: async () => ({ ok: true, data: { response: 'ok' } })
+      }
+    },
+    mapError: (error) => error,
+    checkReadiness: async () => ({ ready: true, error: null }),
+    triggerWarmup: async () => ({ ok: true, data: null })
+  });
+
+  assert.equal(adapter.rewriteStream, null);
+});
+
+test('legacy rewriteStream shim is a function when rewrite stream handler exists', () => {
+  const adapter = createProviderAdapter({
+    services: {
+      rewrite: {
+        sync: async () => ({ ok: true, data: { response: 'ok' } }),
+        stream: async () => ({ ok: true, data: { response: 'ok' } })
+      }
+    },
+    mapError: (error) => error,
+    checkReadiness: async () => ({ ready: true, error: null }),
+    triggerWarmup: async () => ({ ok: true, data: null })
+  });
+
+  assert.equal(typeof adapter.rewriteStream, 'function');
+});
