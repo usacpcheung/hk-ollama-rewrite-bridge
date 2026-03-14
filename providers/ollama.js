@@ -2,7 +2,8 @@ const {
   successResult,
   failureResult,
   streamTextEvent,
-  streamDoneEvent
+  streamDoneEvent,
+  streamErrorEvent
 } = require('../lib/bridge-contract');
 
 function createOllamaProvider({
@@ -246,11 +247,15 @@ function createOllamaProvider({
         doneReason: lastChunk?.done_reason || 'stop'
       });
     } catch (err) {
+      const mappedError = err?.code === 'INVALID_JSON_CHUNK'
+        ? mapError(err, { kind: 'invalid_json' })
+        : mapError(err, { kind: 'fetch' });
+      await emit(streamErrorEvent({ error: mappedError }));
       if (err?.code === 'INVALID_JSON_CHUNK') {
-        return failureResult(mapError(err, { kind: 'invalid_json' }));
+        return failureResult(mappedError);
       }
 
-      return failureResult(mapError(err, { kind: 'fetch' }));
+      return failureResult(mappedError);
     } finally {
       clearTimeout(timeout);
     }

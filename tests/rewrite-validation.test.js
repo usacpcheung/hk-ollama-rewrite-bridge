@@ -53,6 +53,12 @@ async function postRewrite(text) {
   return { status: response.status, body };
 }
 
+async function getJson(pathname) {
+  const response = await fetch(`${BASE_URL}${pathname}`);
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
 test('POST /rewrite max-length validation counts Unicode characters instead of UTF-16 code units', async (t) => {
   const serverProcess = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
@@ -238,6 +244,50 @@ test('POST /rewrite ignores legacy prompt-template env overrides for Ollama payl
   assert.equal(capturedPrompt?.includes('Legacy：'), false);
 });
 
+
+
+test('POST /rewrite stream emits a single terminal error chunk when provider stream call fails', async (t) => {
+  const unusedPort = 6553;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      MINIMAX_API_URL: `http://127.0.0.1:${unusedPort}/v1/text/chatcompletion_v2`,
+      MINIMAX_API_KEY: 'minimax-test-key'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '測試', stream: true })
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  const chunks = body.trim().split('\n').map((line) => JSON.parse(line));
+
+  const errorDoneChunks = chunks.filter((chunk) => chunk.done === true && chunk.error);
+  assert.equal(errorDoneChunks.length, 1);
+  assert.equal(errorDoneChunks[0].error?.code, 'PROVIDER_ERROR');
+});
 test('POST /rewrite stream done chunk includes usage and debug logs redact secrets', async (t) => {
   const minimaxSecret = 'minimax-test-key';
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
@@ -337,4 +387,37 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
   assert.equal(allLogs.includes(minimaxSecret), false);
   assert.equal(allLogs.includes(AUTH_SECRET), false);
   assert.equal(allLogs.includes('provider-side-secret'), false);
+});
+
+test('Minimax not-ready readiness endpoints report non-ready serviceState', async (t) => {
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      MINIMAX_API_KEY: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const readyz = await getJson('/readyz');
+  assert.equal(readyz.status, 503);
+  assert.equal(readyz.body?.serviceState, 'degraded');
+  assert.equal(readyz.body?.reason, 'MINIMAX_API_KEY_MISSING');
+
+  const modelStatus = await getJson('/model-status');
+  assert.equal(modelStatus.status, 200);
+  assert.equal(modelStatus.body?.serviceState, 'degraded');
+  assert.equal(modelStatus.body?.minimaxPassiveReadiness?.ready, false);
+  assert.equal(modelStatus.body?.minimaxPassiveReadiness?.reason, 'MINIMAX_API_KEY_MISSING');
 });
