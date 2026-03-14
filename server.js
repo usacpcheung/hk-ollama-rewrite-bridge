@@ -16,7 +16,6 @@ const {
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
-const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -98,12 +97,7 @@ function parseEnvBoolean(name, fallback = false) {
   return fallback;
 }
 
-const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
-const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
-  max: 600_000
-});
 const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b-instruct';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
 const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds(
@@ -163,34 +157,53 @@ const REWRITE_DEBUG_RAW_OUTPUT = parseEnvBoolean('REWRITE_DEBUG_RAW_OUTPUT', fal
 
 
 const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
-const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
-const selectedProviderCapabilities = PROVIDER_CAPABILITIES[REWRITE_PROVIDER] || { streaming: false };
+function parseRawBoundedInteger(rawValue, fallback, bounds = {}, envName = 'value') {
+  if (rawValue == null || String(rawValue).trim() === '') {
+    return fallback;
+  }
 
-const debugLog = createDebugLogger({
-  enabled: REWRITE_DEBUG_RAW_OUTPUT,
-  defaultProvider: REWRITE_PROVIDER
-});
+  const parsed = parseBoundedInteger(rawValue, bounds);
+  if (parsed == null) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: `Invalid ${envName}; using default`,
+        provided: rawValue,
+        fallback
+      })
+    );
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function parseRawMilliseconds(rawValue, fallback, bounds = {}, envName = 'value') {
+  return parseRawBoundedInteger(rawValue, fallback, { min: 0, ...bounds }, envName);
+}
 
 const serviceRegistry = createServiceRegistry({
-  parseEnvBoundedInteger,
-  provider: REWRITE_PROVIDER,
-  providerCapabilities: selectedProviderCapabilities,
-  readyTimeoutMs: OLLAMA_TIMEOUT_MS,
-  coldTimeoutMs: OLLAMA_COLD_TIMEOUT_MS
+  parseEnvBoundedInteger: (rawValue, fallback, bounds = {}, envName = 'value') =>
+    parseRawBoundedInteger(rawValue, fallback, bounds, envName),
+  parseEnvMilliseconds: (rawValue, fallback, bounds = {}, envName = 'value') =>
+    parseRawMilliseconds(rawValue, fallback, bounds, envName),
+  providerCapabilities: PROVIDER_CAPABILITIES
 });
 const rewriteService = serviceRegistry.get('rewrite');
 
+const debugLog = createDebugLogger({
+  enabled: REWRITE_DEBUG_RAW_OUTPUT,
+  defaultProvider: rewriteService.provider.selected
+});
+
 const providerAdapter = createProviderAdapter(createProvider({
-  provider: REWRITE_PROVIDER,
+  serviceConfig: rewriteService,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
-  ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  rewriteMaxCompletionTokens: rewriteService.provider.maxCompletionTokens,
   minimaxApiUrl: MINIMAX_API_URL,
-  minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
   minimaxSystemPrompt: rewriteService.prompts.minimaxSystemPrompt,
   minimaxUserTemplate: rewriteService.prompts.minimaxUserTemplate,
@@ -229,7 +242,7 @@ const logRewriteRequest = ({
   email = null,
   inputLength = 0,
   requestPhase = modelPhase,
-  selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS,
+  selectedTimeoutMs = rewriteService.timeouts.coldMs,
   probeReady = lastProbeReady,
   probeError = null,
   warmupTriggeredNow = false,
@@ -284,7 +297,7 @@ const rewriteHeaderAuth = createRewriteHeaderAuth({
       requestId: crypto.randomUUID(),
       startedAt: Date.now(),
       requestPhase: modelPhase,
-      selectedTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      selectedTimeoutMs: rewriteService.timeouts.coldMs,
       probeReady: lastProbeReady,
       auth: {
         status: authFailure.status,
@@ -326,7 +339,7 @@ function warmupWithinColdWindow(nowMs) {
 }
 
 async function probeModelReady() {
-  const timeoutMs = REWRITE_PROVIDER === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  const timeoutMs = rewriteService.provider.selected === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
   return providerAdapter.checkReadiness({ timeoutMs });
 }
 
@@ -390,7 +403,7 @@ async function runStartupWarmupLoop() {
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
 
-  if (REWRITE_PROVIDER === 'minimax') {
+  if (rewriteService.provider.selected === 'minimax') {
     startupWarmupAttempts += 1;
     const minimaxPassiveReadiness = getMinimaxPassiveReadiness(Date.now());
 
@@ -500,7 +513,7 @@ async function runStartupWarmupLoop() {
 app.get('/model-status', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const isMinimax = rewriteService.provider.selected === 'minimax';
   const minimaxPassiveReadiness = isMinimax ? getMinimaxPassiveReadiness(nowMs) : null;
 
   if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
@@ -578,7 +591,7 @@ app.get('/healthz', (_req, res) => {
 app.get('/readyz', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const isMinimax = rewriteService.provider.selected === 'minimax';
 
   if (isMinimax) {
     const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
@@ -633,13 +646,13 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
   let email = null;
   let inputLength = 0;
   let requestPhase = modelPhase;
-  let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
+  let selectedTimeoutMs = rewriteService.timeouts.coldMs;
   let probeReady = lastProbeReady;
   let probeError = null;
   let warmupTriggeredNow = false;
   let minimaxRecoveryAttempt = false;
   let minimaxPassiveReason = null;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const isMinimax = rewriteService.provider.selected === 'minimax';
 
   try {
     email = req.auth?.email || null;
@@ -955,8 +968,8 @@ app.listen(PORT, HOST, () => {
       level: 'info',
       msg: 'Effective Ollama config',
       ...providerInfo,
-      ollamaTimeoutMs: OLLAMA_TIMEOUT_MS,
-      ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
+      serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,

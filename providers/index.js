@@ -11,26 +11,27 @@ const PROVIDER_CAPABILITIES = {
 };
 
 function createProvider({
-  provider = process.env.REWRITE_PROVIDER || 'ollama',
+  serviceConfig,
   ollamaUrl,
   ollamaPsUrl,
-  ollamaModel,
   ollamaKeepAlive,
-  rewriteMaxCompletionTokens,
   minimaxApiUrl,
-  minimaxModel,
   minimaxApiKey,
   minimaxSystemPrompt,
   minimaxUserTemplate,
   debugLog
 }) {
+  const provider = serviceConfig?.provider?.selected || 'ollama';
+  const selectedRuntime = serviceConfig?.provider?.runtime || {};
+  const maxCompletionTokens = serviceConfig?.provider?.maxCompletionTokens;
+
   if (provider === 'ollama') {
     return createOllamaProvider({
       generateUrl: ollamaUrl,
       psUrl: ollamaPsUrl,
-      model: ollamaModel,
+      model: selectedRuntime.model,
       keepAlive: ollamaKeepAlive,
-      maxCompletionTokens: rewriteMaxCompletionTokens,
+      maxCompletionTokens,
       debugLog
     });
   }
@@ -38,11 +39,11 @@ function createProvider({
   if (provider === 'minimax') {
     return createMinimaxProvider({
       apiUrl: minimaxApiUrl,
-      model: minimaxModel,
+      model: selectedRuntime.model,
       apiKey: minimaxApiKey,
       systemPrompt: minimaxSystemPrompt,
       userTemplate: minimaxUserTemplate,
-      maxCompletionTokens: rewriteMaxCompletionTokens,
+      maxCompletionTokens,
       debugLog
     });
   }

@@ -45,26 +45,203 @@ function countUnicodeCharacters(value) {
   return [...value].length;
 }
 
-function createRewriteServiceDefinition({
+function readPreferredEnv(env, keys = []) {
+  for (const key of keys) {
+    const raw = env[key];
+    if (raw != null && raw.trim() !== '') {
+      return { key, value: raw };
+    }
+  }
+  return null;
+}
+
+function readWithLegacyFallback({
+  env,
+  preferredKeys,
+  legacyKeys,
+  parse,
+  defaultValue,
+  warnLegacyUsage,
+  warningLabel
+}) {
+  const preferred = readPreferredEnv(env, preferredKeys);
+  if (preferred) {
+    return {
+      value: parse(preferred.value, defaultValue),
+      source: { type: 'preferred', key: preferred.key }
+    };
+  }
+
+  const legacy = readPreferredEnv(env, legacyKeys);
+  if (legacy) {
+    warnLegacyUsage({
+      legacyKey: legacy.key,
+      preferredKeys,
+      warningLabel
+    });
+    return {
+      value: parse(legacy.value, defaultValue),
+      source: { type: 'legacy', key: legacy.key }
+    };
+  }
+
+  return {
+    value: defaultValue,
+    source: { type: 'default', key: null }
+  };
+}
+
+function resolveRewriteConfig({
+  env = process.env,
   parseEnvBoundedInteger,
-  provider,
-  readyTimeoutMs,
-  coldTimeoutMs,
+  parseEnvMilliseconds,
   providerCapabilities = {}
 }) {
-  const maxTextLength = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
-    min: 1,
-    max: ABSOLUTE_MAX_TEXT_LENGTH
+  const serviceId = 'REWRITE';
+
+  const warnLegacyUsage = ({ legacyKey, preferredKeys, warningLabel }) => {
+    if (!preferredKeys.length) {
+      return;
+    }
+
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: `${warningLabel} uses legacy env key`,
+        legacyKey,
+        preferredKeys,
+        service: 'rewrite'
+      })
+    );
+  };
+
+  const providerResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_PROVIDER`],
+    legacyKeys: ['REWRITE_PROVIDER'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'ollama',
+    warnLegacyUsage,
+    warningLabel: 'provider'
   });
 
-  const maxCompletionTokens = parseEnvBoundedInteger(
-    'REWRITE_MAX_COMPLETION_TOKENS',
-    DEFAULT_MAX_COMPLETION_TOKENS,
-    {
-      min: 1,
-      max: ABSOLUTE_MAX_COMPLETION_TOKENS
+  const maxCompletionTokensResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_MAX_COMPLETION_TOKENS`],
+    legacyKeys: ['REWRITE_MAX_COMPLETION_TOKENS'],
+    parse: (raw, fallback) => {
+      const parsed = parseEnvBoundedInteger(raw, fallback, {
+        min: 1,
+        max: ABSOLUTE_MAX_COMPLETION_TOKENS
+      });
+      return parsed;
+    },
+    defaultValue: DEFAULT_MAX_COMPLETION_TOKENS,
+    warnLegacyUsage,
+    warningLabel: 'maxCompletionTokens'
+  });
+
+  const maxTextLengthResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_MAX_TEXT_LENGTH`],
+    legacyKeys: ['REWRITE_MAX_TEXT_LENGTH'],
+    parse: (raw, fallback) => {
+      const parsed = parseEnvBoundedInteger(raw, fallback, {
+        min: 1,
+        max: ABSOLUTE_MAX_TEXT_LENGTH
+      });
+      return parsed;
+    },
+    defaultValue: DEFAULT_MAX_TEXT_LENGTH,
+    warnLegacyUsage,
+    warningLabel: 'maxTextLength'
+  });
+
+  const readyTimeoutResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_READY_TIMEOUT_MS`],
+    legacyKeys: ['OLLAMA_TIMEOUT_MS'],
+    parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, { max: 300_000 }),
+    defaultValue: 30_000,
+    warnLegacyUsage,
+    warningLabel: 'readyTimeoutMs'
+  });
+
+  const coldTimeoutResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_COLD_TIMEOUT_MS`],
+    legacyKeys: ['OLLAMA_COLD_TIMEOUT_MS'],
+    parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, { max: 600_000 }),
+    defaultValue: 120_000,
+    warnLegacyUsage,
+    warningLabel: 'coldTimeoutMs'
+  });
+
+  const ollamaModelResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_OLLAMA_MODEL`, `${serviceId}_PROVIDER_OLLAMA_MODEL`],
+    legacyKeys: ['OLLAMA_MODEL'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'qwen2.5:3b-instruct',
+    warnLegacyUsage,
+    warningLabel: 'ollamaModel'
+  });
+
+  const minimaxModelResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_MINIMAX_MODEL`, `${serviceId}_PROVIDER_MINIMAX_MODEL`],
+    legacyKeys: ['MINIMAX_MODEL'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'M2-her',
+    warnLegacyUsage,
+    warningLabel: 'minimaxModel'
+  });
+
+  const provider = providerResolution.value;
+  const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
+
+  return {
+    provider,
+    maxCompletionTokens: maxCompletionTokensResolution.value,
+    maxTextLength: maxTextLengthResolution.value,
+    timeouts: {
+      readyMs: readyTimeoutResolution.value,
+      coldMs: coldTimeoutResolution.value
+    },
+    providers: {
+      ollama: {
+        model: ollamaModelResolution.value,
+        capabilities: providerCapabilities.ollama || { streaming: false }
+      },
+      minimax: {
+        model: minimaxModelResolution.value,
+        capabilities: providerCapabilities.minimax || { streaming: false }
+      }
+    },
+    selectedProviderCapabilities,
+    sources: {
+      provider: providerResolution.source,
+      maxCompletionTokens: maxCompletionTokensResolution.source,
+      maxTextLength: maxTextLengthResolution.source,
+      readyTimeoutMs: readyTimeoutResolution.source,
+      coldTimeoutMs: coldTimeoutResolution.source,
+      ollamaModel: ollamaModelResolution.source,
+      minimaxModel: minimaxModelResolution.source
     }
-  );
+  };
+}
+
+function createRewriteServiceDefinition({
+  parseEnvBoundedInteger,
+  parseEnvMilliseconds,
+  providerCapabilities = {}
+}) {
+  const resolvedConfig = resolveRewriteConfig({
+    parseEnvBoundedInteger,
+    parseEnvMilliseconds,
+    providerCapabilities
+  });
+  const maxTextLength = resolvedConfig.maxTextLength;
 
   return {
     id: 'rewrite',
@@ -73,11 +250,18 @@ function createRewriteServiceDefinition({
       futureApiPath: '/api/rewrite'
     },
     provider: {
-      selected: provider,
-      maxCompletionTokens
+      selected: resolvedConfig.provider,
+      maxCompletionTokens: resolvedConfig.maxCompletionTokens,
+      runtime: resolvedConfig.providers[resolvedConfig.provider] || {},
+      runtimeByProvider: resolvedConfig.providers,
+      sources: resolvedConfig.sources
     },
     capabilities: {
-      streaming: providerCapabilities.streaming === true
+      streaming: resolvedConfig.selectedProviderCapabilities.streaming === true,
+      byProvider: {
+        ollama: resolvedConfig.providers.ollama.capabilities,
+        minimax: resolvedConfig.providers.minimax.capabilities
+      }
     },
     prompts: {
       rewriteSystemPrompt: REWRITE_SYSTEM_PROMPT,
@@ -89,8 +273,8 @@ function createRewriteServiceDefinition({
       maxTextLength
     },
     timeouts: {
-      readyMs: readyTimeoutMs,
-      coldMs: coldTimeoutMs
+      readyMs: resolvedConfig.timeouts.readyMs,
+      coldMs: resolvedConfig.timeouts.coldMs
     },
     buildPrompt: ({ text, isMinimax }) => {
       if (isMinimax) {
@@ -131,5 +315,6 @@ function createRewriteServiceDefinition({
 }
 
 module.exports = {
-  createRewriteServiceDefinition
+  createRewriteServiceDefinition,
+  resolveRewriteConfig
 };

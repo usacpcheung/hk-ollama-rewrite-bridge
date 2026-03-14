@@ -30,6 +30,47 @@ Reverse proxy must unset these headers from inbound client traffic and set them 
 
 ---
 
+## Service-scoped environment naming and compatibility
+
+Rewrite service resolves configuration with this order:
+1. New service-scoped keys
+2. Legacy keys
+3. Built-in defaults
+
+Naming convention:
+- `<SERVICE_ID>_PROVIDER`
+- `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
+- `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
+- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
+
+### Compatibility table (rewrite)
+
+| Legacy | Preferred |
+|---|---|
+| `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` / `REWRITE_PROVIDER_OLLAMA_MODEL` |
+| `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` / `REWRITE_PROVIDER_MINIMAX_MODEL` |
+| `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
+| `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
+
+`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is.
+
+### Migration examples
+
+Rewrite service:
+
+```bash
+REWRITE_PROVIDER=minimax \
+REWRITE_MINIMAX_MODEL=M2-her \
+REWRITE_MAX_COMPLETION_TOKENS=400
+```
+
+Hypothetical summarize service:
+
+```bash
+SUMMARIZE_PROVIDER=ollama \
+SUMMARIZE_OLLAMA_MODEL=qwen2.5:7b-instruct
+```
+
 ## 1) `POST /rewrite`
 
 Rewrite HK colloquial Cantonese into formal Traditional Chinese.

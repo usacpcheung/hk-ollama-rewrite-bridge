@@ -2,22 +2,19 @@ const { createRewriteServiceDefinition } = require('./rewrite');
 
 function createServiceRegistry({
   parseEnvBoundedInteger,
-  provider,
-  providerCapabilities = {},
-  readyTimeoutMs,
-  coldTimeoutMs
+  parseEnvMilliseconds,
+  providerCapabilities = {}
 }) {
   const rewriteService = createRewriteServiceDefinition({
     parseEnvBoundedInteger,
-    provider,
-    readyTimeoutMs,
-    coldTimeoutMs,
+    parseEnvMilliseconds,
     providerCapabilities
   });
 
   const services = [rewriteService].map((service) => ({
     ...service,
     capabilities: {
+      ...service.capabilities,
       streaming: service.capabilities?.streaming === true
     }
   }));
