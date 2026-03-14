@@ -30,6 +30,53 @@ Reverse proxy must unset these headers from inbound client traffic and set them 
 
 ---
 
+## Service-scoped environment naming and compatibility
+
+Rewrite service resolves configuration with this order:
+1. New service-scoped keys
+2. Legacy keys
+3. Built-in defaults
+
+Naming convention:
+- `<SERVICE_ID>_PROVIDER`
+- `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
+- `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
+- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
+
+### Compatibility table (rewrite)
+
+| Legacy | Preferred |
+|---|---|
+| `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` / `REWRITE_PROVIDER_OLLAMA_MODEL` |
+| `OLLAMA_URL` | `REWRITE_OLLAMA_URL` / `REWRITE_PROVIDER_OLLAMA_URL` |
+| `OLLAMA_PS_URL` | `REWRITE_OLLAMA_PS_URL` / `REWRITE_PROVIDER_OLLAMA_PS_URL` |
+| `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` / `REWRITE_PROVIDER_MINIMAX_MODEL` |
+| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` / `REWRITE_PROVIDER_MINIMAX_API_URL` |
+| `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
+| `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
+
+`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is.
+
+### Migration examples
+
+Rewrite service:
+
+```bash
+REWRITE_PROVIDER=minimax \
+REWRITE_MINIMAX_MODEL=M2-her \
+REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2 \
+REWRITE_OLLAMA_URL=http://127.0.0.1:11434/api/generate \
+REWRITE_OLLAMA_PS_URL=http://127.0.0.1:11434/api/ps \
+REWRITE_MAX_COMPLETION_TOKENS=400
+```
+
+Hypothetical summarize service:
+
+```bash
+SUMMARIZE_PROVIDER=ollama \
+SUMMARIZE_OLLAMA_MODEL=qwen2.5:7b-instruct
+```
+
 ## 1) `POST /rewrite`
 
 Rewrite HK colloquial Cantonese into formal Traditional Chinese.
@@ -47,6 +94,14 @@ Example journal check:
 ```bash
 journalctl -u rewrite-bridge -n 200 --no-pager | rg '"eventType":"provider_(request|response_meta)"'
 ```
+
+### Boolean environment-value parsing
+
+`WARMUP_ON_START` and `MINIMAX_FAIL_OPEN_ON_IDLE` use shared boolean parsing semantics:
+
+- True values: `1`, `true`, `yes`, `on`
+- False values: `0`, `false`, `no`, `off`
+- Parsing is case-insensitive; unset/empty values fall back to defaults.
 
 ### Runtime token-limit configuration
 
@@ -105,14 +160,7 @@ In Minimax mode, the bridge sends a role-split payload:
 }
 ```
 
-If Minimax system prompt is unset/empty, it falls back to one `user` message for compatibility.
-
-Minimax user-template resolution order during migration:
-1. `MINIMAX_USER_TEMPLATE`
-2. `REWRITE_USER_TEMPLATE` (legacy compatibility fallback; set `MINIMAX_USER_TEMPLATE` explicitly)
-3. built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
-
-When `REWRITE_PROVIDER=minimax` and `MINIMAX_USER_TEMPLATE` is unset while `REWRITE_USER_TEMPLATE` is set, startup emits a one-time warning so deployments can migrate to explicit `MINIMAX_USER_TEMPLATE`.
+The bridge uses built-in system/user prompt construction for Minimax and ignores prompt-template environment-variable overrides.
 
 ### Success (`stream=false`)
 
@@ -389,4 +437,3 @@ Backend parsing coverage currently includes:
   - terminal `[DONE]`
 
 This allows clients to consume one stable external response contract regardless of selected provider.
-

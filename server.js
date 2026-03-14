@@ -1,18 +1,21 @@
 const express = require('express');
 const crypto = require('crypto');
 const OpenCC = require('opencc-js');
-const { createProvider } = require('./providers');
+const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
+const { createProviderAdapter } = require('./lib/provider-adapter');
+const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createDebugLogger } = require('./providers/debug-logger');
+const {
+  writeJsonError,
+  writeJsonSuccess,
+  setStreamHeaders,
+  createStreamWriter
+} = require('./lib/output-writer');
 
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
-const DEFAULT_MAX_TEXT_LENGTH = 200;
-const ABSOLUTE_MAX_TEXT_LENGTH = 600;
-const DEFAULT_MAX_COMPLETION_TOKENS = 300;
-const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
-const REWRITE_PROVIDER = process.env.REWRITE_PROVIDER || 'ollama';
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -94,25 +97,7 @@ function parseEnvBoolean(name, fallback = false) {
   return fallback;
 }
 
-const MAX_TEXT_LENGTH = parseEnvBoundedInteger('REWRITE_MAX_TEXT_LENGTH', DEFAULT_MAX_TEXT_LENGTH, {
-  min: 1,
-  max: ABSOLUTE_MAX_TEXT_LENGTH
-});
-const REWRITE_MAX_COMPLETION_TOKENS = parseEnvBoundedInteger(
-  'REWRITE_MAX_COMPLETION_TOKENS',
-  DEFAULT_MAX_COMPLETION_TOKENS,
-  {
-    min: 1,
-    max: ABSOLUTE_MAX_COMPLETION_TOKENS
-  }
-);
-
-const OLLAMA_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_TIMEOUT_MS', 30_000, { max: 300_000 });
-const OLLAMA_COLD_TIMEOUT_MS = parseEnvMilliseconds('OLLAMA_COLD_TIMEOUT_MS', 120_000, {
-  max: 600_000
-});
 const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b-instruct';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
 const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds(
@@ -133,9 +118,7 @@ const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   10 * 60_000,
   { max: 24 * 60 * 60_000 }
 );
-const MINIMAX_FAIL_OPEN_ON_IDLE = process.env.MINIMAX_FAIL_OPEN_ON_IDLE
-  ? process.env.MINIMAX_FAIL_OPEN_ON_IDLE.toLowerCase() !== 'false'
-  : true;
+const MINIMAX_FAIL_OPEN_ON_IDLE = parseEnvBoolean('MINIMAX_FAIL_OPEN_ON_IDLE', true);
 const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
   parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
     min: 1,
@@ -157,9 +140,7 @@ const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_M
 const WARMUP_RETRIGGER_WINDOW_MS = parseEnvMilliseconds('WARMUP_RETRIGGER_WINDOW_MS', 10_000, {
   max: 120_000
 });
-const WARMUP_ON_START = process.env.WARMUP_ON_START
-  ? process.env.WARMUP_ON_START.toLowerCase() !== 'false'
-  : true;
+const WARMUP_ON_START = parseEnvBoolean('WARMUP_ON_START', true);
 const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
   max: 900_000
 });
@@ -175,93 +156,57 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
 const REWRITE_DEBUG_RAW_OUTPUT = parseEnvBoolean('REWRITE_DEBUG_RAW_OUTPUT', false);
 
 
-const MINIMAX_API_URL = process.env.MINIMAX_API_URL || 'https://api.minimax.io/v1/text/chatcompletion_v2';
-const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'M2-her';
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
-const REWRITE_SYSTEM_PROMPT = process.env.REWRITE_SYSTEM_PROMPT ||
-  '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
-  + '必須逐句保留原意與全部資訊（包括人物、時間、地點、數字、否定、因果、條件、語氣）。\n'
-  + '只可改寫語體，不可新增、虛構、延伸、評論、解釋、總結或改變立場。\n'
-  + '請移除口語贅詞、語氣助詞與寒暄開場（例如：喂、係、嘅、啦、囉、呀、唉、哦、嗯、咩），但只可移除不影響語義者，不得刪除任何實質內容詞。\n'
-  + '若上述詞語出現在引號內容、專有名稱、品牌、口號、歌詞或其他關鍵語義位置，必須保留，不可硬改。\n'
-  + '不得把內容寫成故事、對話續寫、創作文本或條列重組。\n'
-  + '輸出格式：只輸出改寫後正文，不要標題、前言、註解、解釋、JSON、metadata 或引號。';
-const REWRITE_USER_TEMPLATE = process.env.REWRITE_USER_TEMPLATE || '原文：{TEXT}';
-const MINIMAX_SYSTEM_PROMPT =
-  process.env.MINIMAX_SYSTEM_PROMPT !== undefined
-    ? process.env.MINIMAX_SYSTEM_PROMPT
-    : REWRITE_SYSTEM_PROMPT;
-const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
-const MINIMAX_USER_TEMPLATE =
-  process.env.MINIMAX_USER_TEMPLATE !== undefined
-    ? process.env.MINIMAX_USER_TEMPLATE
-    : process.env.REWRITE_USER_TEMPLATE !== undefined
-      ? process.env.REWRITE_USER_TEMPLATE
-      : MINIMAX_DEFAULT_USER_TEMPLATE;
-
-if (
-  REWRITE_PROVIDER === 'minimax'
-  && process.env.MINIMAX_USER_TEMPLATE === undefined
-  && process.env.REWRITE_USER_TEMPLATE !== undefined
-) {
-  console.warn(
-    JSON.stringify({
-      level: 'warn',
-      msg: 'Using legacy Minimax user-template fallback from REWRITE_USER_TEMPLATE; set MINIMAX_USER_TEMPLATE explicitly.'
-    })
-  );
-}
-
-function renderUserContent(userTemplate, text) {
-  if (typeof userTemplate !== 'string' || userTemplate.length === 0) {
-    return text;
+function parseRawBoundedInteger(rawValue, fallback, bounds = {}, envName = 'value') {
+  if (rawValue == null || String(rawValue).trim() === '') {
+    return fallback;
   }
 
-  if (userTemplate.includes('{TEXT}')) {
-    return userTemplate.replace('{TEXT}', text);
+  const parsed = parseBoundedInteger(rawValue, bounds);
+  if (parsed == null) {
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: `Invalid ${envName}; using default`,
+        provided: rawValue,
+        fallback
+      })
+    );
+    return fallback;
   }
 
-  return `${userTemplate}${text}`;
+  return parsed;
 }
 
-function buildRewritePrompt(systemPrompt, userTemplate, text) {
-  const userContent = renderUserContent(userTemplate, text);
-  const prompt = [systemPrompt, userContent]
-    .filter((entry) => typeof entry === 'string' && entry.length > 0)
-    .join('\n\n');
-
-  return {
-    prompt,
-    systemPrompt,
-    userContent
-  };
+function parseRawMilliseconds(rawValue, fallback, bounds = {}, envName = 'value') {
+  return parseRawBoundedInteger(rawValue, fallback, { min: 0, ...bounds }, envName);
 }
 
-function countUnicodeCharacters(value) {
-  return [...value].length;
-}
-
+const serviceRegistry = createServiceRegistry({
+  parseEnvBoundedInteger: (rawValue, fallback, bounds = {}, envName = 'value') =>
+    parseRawBoundedInteger(rawValue, fallback, bounds, envName),
+  parseEnvMilliseconds: (rawValue, fallback, bounds = {}, envName = 'value') =>
+    parseRawMilliseconds(rawValue, fallback, bounds, envName),
+  providerCapabilities: PROVIDER_CAPABILITIES
+});
+const rewriteService = serviceRegistry.get('rewrite');
 
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
-  defaultProvider: REWRITE_PROVIDER
+  defaultProvider: rewriteService.provider.selected
 });
 
-const provider = createProvider({
-  provider: REWRITE_PROVIDER,
+const providerAdapter = createProviderAdapter(createProvider({
+  serviceConfig: rewriteService,
   ollamaUrl: OLLAMA_URL,
   ollamaPsUrl: OLLAMA_PS_URL,
-  ollamaModel: OLLAMA_MODEL,
   ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  rewriteMaxCompletionTokens: REWRITE_MAX_COMPLETION_TOKENS,
-  minimaxApiUrl: MINIMAX_API_URL,
-  minimaxModel: MINIMAX_MODEL,
   minimaxApiKey: MINIMAX_API_KEY,
-  minimaxSystemPrompt: MINIMAX_SYSTEM_PROMPT,
-  minimaxUserTemplate: MINIMAX_USER_TEMPLATE,
+  minimaxSystemPrompt: rewriteService.prompts.minimaxSystemPrompt,
+  minimaxUserTemplate: rewriteService.prompts.minimaxUserTemplate,
   debugLog
-});
+}));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
@@ -285,11 +230,7 @@ const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 app.use(express.json({ limit: '16kb' }));
 
 function errorResponse(res, status, code, message, extra = {}) {
-  return res.status(status).json({
-    ok: false,
-    error: { code, message },
-    ...extra
-  });
+  return writeJsonError(res, status, code, message, extra);
 }
 
 const logRewriteRequest = ({
@@ -299,7 +240,7 @@ const logRewriteRequest = ({
   email = null,
   inputLength = 0,
   requestPhase = modelPhase,
-  selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS,
+  selectedTimeoutMs = rewriteService.timeouts.coldMs,
   probeReady = lastProbeReady,
   probeError = null,
   warmupTriggeredNow = false,
@@ -354,7 +295,7 @@ const rewriteHeaderAuth = createRewriteHeaderAuth({
       requestId: crypto.randomUUID(),
       startedAt: Date.now(),
       requestPhase: modelPhase,
-      selectedTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      selectedTimeoutMs: rewriteService.timeouts.coldMs,
       probeReady: lastProbeReady,
       auth: {
         status: authFailure.status,
@@ -396,8 +337,8 @@ function warmupWithinColdWindow(nowMs) {
 }
 
 async function probeModelReady() {
-  const timeoutMs = REWRITE_PROVIDER === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
-  return provider.checkReadiness({ timeoutMs });
+  const timeoutMs = rewriteService.provider.selected === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  return providerAdapter.checkReadiness({ timeoutMs });
 }
 
 function getMinimaxPassiveReadiness(nowMs = Date.now()) {
@@ -437,7 +378,7 @@ async function triggerWarmupIfNeeded(nowMs) {
   lastWarmupTriggerAtMs = nowMs;
 
   try {
-    const warmupResult = await provider.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
+    const warmupResult = await providerAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
     if (!warmupResult.ok) {
       lastWarmupResult = 'failed';
       lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
@@ -459,6 +400,44 @@ async function delay(ms) {
 async function runStartupWarmupLoop() {
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
+
+  if (rewriteService.provider.selected === 'minimax') {
+    startupWarmupAttempts += 1;
+    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(Date.now());
+
+    if (minimaxPassiveReadiness.ready) {
+      promoteServiceReady();
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          msg: 'Startup passive readiness evaluated',
+          provider: 'minimax',
+          serviceState,
+          startupWarmupAttempts,
+          startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+          passiveReady: true,
+          passiveReason: minimaxPassiveReadiness.reason
+        })
+      );
+      return;
+    }
+
+    modelPhase = 'warming';
+    serviceState = 'degraded';
+    console.warn(
+      JSON.stringify({
+        level: 'warn',
+        msg: 'Startup passive readiness evaluated',
+        provider: 'minimax',
+        serviceState,
+        startupWarmupAttempts,
+        startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
+        passiveReady: false,
+        passiveReason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY'
+      })
+    );
+    return;
+  }
 
   while (Date.now() < startupWarmupDeadlineAtMs) {
     startupWarmupAttempts += 1;
@@ -532,7 +511,7 @@ async function runStartupWarmupLoop() {
 app.get('/model-status', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const isMinimax = rewriteService.provider.selected === 'minimax';
   const minimaxPassiveReadiness = isMinimax ? getMinimaxPassiveReadiness(nowMs) : null;
 
   if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
@@ -549,6 +528,7 @@ app.get('/model-status', async (_req, res) => {
       promoteServiceReady();
     } else {
       modelPhase = 'warming';
+      serviceState = 'degraded';
     }
   } else {
     applyProbeState(probeReady);
@@ -603,22 +583,23 @@ app.get('/model-status', async (_req, res) => {
 });
 
 app.get('/healthz', (_req, res) => {
-  return res.json({ ok: true });
+  return writeJsonSuccess(res);
 });
 
 app.get('/readyz', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  const isMinimax = rewriteService.provider.selected === 'minimax';
 
   if (isMinimax) {
     const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
     if (minimaxPassiveReadiness.ready) {
       promoteServiceReady();
-      return res.json({ ok: true, serviceState, reason: null });
+      return writeJsonSuccess(res, { serviceState, reason: null });
     }
 
     modelPhase = 'warming';
+    serviceState = 'degraded';
     return res
       .status(503)
       .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
@@ -637,7 +618,7 @@ app.get('/readyz', async (_req, res) => {
 
   if (serviceState === 'ready') {
     if (probeReady === true) {
-      return res.json({ ok: true, serviceState, reason: null });
+      return writeJsonSuccess(res, { serviceState, reason: null });
     }
 
     if (probeReady === false) {
@@ -657,44 +638,41 @@ app.get('/readyz', async (_req, res) => {
   return res.status(503).json({ ok: false, serviceState, reason });
 });
 
-app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
+app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath], rewriteHeaderAuth, async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   let email = null;
   let inputLength = 0;
   let requestPhase = modelPhase;
-  let selectedTimeoutMs = OLLAMA_COLD_TIMEOUT_MS;
+  let selectedTimeoutMs = rewriteService.timeouts.coldMs;
   let probeReady = lastProbeReady;
   let probeError = null;
   let warmupTriggeredNow = false;
   let minimaxRecoveryAttempt = false;
-  const isMinimax = REWRITE_PROVIDER === 'minimax';
+  let minimaxPassiveReason = null;
+  const isMinimax = rewriteService.provider.selected === 'minimax';
 
   try {
     email = req.auth?.email || null;
 
-    const { text, stream } = req.body || {};
-    const streamRequested = stream === true || stream === 'true' || stream === 1 || stream === '1';
-
-    if (typeof text !== 'string') {
-      return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
+    const validationResult = rewriteService.validateRequest({ body: req.body });
+    if (!validationResult.ok) {
+      return errorResponse(res, validationResult.status, validationResult.code, validationResult.message);
     }
 
-    const trimmedText = text.trim();
-    const inputCharCount = countUnicodeCharacters(trimmedText);
+    const { trimmedText, streamRequested, inputCharCount } = validationResult.value;
     inputLength = inputCharCount;
 
-    if (!trimmedText) {
-      return errorResponse(res, 400, 'INVALID_INPUT', 'text is required');
+    if (streamRequested && !rewriteService.capabilities.streaming) {
+      return errorResponse(
+        res,
+        501,
+        'STREAMING_UNSUPPORTED',
+        `Streaming is not supported for service "${rewriteService.id}" with provider "${rewriteService.provider.selected}".`
+      );
     }
 
-    if (inputCharCount > MAX_TEXT_LENGTH) {
-      return errorResponse(res, 413, 'TOO_LONG', `Max ${MAX_TEXT_LENGTH} characters`);
-    }
-
-    const { prompt, systemPrompt, userContent } = isMinimax
-      ? buildRewritePrompt(MINIMAX_SYSTEM_PROMPT, MINIMAX_USER_TEMPLATE, trimmedText)
-      : buildRewritePrompt(REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE, trimmedText);
+    const { prompt, systemPrompt, userContent } = rewriteService.buildPrompt({ text: trimmedText, isMinimax });
 
     const nowMs = Date.now();
     const probeAgeMs = lastProbeAtMs ? Math.max(0, nowMs - lastProbeAtMs) : Number.POSITIVE_INFINITY;
@@ -715,11 +693,13 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     if (isMinimax) {
       const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
       probeReady = minimaxPassiveReadiness.ready;
-      probeError = minimaxPassiveReadiness.reason;
+      minimaxPassiveReason = minimaxPassiveReadiness.reason;
+      probeError = minimaxPassiveReason;
       if (minimaxPassiveReadiness.ready) {
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
+        serviceState = 'degraded';
 
         if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
           const cooldownRemainingMs =
@@ -764,8 +744,17 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       }
     }
 
+    if (isMinimax && probeReady !== true && minimaxPassiveReason === 'MINIMAX_API_KEY_MISSING') {
+      return errorResponse(
+        res,
+        503,
+        'MINIMAX_API_KEY_MISSING',
+        'Minimax API key is missing; set MINIMAX_API_KEY to enable rewrite requests.'
+      );
+    }
+
     requestPhase = modelPhase;
-    selectedTimeoutMs = requestPhase === 'ready' ? OLLAMA_TIMEOUT_MS : OLLAMA_COLD_TIMEOUT_MS;
+    selectedTimeoutMs = requestPhase === 'ready' ? rewriteService.timeouts.readyMs : rewriteService.timeouts.coldMs;
 
     if (serviceState === 'starting') {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
@@ -815,130 +804,74 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       );
     }
 
-    if (streamRequested) {
-      res.status(200);
-      res.set({
-        'Content-Type': 'application/x-ndjson; charset=utf-8',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      });
+    const streamEnabled = streamRequested && rewriteService.capabilities.streaming;
 
-      if (typeof res.flushHeaders === 'function') {
-        res.flushHeaders();
+    if (streamEnabled) {
+      if (!providerAdapter.hasStreamHandler({ serviceId: rewriteService.id })) {
+        return errorResponse(
+          res,
+          501,
+          'STREAMING_UNSUPPORTED',
+          `Streaming is not supported for service "${rewriteService.id}" with provider "${rewriteService.provider.selected}".`
+        );
       }
 
-      let streamDoneSent = false;
+      setStreamHeaders(res);
       let streamedText = '';
       let streamedChunkEmitted = false;
+      let streamDoneEmitted = false;
+      let streamDoneReason = 'stop';
       let finalUsage = null;
 
-      const writeStreamChunk = (payload) => {
-        if (res.writableEnded) {
-          return;
-        }
+      const streamWriter = createStreamWriter(res);
 
-        res.write(`${JSON.stringify(payload)}\n`);
-        if (typeof res.flush === 'function') {
-          res.flush();
-        }
-      };
-
-      const writeDoneChunk = (extra = {}) => {
-        if (streamDoneSent) {
-          return;
-        }
-
-        streamDoneSent = true;
-        writeStreamChunk({ response: '', done: true, ...(finalUsage ? { usage: finalUsage } : {}), ...extra });
-      };
-
-      const rewriteResult = provider.rewriteStream
-        ? await provider.rewriteStream({
-            requestId,
-            prompt,
-            systemPrompt,
-            userContent,
-            timeoutMs: selectedTimeoutMs,
-            onChunk: async (event) => {
+      const rewriteResult = await providerAdapter.invokeStream({
+        serviceId: rewriteService.id,
+        requestId,
+        payload: {
+          prompt,
+          systemPrompt,
+          userContent
+        },
+        timeoutMs: selectedTimeoutMs,
+        onChunk: async (event) => {
               if (!event || typeof event !== 'object') {
                 return;
               }
 
-              if (event.type === 'chunk' && event.chunk && typeof event.chunk === 'object') {
-                const chunk = event.chunk;
-                const chunkResponse = typeof chunk.response === 'string' ? chunk.response : '';
-
-                if (chunkResponse && !chunk.done) {
-                  streamedText += chunkResponse;
-                  streamedChunkEmitted = true;
-                }
-
-                if (chunk.done) {
-                  const { done_reason: doneReason } = chunk;
-                  if (!finalUsage && chunk.usage && typeof chunk.usage === 'object') {
-                    finalUsage = chunk.usage;
-                  }
-
-                  if (!finalUsage) {
-                    const usageFields = ['prompt_eval_count', 'prompt_eval_duration', 'eval_count', 'eval_duration', 'total_duration', 'load_duration'];
-                    const chunkUsage = {};
-                    for (const field of usageFields) {
-                      if (typeof chunk[field] === 'number') {
-                        chunkUsage[field] = chunk[field];
-                      }
-                    }
-                    finalUsage = Object.keys(chunkUsage).length > 0 ? chunkUsage : finalUsage;
-                  }
-                  writeDoneChunk(doneReason ? { done_reason: doneReason } : {});
-                  return;
-                }
-
-                if (chunkResponse) {
-                  writeStreamChunk({
-                    ...chunk,
-                    response: toHK(chunkResponse),
-                    done: false
-                  });
-                }
-
+              if (event.type === 'error' && event.error && typeof event.error === 'object') {
+                streamWriter.writeError(event.error);
                 return;
               }
 
-              if (event.type === 'token' && typeof event.text === 'string' && event.text.length > 0) {
+              if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
                 streamedText += event.text;
                 streamedChunkEmitted = true;
-                writeStreamChunk({ response: toHK(event.text), done: false });
+                streamWriter.writeChunk({ response: toHK(event.text), done: false });
                 return;
               }
 
               if (event.type === 'done') {
                 if (event.usage) {
                   finalUsage = event.usage;
+                  streamWriter.setUsage(finalUsage);
                 }
-                writeDoneChunk(event.reason ? { done_reason: event.reason } : {});
-                return;
-              }
-
-              if (event.type === 'final' && event.usage) {
-                finalUsage = event.usage;
+                streamDoneReason = event.reason || streamDoneReason;
+                streamDoneEmitted = true;
+                streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
               }
             }
-          })
-        : await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+          });
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
         consecutiveRewriteFailures += 1;
-        const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+        const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
         setLastError(mappedError.code, mappedError.message);
-        writeStreamChunk({
-          done: true,
-          error: {
-            code: mappedError.code,
-            message: mappedError.message,
-            status: mappedError.status || 502
-          }
+        streamWriter.writeError({
+          code: mappedError.code,
+          message: mappedError.message,
+          status: mappedError.status || 502
         });
         return res.end();
       }
@@ -951,27 +884,39 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
 
       const finalResponse = (rewriteResult.data?.response || '').trim();
       finalUsage = rewriteResult.data?.usage || finalUsage;
+      streamWriter.setUsage(finalUsage);
       logProviderResponseMeta({
         requestId,
         stream: true,
         usage: finalUsage,
-        doneReason: 'stop'
+        doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
         const finalText = toHK(streamResponse);
-        writeStreamChunk({ response: finalText, done: false });
+        streamWriter.writeChunk({ response: finalText, done: false });
       }
 
-      writeDoneChunk({ done_reason: 'stop' });
+      if (!streamDoneEmitted) {
+        streamWriter.writeDone({ done_reason: rewriteResult.data?.doneReason || streamDoneReason || 'stop' });
+      }
       return res.end();
     }
 
-    const rewriteResult = await provider.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+    const rewriteResult = await providerAdapter.invokeSync({
+      serviceId: rewriteService.id,
+      requestId,
+      payload: {
+        prompt,
+        systemPrompt,
+        userContent
+      },
+      timeoutMs: selectedTimeoutMs
+    });
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
-      const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
+      const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
@@ -1004,7 +949,7 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
     }
 
     const finalText = toHK(modelText);
-    return res.json({ ok: true, result: finalText, ...(usage ? { usage } : {}) });
+    return writeJsonSuccess(res, { result: finalText, ...(usage ? { usage } : {}) });
   } finally {
     logRewriteRequest({
       req,
@@ -1034,14 +979,14 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  const providerInfo = provider.getInfo ? provider.getInfo() : {};
+  const providerInfo = providerAdapter.getInfo();
   console.log(
     JSON.stringify({
       level: 'info',
       msg: 'Effective Ollama config',
       ...providerInfo,
-      ollamaTimeoutMs: OLLAMA_TIMEOUT_MS,
-      ollamaColdTimeoutMs: OLLAMA_COLD_TIMEOUT_MS,
+      serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
+      serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
