@@ -161,16 +161,24 @@ test('rewriteStream falls back to single user message when system prompt is miss
     systemPrompt: ''
   });
 
+  const events = [];
   const result = await provider.rewriteStream({
     prompt: '把下方文字改寫為繁體書面語：\n測試內容',
     timeoutMs: 5_000,
-    onChunk: async () => {}
+    onChunk: async (event) => {
+      events.push(event);
+    }
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.data.doneReason, 'stop');
   assert.deepEqual(capturedBody.messages, [
     { role: 'user', content: '把下方文字改寫為繁體書面語：\n測試內容' }
   ]);
+
+  const doneEvents = events.filter((event) => event.type === 'done');
+  assert.equal(doneEvents.length, 1);
+  assert.equal(doneEvents[0].reason, 'stop');
 });
 
 
