@@ -124,9 +124,7 @@ const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   10 * 60_000,
   { max: 24 * 60 * 60_000 }
 );
-const MINIMAX_FAIL_OPEN_ON_IDLE = process.env.MINIMAX_FAIL_OPEN_ON_IDLE
-  ? process.env.MINIMAX_FAIL_OPEN_ON_IDLE.toLowerCase() !== 'false'
-  : true;
+const MINIMAX_FAIL_OPEN_ON_IDLE = parseEnvBoolean('MINIMAX_FAIL_OPEN_ON_IDLE', true);
 const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
   parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
     min: 1,
@@ -148,9 +146,7 @@ const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_M
 const WARMUP_RETRIGGER_WINDOW_MS = parseEnvMilliseconds('WARMUP_RETRIGGER_WINDOW_MS', 10_000, {
   max: 120_000
 });
-const WARMUP_ON_START = process.env.WARMUP_ON_START
-  ? process.env.WARMUP_ON_START.toLowerCase() !== 'false'
-  : true;
+const WARMUP_ON_START = parseEnvBoolean('WARMUP_ON_START', true);
 const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
   max: 900_000
 });
@@ -521,6 +517,7 @@ app.get('/model-status', async (_req, res) => {
       promoteServiceReady();
     } else {
       modelPhase = 'warming';
+      serviceState = 'degraded';
     }
   } else {
     applyProbeState(probeReady);
@@ -591,6 +588,7 @@ app.get('/readyz', async (_req, res) => {
     }
 
     modelPhase = 'warming';
+    serviceState = 'degraded';
     return res
       .status(503)
       .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
@@ -690,6 +688,7 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
+        serviceState = 'degraded';
 
         if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
           const cooldownRemainingMs =
