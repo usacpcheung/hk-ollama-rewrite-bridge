@@ -64,25 +64,41 @@ function readWithLegacyFallback({
   warnLegacyUsage,
   warningLabel
 }) {
+  const parseWithValidity = (raw) => {
+    const invalidMarker = Symbol('invalid-env-value');
+    const parsed = parse(raw, invalidMarker);
+
+    return {
+      isValid: parsed !== invalidMarker,
+      value: parsed
+    };
+  };
+
   const preferred = readPreferredEnv(env, preferredKeys);
   if (preferred) {
-    return {
-      value: parse(preferred.value, defaultValue),
-      source: { type: 'preferred', key: preferred.key }
-    };
+    const preferredParsed = parseWithValidity(preferred.value);
+    if (preferredParsed.isValid) {
+      return {
+        value: preferredParsed.value,
+        source: { type: 'preferred', key: preferred.key }
+      };
+    }
   }
 
   const legacy = readPreferredEnv(env, legacyKeys);
   if (legacy) {
-    warnLegacyUsage({
-      legacyKey: legacy.key,
-      preferredKeys,
-      warningLabel
-    });
-    return {
-      value: parse(legacy.value, defaultValue),
-      source: { type: 'legacy', key: legacy.key }
-    };
+    const legacyParsed = parseWithValidity(legacy.value);
+    if (legacyParsed.isValid) {
+      warnLegacyUsage({
+        legacyKey: legacy.key,
+        preferredKeys,
+        warningLabel
+      });
+      return {
+        value: legacyParsed.value,
+        source: { type: 'legacy', key: legacy.key }
+      };
+    }
   }
 
   return {
