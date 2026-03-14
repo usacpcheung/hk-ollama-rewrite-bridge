@@ -133,9 +133,7 @@ const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   10 * 60_000,
   { max: 24 * 60 * 60_000 }
 );
-const MINIMAX_FAIL_OPEN_ON_IDLE = process.env.MINIMAX_FAIL_OPEN_ON_IDLE
-  ? process.env.MINIMAX_FAIL_OPEN_ON_IDLE.toLowerCase() !== 'false'
-  : true;
+const MINIMAX_FAIL_OPEN_ON_IDLE = parseEnvBoolean('MINIMAX_FAIL_OPEN_ON_IDLE', true);
 const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
   parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
     min: 1,
@@ -157,9 +155,7 @@ const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_M
 const WARMUP_RETRIGGER_WINDOW_MS = parseEnvMilliseconds('WARMUP_RETRIGGER_WINDOW_MS', 10_000, {
   max: 120_000
 });
-const WARMUP_ON_START = process.env.WARMUP_ON_START
-  ? process.env.WARMUP_ON_START.toLowerCase() !== 'false'
-  : true;
+const WARMUP_ON_START = parseEnvBoolean('WARMUP_ON_START', true);
 const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
   max: 900_000
 });
@@ -931,12 +927,17 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
         lastRewriteFailureAtMs = Date.now();
         consecutiveRewriteFailures += 1;
         const mappedError = rewriteResult.error || provider.mapError(new Error('unknown'));
-        setLastError(mappedError.code, mappedError.message);
-        writeStreamChunk({
-          done: true,
+        const errorCode = mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready'
+          ? 'MODEL_COLD_START_TIMEOUT'
+          : mappedError.code;
+        const errorMessage = errorCode === 'MODEL_COLD_START_TIMEOUT'
+          ? 'Model is warming up and took too long to respond. Please retry shortly.'
+          : mappedError.message;
+        setLastError(errorCode, errorMessage);
+        writeDoneChunk({
           error: {
-            code: mappedError.code,
-            message: mappedError.message,
+            code: errorCode,
+            message: errorMessage,
             status: mappedError.status || 502
           }
         });
@@ -989,20 +990,23 @@ app.post('/rewrite', rewriteHeaderAuth, async (req, res) => {
       return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
     }
 
+    const modelText = (rewriteResult.data.response || '').trim();
+    const usage = rewriteResult.data?.usage || null;
+    if (!modelText) {
+      lastRewriteFailureAtMs = Date.now();
+      consecutiveRewriteFailures += 1;
+      setLastError('OLLAMA_ERROR', 'Empty model response');
+      logProviderResponseMeta({ requestId, stream: false, usage, doneReason: null });
+      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
+    }
+
     modelPhase = 'ready';
     lastRewriteSuccessAtMs = Date.now();
     consecutiveRewriteFailures = 0;
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
-    const modelText = (rewriteResult.data.response || '').trim();
-    const usage = rewriteResult.data?.usage || null;
     logProviderResponseMeta({ requestId, stream: false, usage, doneReason: 'stop' });
-    if (!modelText) {
-      setLastError('OLLAMA_ERROR', 'Empty model response');
-      return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
-    }
-
     const finalText = toHK(modelText);
     return res.json({ ok: true, result: finalText, ...(usage ? { usage } : {}) });
   } finally {
