@@ -437,6 +437,12 @@ function createMinimaxProvider({
   }
 
   return {
+    services: {
+      rewrite: {
+        sync: rewrite,
+        stream: rewriteStream
+      }
+    },
     rewrite,
     rewriteStream,
     checkReadiness,
