@@ -48,6 +48,14 @@ Example journal check:
 journalctl -u rewrite-bridge -n 200 --no-pager | rg '"eventType":"provider_(request|response_meta)"'
 ```
 
+### Boolean environment-value parsing
+
+`WARMUP_ON_START` and `MINIMAX_FAIL_OPEN_ON_IDLE` use shared boolean parsing semantics:
+
+- True values: `1`, `true`, `yes`, `on`
+- False values: `0`, `false`, `no`, `off`
+- Parsing is case-insensitive; unset/empty values fall back to defaults.
+
 ### Runtime token-limit configuration
 
 - `REWRITE_MAX_COMPLETION_TOKENS` controls provider output token budget for both `stream=false` and `stream=true` rewrite paths.
