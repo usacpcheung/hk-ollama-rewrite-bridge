@@ -57,7 +57,7 @@ Tune runtime behavior without code changes:
 | `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Timeout (ms) for each warm-up trigger call; higher helps cold loads complete on tiny VPS. |
 | `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Cooldown window (ms) before another warm-up trigger is allowed; recommend `5000-15000` (max `120000`). |
 | `READY_REWRITE_STRICT_PROBE_MAX_AGE_MS` | `min(1000, OLLAMA_PS_CACHE_MS)` | When service state is `ready`, forces a fresh Ollama readiness probe if cached probe age exceeds this limit. Helps avoid stale-ready rewrites after upstream restarts. |
-| `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. |
+| `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. Boolean parser accepts true: `1`,`true`,`yes`,`on`; false: `0`,`false`,`no`,`off` (case-insensitive). |
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
@@ -69,7 +69,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
-| `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
+| `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. Boolean parser accepts true: `1`,`true`,`yes`,`on`; false: `0`,`false`,`no`,`off` (case-insensitive). |
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
@@ -205,8 +205,8 @@ When `REWRITE_PROVIDER=minimax`, readiness is **passive**:
 This keeps readiness checks non-billable and avoids probe-induced usage/cost spikes. Tradeoff: upstream outages may be detected less immediately when traffic is idle.
 
 Policy details:
-- `MINIMAX_FAIL_OPEN_ON_IDLE=true` keeps the time/idle fail-open behavior. Once failures are old enough (or traffic has been idle past `MINIMAX_PASSIVE_READY_GRACE_MS`), passive readiness can return to green.
-- `MINIMAX_FAIL_OPEN_ON_IDLE=false` is strict fail-closed after threshold failures: elapsed time alone does not recover readiness; a successful rewrite is required to clear failure streak state.
+- `MINIMAX_FAIL_OPEN_ON_IDLE=true` (also `1`, `yes`, `on`) keeps the time/idle fail-open behavior. Once failures are old enough (or traffic has been idle past `MINIMAX_PASSIVE_READY_GRACE_MS`), passive readiness can return to green.
+- `MINIMAX_FAIL_OPEN_ON_IDLE=false` (also `0`, `no`, `off`) is strict fail-closed after threshold failures: elapsed time alone does not recover readiness; a successful rewrite is required to clear failure streak state.
 
 Controlled recovery-attempt mechanism (backend guardrail):
 - Even in strict fail-closed state (`MINIMAX_RECENT_FAILURES`), backend allows bounded `POST /rewrite` recovery attempts to break deadlock.
