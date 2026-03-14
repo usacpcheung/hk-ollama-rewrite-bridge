@@ -521,6 +521,7 @@ app.get('/model-status', async (_req, res) => {
       promoteServiceReady();
     } else {
       modelPhase = 'warming';
+      serviceState = 'degraded';
     }
   } else {
     applyProbeState(probeReady);
@@ -591,6 +592,7 @@ app.get('/readyz', async (_req, res) => {
     }
 
     modelPhase = 'warming';
+    serviceState = 'degraded';
     return res
       .status(503)
       .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
@@ -690,6 +692,7 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
+        serviceState = 'degraded';
 
         if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
           const cooldownRemainingMs =
