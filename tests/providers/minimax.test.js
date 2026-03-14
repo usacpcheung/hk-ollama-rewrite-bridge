@@ -414,3 +414,15 @@ test('triggerWarmup is a no-op success and does not send rewrite prompt payload'
     global.fetch = originalFetch;
   }
 });
+
+
+test('exposes rewrite service handlers for generic adapter dispatch', () => {
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'MiniMax-Text-01',
+    apiKey: 'test-key'
+  });
+
+  assert.equal(typeof provider.services?.rewrite?.sync, 'function');
+  assert.equal(typeof provider.services?.rewrite?.stream, 'function');
+});

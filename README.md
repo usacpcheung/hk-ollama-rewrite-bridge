@@ -37,18 +37,79 @@ Run all tests:
 npm test
 ```
 
+## Service-scoped environment naming
+
+Services now resolve runtime config with a service prefix:
+
+- `<SERVICE_ID>_PROVIDER` (for example `REWRITE_PROVIDER`, future `SUMMARIZE_PROVIDER`)
+- `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL` (for example `REWRITE_OLLAMA_MODEL`, `REWRITE_PROVIDER_MINIMAX_MODEL`)
+- `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
+- Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS` and `<SERVICE_ID>_COLD_TIMEOUT_MS`
+
+Resolution order for rewrite service:
+1. New service-scoped keys (preferred)
+2. Legacy keys (fallback, still accepted)
+3. Hardcoded defaults
+
+Legacy fallback emits a deprecation warning only when a new equivalent exists and only the legacy key is used.
+
+### Compatibility mapping (rewrite)
+
+| Legacy key | New key |
+|---|---|
+| `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` (or `REWRITE_PROVIDER_OLLAMA_MODEL`) |
+| `OLLAMA_URL` | `REWRITE_OLLAMA_URL` (or `REWRITE_PROVIDER_OLLAMA_URL`) |
+| `OLLAMA_PS_URL` | `REWRITE_OLLAMA_PS_URL` (or `REWRITE_PROVIDER_OLLAMA_PS_URL`) |
+| `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` (or `REWRITE_PROVIDER_MINIMAX_MODEL`) |
+| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` (or `REWRITE_PROVIDER_MINIMAX_API_URL`) |
+| `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
+| `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `REWRITE_MAX_COMPLETION_TOKENS` (already service-scoped) |
+| `REWRITE_MAX_TEXT_LENGTH` | `REWRITE_MAX_TEXT_LENGTH` (already service-scoped) |
+| `REWRITE_PROVIDER` | `REWRITE_PROVIDER` (already service-scoped) |
+
+### Migration examples
+
+Rewrite service today:
+
+```bash
+REWRITE_PROVIDER=minimax \
+REWRITE_MINIMAX_MODEL=M2-her \
+REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2 \
+REWRITE_OLLAMA_URL=http://127.0.0.1:11434/api/generate \
+REWRITE_OLLAMA_PS_URL=http://127.0.0.1:11434/api/ps \
+REWRITE_MAX_COMPLETION_TOKENS=400 \
+REWRITE_READY_TIMEOUT_MS=45000 \
+REWRITE_COLD_TIMEOUT_MS=180000 \
+npm start
+```
+
+Hypothetical future summarize service:
+
+```bash
+SUMMARIZE_PROVIDER=ollama \
+SUMMARIZE_OLLAMA_MODEL=qwen2.5:7b-instruct \
+SUMMARIZE_MAX_COMPLETION_TOKENS=600
+```
+
 ## Environment Variables
 
 Tune runtime behavior without code changes:
 
 | Key | Default | Meaning |
 |---|---:|---|
-| `OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Ollama generate endpoint used by `POST /rewrite`. |
-| `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Model name sent in rewrite requests. |
+| `OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Legacy fallback for rewrite Ollama generate endpoint; prefer `REWRITE_OLLAMA_URL` or `REWRITE_PROVIDER_OLLAMA_URL`. |
+| `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Legacy fallback for rewrite Ollama model; prefer `REWRITE_OLLAMA_MODEL` or `REWRITE_PROVIDER_OLLAMA_MODEL`. |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Ollama keep-alive duration; longer keeps model loaded longer. |
-| `OLLAMA_TIMEOUT_MS` | `30000` | Request timeout (ms) when model is in `ready` phase. |
-| `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Request timeout (ms) for cold/warming phases. Recommend `120000-180000` for low-power VPS. |
-| `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Ollama status endpoint used to probe readiness. |
+| `REWRITE_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Preferred rewrite Ollama model key. |
+| `REWRITE_PROVIDER_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Alternate preferred rewrite Ollama model key. |
+| `REWRITE_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Preferred rewrite Ollama generate endpoint key. |
+| `REWRITE_PROVIDER_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Alternate preferred rewrite Ollama generate endpoint key. |
+| `REWRITE_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Preferred rewrite Ollama readiness endpoint key. |
+| `REWRITE_PROVIDER_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Alternate preferred rewrite Ollama readiness endpoint key. |
+| `OLLAMA_TIMEOUT_MS` | `30000` | Legacy fallback for rewrite ready timeout; prefer `REWRITE_READY_TIMEOUT_MS`. |
+| `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Legacy fallback for rewrite cold timeout; prefer `REWRITE_COLD_TIMEOUT_MS`. |
+| `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Legacy fallback for rewrite Ollama readiness endpoint; prefer `REWRITE_OLLAMA_PS_URL` or `REWRITE_PROVIDER_OLLAMA_PS_URL`. |
 | `OLLAMA_PS_CACHE_MS` | `2000` | Cache TTL (ms) for readiness probe results. |
 | `OLLAMA_PS_TIMEOUT_MS` | `1000` | Timeout (ms) for each `/api/ps` probe call. |
 | `WARMUP_PS_CACHE_MS` | fallback alias | Legacy/alias for `OLLAMA_PS_CACHE_MS` when primary key is unset. |
@@ -60,12 +121,18 @@ Tune runtime behavior without code changes:
 | `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. Boolean parser accepts true: `1`,`true`,`yes`,`on`; false: `0`,`false`,`no`,`off` (case-insensitive). |
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
+| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Max completion tokens sent to both Ollama (`num_predict`) and Minimax (`max_completion_tokens`) for `POST /rewrite` stream and non-stream paths. Must be an integer in range `1-8192`; invalid/empty values fall back to `300`. |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
+| `REWRITE_MINIMAX_MODEL` | `M2-her` | Preferred rewrite Minimax model key. |
+| `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate preferred rewrite Minimax model key. |
+| `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Preferred rewrite Minimax endpoint key. |
+| `REWRITE_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Alternate preferred rewrite Minimax endpoint key. |
+| `REWRITE_READY_TIMEOUT_MS` | `30000` | Preferred rewrite request timeout (ms) when model is in ready phase. |
+| `REWRITE_COLD_TIMEOUT_MS` | `120000` | Preferred rewrite request timeout (ms) during cold/warming phases. |
 | `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
-| `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
-| `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
+| `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Legacy fallback for rewrite Minimax endpoint; prefer `REWRITE_MINIMAX_API_URL` or `REWRITE_PROVIDER_MINIMAX_API_URL`. |
+| `MINIMAX_MODEL` | `M2-her` | Legacy fallback for rewrite Minimax model; prefer `REWRITE_MINIMAX_MODEL` or `REWRITE_PROVIDER_MINIMAX_MODEL`. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |

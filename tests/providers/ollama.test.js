@@ -178,3 +178,16 @@ test('redactSensitiveValue keeps usage token counters visible', () => {
     completion_tokens: 21
   });
 });
+
+
+test('exposes rewrite service handlers for generic adapter dispatch', () => {
+  const provider = createOllamaProvider({
+    generateUrl: 'http://ollama.test/api/generate',
+    psUrl: 'http://ollama.test/api/ps',
+    model: 'qwen2.5:3b-instruct',
+    keepAlive: '30m'
+  });
+
+  assert.equal(typeof provider.services?.rewrite?.sync, 'function');
+  assert.equal(typeof provider.services?.rewrite?.stream, 'function');
+});

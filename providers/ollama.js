@@ -293,6 +293,12 @@ function createOllamaProvider({
   }
 
   return {
+    services: {
+      rewrite: {
+        sync: rewrite,
+        stream: rewriteStream
+      }
+    },
     rewrite,
     rewriteStream,
     checkReadiness,
