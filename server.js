@@ -516,7 +516,7 @@ app.get('/model-status', async (_req, res) => {
 
   if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
-    lastProbeAtMs = nowMs;
+    lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
     if (probeResult.ready !== null) {
       lastProbeReady = probeResult.ready;
@@ -607,7 +607,7 @@ app.get('/readyz', async (_req, res) => {
 
   if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
-    lastProbeAtMs = nowMs;
+    lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
     if (probeResult.ready !== null) {
       lastProbeReady = probeResult.ready;
@@ -682,7 +682,7 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
 
     if (!isMinimax && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
       const probeResult = await probeModelReady();
-      lastProbeAtMs = nowMs;
+      lastProbeAtMs = Date.now();
       probeReady = probeResult.ready;
       probeError = probeResult.error;
       if (probeResult.ready !== null) {
