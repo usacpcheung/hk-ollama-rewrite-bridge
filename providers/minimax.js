@@ -1,5 +1,13 @@
 const { randomUUID } = require('crypto');
 
+const {
+  successResult,
+  failureResult,
+  streamTextEvent,
+  streamDoneEvent,
+  streamErrorEvent
+} = require('../lib/bridge-contract');
+
 function createMinimaxProvider({
   apiUrl,
   model,
@@ -9,6 +17,13 @@ function createMinimaxProvider({
   maxCompletionTokens = 300,
   debugLog
 }) {
+  const probeBody = {
+    model,
+    messages: buildProbeMessages(),
+    max_completion_tokens: 1,
+    stream: false
+  };
+
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
@@ -24,16 +39,7 @@ function createMinimaxProvider({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: buildMessages({
-            prompt: 'ping',
-            systemPrompt,
-            userContent: renderUserContent(userTemplate, 'ping')
-          }),
-          max_completion_tokens: 1,
-          stream: false
-        }),
+        body: JSON.stringify(probeBody),
         signal: controller.signal
       });
 
@@ -60,11 +66,7 @@ function createMinimaxProvider({
   }
 
   async function triggerWarmup({ timeoutMs }) {
-    return generate({
-      prompt: '你好',
-      timeoutMs,
-      maxTokens: 1
-    });
+    return successResult({ response: '', usage: null });
   }
 
   async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
@@ -126,17 +128,14 @@ function createMinimaxProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       let data;
       try {
         data = await response.json();
       } catch (_err) {
-        return { ok: false, error: mapError(new Error('invalid_json'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
       }
 
       debugLog?.({
@@ -156,9 +155,9 @@ function createMinimaxProvider({
         data?.choices?.[0]?.text ||
         '';
 
-      return { ok: true, data: { response: responseText, usage: data?.usage || null } };
+      return successResult({ response: responseText, usage: data?.usage || null });
     } catch (err) {
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
       clearTimeout(timeout);
     }
@@ -214,14 +213,11 @@ function createMinimaxProvider({
       });
 
       if (!response.ok) {
-        return {
-          ok: false,
-          error: mapError(new Error('request_failed'), { kind: 'http', status: response.status })
-        };
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
       }
 
       if (!response.body) {
-        return { ok: false, error: mapError(new Error('missing_body'), { kind: 'invalid_json' }) };
+        return failureResult(mapError(new Error('missing_body'), { kind: 'invalid_json' }));
       }
 
       const reader = response.body.getReader();
@@ -229,12 +225,14 @@ function createMinimaxProvider({
       let buffer = '';
       let streamedText = '';
       let doneEventEmitted = false;
+      let doneReason = 'stop';
+      let authoritativeDoneReason = null;
       let finalCompletionEvent = null;
       let finalMessageContent = '';
       const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
 
       const emitMappedChunk = async (chunk) => {
-        await emit({ type: 'chunk', chunk });
+        await emit(streamTextEvent({ text: chunk?.response || '', raw: chunk }));
       };
 
       const emitDone = async (reason) => {
@@ -242,14 +240,22 @@ function createMinimaxProvider({
           return;
         }
 
+        doneReason = authoritativeDoneReason || reason || doneReason || 'stop';
         doneEventEmitted = true;
-        await emitMappedChunk(buildMappedChunk({
-          id: streamId,
-          model,
-          response: '',
-          done: true,
-          doneReason: reason || 'stop'
-        }));
+        await emit(
+          streamDoneEvent({
+            reason: doneReason,
+            usage: finalCompletionEvent?.usage || null,
+            raw: buildMappedChunk({
+              id: streamId,
+              model,
+              response: '',
+              done: true,
+              doneReason,
+              usage: finalCompletionEvent?.usage || null
+            })
+          })
+        );
       };
 
       const processSseFrame = async (frame) => {
@@ -270,7 +276,7 @@ function createMinimaxProvider({
         }
 
         if (payload === '[DONE]') {
-          await emitDone('done');
+          await emitDone();
           return;
         }
 
@@ -287,7 +293,7 @@ function createMinimaxProvider({
           finalMessageContent = parsedFrame.finalMessageContent;
         }
 
-        if (parsedFrame.chunk) {
+        if (parsedFrame.chunk && !parsedFrame.chunk.done) {
           const chunk = {
             ...parsedFrame.chunk,
             id: streamId,
@@ -300,10 +306,27 @@ function createMinimaxProvider({
           }
 
           await emitMappedChunk(chunk);
+          return;
+        }
 
-          if (chunk.done) {
-            doneEventEmitted = true;
+        if (parsedFrame.chunk?.done) {
+          if (parsedFrame.chunk.done_reason && !authoritativeDoneReason) {
+            authoritativeDoneReason = parsedFrame.chunk.done_reason;
           }
+
+          if (!streamedText && finalMessageContent) {
+            await emitMappedChunk(
+              buildMappedChunk({
+                id: streamId,
+                model,
+                response: finalMessageContent,
+                done: false
+              })
+            );
+            streamedText += finalMessageContent;
+          }
+
+          await emitDone(parsedFrame.chunk.done_reason);
         }
       };
 
@@ -348,32 +371,26 @@ function createMinimaxProvider({
       });
 
       if (!streamedText && finalResponseText && !doneEventEmitted) {
-        await emitMappedChunk(buildMappedChunk({
-          id: streamId,
-          model,
-          response: finalResponseText,
-          done: false
-        }));
+        await emitMappedChunk(
+          buildMappedChunk({
+            id: streamId,
+            model,
+            response: finalResponseText,
+            done: false
+          })
+        );
       }
 
-      await emitDone('stop');
-      await emit({
-        type: 'final',
+      await emitDone(doneReason);
+      return successResult({
         response: finalResponseText,
         usage: finalCompletionEvent?.usage || null,
-        completion: finalCompletionEvent || null
+        doneReason
       });
-
-      return {
-        ok: true,
-        data: {
-          response: finalResponseText,
-          usage: finalCompletionEvent?.usage || null,
-          completion: finalCompletionEvent || null
-        }
-      };
     } catch (err) {
-      return { ok: false, error: mapError(err, { kind: 'fetch' }) };
+      const mappedError = mapError(err, { kind: err?.code === 'INVALID_JSON_CHUNK' ? 'invalid_json' : 'fetch' });
+      await emit(streamErrorEvent({ error: mappedError }));
+      return failureResult(mappedError);
     } finally {
       clearTimeout(timeout);
     }
@@ -521,10 +538,15 @@ function buildMessages({ prompt, systemPrompt, userContent }) {
   ];
 }
 
+function buildProbeMessages() {
+  return [{ role: 'user', content: 'ping' }];
+}
+
 module.exports = {
   createMinimaxProvider,
   parseMinimaxSseFrame,
   buildMappedChunk,
   buildMessages,
-  renderUserContent
+  renderUserContent,
+  buildProbeMessages
 };

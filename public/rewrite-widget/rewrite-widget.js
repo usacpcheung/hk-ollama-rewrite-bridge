@@ -276,6 +276,8 @@
 }
 .rw-counter,.rw-hint{ font-size:12px; color:var(--muted); pointer-events:none; }
 .rw-actions{ margin-top:12px; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+.rw-stream-toggle{ margin-top:10px; display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; user-select:none; }
+.rw-stream-toggle input{ width:16px; height:16px; accent-color:var(--accent); }
 .rw-btn{
   border:1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.06);
@@ -375,18 +377,43 @@
     actions.appendChild(undoBtn);
     actions.appendChild(rewriteBtn);
 
+    const streamToggle = document.createElement("label");
+    streamToggle.className = "rw-stream-toggle";
+
+    const streamCheckbox = document.createElement("input");
+    streamCheckbox.type = "checkbox";
+    streamCheckbox.checked = !!opts.streamEnabledByDefault;
+
+    const streamLabel = document.createElement("span");
+    streamLabel.textContent = "Enable streaming";
+
+    streamToggle.appendChild(streamCheckbox);
+    streamToggle.appendChild(streamLabel);
+
     const toast = document.createElement("div");
     toast.className = "rw-toast";
 
     card.appendChild(title);
     card.appendChild(area);
     card.appendChild(actions);
+    card.appendChild(streamToggle);
     card.appendChild(toast);
 
     root.appendChild(card);
     container.appendChild(root);
 
-    return { root, dot, statusText, hint, ta, countSpan: counter.querySelector(".rw-count"), undoBtn, rewriteBtn, toast };
+    return {
+      root,
+      dot,
+      statusText,
+      hint,
+      ta,
+      countSpan: counter.querySelector(".rw-count"),
+      undoBtn,
+      rewriteBtn,
+      streamCheckbox,
+      toast
+    };
   }
 
   function setDot(dotEl, state) {
@@ -416,7 +443,8 @@
     const ui = buildDOM(container, {
       maxChars,
       title: cfg.title,
-      placeholder: cfg.placeholder
+      placeholder: cfg.placeholder,
+      streamEnabledByDefault: cfg.streamEnabledByDefault
     });
 
     // Per-widget state
@@ -584,12 +612,14 @@
         while (attempts < 6) {
           attempts++;
 
+          const useStream = !!ui.streamCheckbox.checked;
+
           const res = await fetchWithTimeout(
             REWRITE_URL,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: original }),
+              body: JSON.stringify({ text: original, stream: useStream }),
               redirect: "follow",
               credentials: "include"
             },
@@ -622,13 +652,30 @@
             throw new Error(t?.error?.message || `Rewrite failed: HTTP ${res.status}`);
           }
 
-          const data = await res.json();
-          if (!data || data.ok !== true || typeof data.result !== "string") {
-            throw new Error("Unexpected API response format.");
+          if (useStream) {
+            ui.ta.value = "";
+            updateCount();
+
+            const streamResult = await consumeNdjsonStream(res, {
+              onChunk: (chunkText) => {
+                ui.ta.value += chunkText;
+                updateCount();
+              }
+            });
+
+            if (streamResult.errorMessage) {
+              throw new Error(streamResult.errorMessage);
+            }
+          } else {
+            const data = await res.json();
+            if (!data || data.ok !== true || typeof data.result !== "string") {
+              throw new Error("Unexpected API response format.");
+            }
+
+            ui.ta.value = data.result;
+            updateCount();
           }
 
-          ui.ta.value = data.result;
-          updateCount();
           toast("Done.", "ok");
           success = true;
 
@@ -690,6 +737,56 @@
         container.innerHTML = "";
       }
     };
+  }
+
+  async function consumeNdjsonStream(res, { onChunk }) {
+    if (!res.body || typeof res.body.getReader !== "function") {
+      throw new Error("Streaming is not supported in this browser.");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let errorMessage = "";
+
+    const handleLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      let payload;
+      try {
+        payload = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+
+      if (typeof payload.response === "string" && payload.response.length > 0) {
+        onChunk(payload.response);
+      }
+
+      if (payload.error && typeof payload.error.message === "string" && payload.error.message.length > 0) {
+        errorMessage = payload.error.message;
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        handleLine(line);
+      }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      handleLine(buffer);
+    }
+
+    return { errorMessage };
   }
 
   global.RewriteWidget = { mount };

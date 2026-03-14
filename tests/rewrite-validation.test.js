@@ -53,6 +53,12 @@ async function postRewrite(text) {
   return { status: response.status, body };
 }
 
+async function getJson(pathname) {
+  const response = await fetch(`${BASE_URL}${pathname}`);
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
 test('POST /rewrite max-length validation counts Unicode characters instead of UTF-16 code units', async (t) => {
   const serverProcess = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
@@ -105,71 +111,7 @@ function startMockMinimaxServer(handler) {
 
 
 
-test('POST /rewrite uses REWRITE_USER_TEMPLATE when MINIMAX_USER_TEMPLATE is absent', async (t) => {
-  let capturedMessages = null;
-  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
-    let raw = '';
-    req.on('data', (chunk) => {
-      raw += chunk;
-    });
-    req.on('end', () => {
-      const payload = JSON.parse(raw || '{}');
-      capturedMessages = payload.messages;
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ reply: '改寫完成' }));
-    });
-  });
-
-  t.after(() => {
-    mockServer.close();
-  });
-
-  const env = {
-    ...process.env,
-    REWRITE_PROVIDER: 'minimax',
-    WARMUP_ON_START: 'false',
-    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
-    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
-    MINIMAX_API_KEY: 'minimax-test-key',
-    MINIMAX_SYSTEM_PROMPT: '',
-    REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}'
-  };
-  delete env.MINIMAX_USER_TEMPLATE;
-
-  const serverProcess = spawn(process.execPath, ['server.js'], {
-    cwd: process.cwd(),
-    env,
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  t.after(() => {
-    if (!serverProcess.killed) {
-      serverProcess.kill('SIGTERM');
-    }
-  });
-
-  await waitForServerReady(serverProcess);
-
-  const response = await fetch(`${BASE_URL}/rewrite`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Bridge-Auth': AUTH_SECRET,
-      'X-Authenticated-Email': 'tester@hs.edu.hk'
-    },
-    body: JSON.stringify({ text: '我今日唔係好舒服，想請半日假。' })
-  });
-
-  assert.equal(response.status, 200);
-  assert.deepEqual(capturedMessages, [
-    {
-      role: 'user',
-      content: 'Legacy：我今日唔係好舒服，想請半日假。'
-    }
-  ]);
-});
-
-test('POST /rewrite uses MINIMAX_USER_TEMPLATE over REWRITE_USER_TEMPLATE when both are set', async (t) => {
+test('POST /rewrite ignores legacy prompt-template env overrides for Minimax payloads', async (t) => {
   let capturedMessages = null;
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
     let raw = '';
@@ -197,8 +139,9 @@ test('POST /rewrite uses MINIMAX_USER_TEMPLATE over REWRITE_USER_TEMPLATE when b
       BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
       MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
       MINIMAX_API_KEY: 'minimax-test-key',
-      MINIMAX_SYSTEM_PROMPT: '',
+      REWRITE_SYSTEM_PROMPT: 'Override system',
       REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}',
+      MINIMAX_SYSTEM_PROMPT: 'Minimax system override',
       MINIMAX_USER_TEMPLATE: 'Minimax：{TEXT}'
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -223,26 +166,35 @@ test('POST /rewrite uses MINIMAX_USER_TEMPLATE over REWRITE_USER_TEMPLATE when b
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(capturedMessages, [
-    {
-      role: 'user',
-      content: 'Minimax：我今日唔係好舒服，想請半日假。'
-    }
-  ]);
+  assert.equal(capturedMessages?.[0]?.role, 'system');
+  assert.match(capturedMessages?.[0]?.content || '', /^你是忠實改寫助手。/);
+  assert.equal(
+    capturedMessages?.[1]?.content,
+    '把下方文字改寫為繁體書面語：\n我今日唔係好舒服，想請半日假。'
+  );
+  assert.equal(capturedMessages?.[0]?.content?.includes('Override system'), false);
+  assert.equal(capturedMessages?.[1]?.content?.includes('Legacy：'), false);
+  assert.equal(capturedMessages?.[1]?.content?.includes('Minimax：'), false);
 });
 
-test('POST /rewrite sends one user message with minimax default template when system prompt is empty', async (t) => {
-  let capturedMessages = null;
+test('POST /rewrite ignores legacy prompt-template env overrides for Ollama payloads', async (t) => {
+  let capturedPrompt = null;
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    if (req.url === '/api/ps') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ models: [{ name: 'qwen2.5:3b-instruct' }] }));
+      return;
+    }
+
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
     });
     req.on('end', () => {
       const payload = JSON.parse(raw || '{}');
-      capturedMessages = payload.messages;
+      capturedPrompt = payload.prompt;
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ reply: '改寫完成' }));
+      res.end(JSON.stringify({ response: '改寫完成', done: true }));
     });
   });
 
@@ -250,21 +202,20 @@ test('POST /rewrite sends one user message with minimax default template when sy
     mockServer.close();
   });
 
-  const env = {
-    ...process.env,
-    REWRITE_PROVIDER: 'minimax',
-    WARMUP_ON_START: 'false',
-    BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
-    MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
-    MINIMAX_API_KEY: 'minimax-test-key',
-    MINIMAX_SYSTEM_PROMPT: ''
-  };
-  delete env.REWRITE_USER_TEMPLATE;
-  delete env.MINIMAX_USER_TEMPLATE;
-
   const serverProcess = spawn(process.execPath, ['server.js'], {
     cwd: process.cwd(),
-    env,
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'ollama',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      OLLAMA_URL: `http://127.0.0.1:${port}/api/generate`,
+      OLLAMA_PS_URL: `http://127.0.0.1:${port}/api/ps`,
+      REWRITE_SYSTEM_PROMPT: 'Override system',
+      REWRITE_USER_TEMPLATE: 'Legacy：{TEXT}',
+      MINIMAX_SYSTEM_PROMPT: 'Minimax system override',
+      MINIMAX_USER_TEMPLATE: 'Minimax：{TEXT}'
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -287,14 +238,56 @@ test('POST /rewrite sends one user message with minimax default template when sy
   });
 
   assert.equal(response.status, 200);
-  assert.deepEqual(capturedMessages, [
-    {
-      role: 'user',
-      content: '把下方文字改寫為繁體書面語：\n我今日唔係好舒服，想請半日假。'
-    }
-  ]);
+  assert.match(capturedPrompt || '', /^你是忠實改寫助手。/);
+  assert.match(capturedPrompt || '', /\n\n原文：我今日唔係好舒服，想請半日假。$/);
+  assert.equal(capturedPrompt?.includes('Override system'), false);
+  assert.equal(capturedPrompt?.includes('Legacy：'), false);
 });
 
+
+
+test('POST /rewrite stream emits a single terminal error chunk when provider stream call fails', async (t) => {
+  const unusedPort = 6553;
+
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      MINIMAX_API_URL: `http://127.0.0.1:${unusedPort}/v1/text/chatcompletion_v2`,
+      MINIMAX_API_KEY: 'minimax-test-key'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const response = await fetch(`${BASE_URL}/rewrite`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Bridge-Auth': AUTH_SECRET,
+      'X-Authenticated-Email': 'tester@hs.edu.hk'
+    },
+    body: JSON.stringify({ text: '測試', stream: true })
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  const chunks = body.trim().split('\n').map((line) => JSON.parse(line));
+
+  const errorDoneChunks = chunks.filter((chunk) => chunk.done === true && chunk.error);
+  assert.equal(errorDoneChunks.length, 1);
+  assert.equal(errorDoneChunks[0].error?.code, 'PROVIDER_ERROR');
+});
 test('POST /rewrite stream done chunk includes usage and debug logs redact secrets', async (t) => {
   const minimaxSecret = 'minimax-test-key';
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
@@ -394,4 +387,37 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
   assert.equal(allLogs.includes(minimaxSecret), false);
   assert.equal(allLogs.includes(AUTH_SECRET), false);
   assert.equal(allLogs.includes('provider-side-secret'), false);
+});
+
+test('Minimax not-ready readiness endpoints report non-ready serviceState', async (t) => {
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      MINIMAX_API_KEY: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const readyz = await getJson('/readyz');
+  assert.equal(readyz.status, 503);
+  assert.equal(readyz.body?.serviceState, 'degraded');
+  assert.equal(readyz.body?.reason, 'MINIMAX_API_KEY_MISSING');
+
+  const modelStatus = await getJson('/model-status');
+  assert.equal(modelStatus.status, 200);
+  assert.equal(modelStatus.body?.serviceState, 'degraded');
+  assert.equal(modelStatus.body?.minimaxPassiveReadiness?.ready, false);
+  assert.equal(modelStatus.body?.minimaxPassiveReadiness?.reason, 'MINIMAX_API_KEY_MISSING');
 });
