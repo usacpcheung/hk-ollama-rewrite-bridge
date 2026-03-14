@@ -1,6 +1,15 @@
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
 
+const PROVIDER_CAPABILITIES = {
+  ollama: {
+    streaming: true
+  },
+  minimax: {
+    streaming: true
+  }
+};
+
 function createProvider({
   provider = process.env.REWRITE_PROVIDER || 'ollama',
   ollamaUrl,
@@ -41,4 +50,4 @@ function createProvider({
   throw new Error(`Unsupported provider: ${provider}`);
 }
 
-module.exports = { createProvider };
+module.exports = { createProvider, PROVIDER_CAPABILITIES };
