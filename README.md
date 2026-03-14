@@ -58,6 +58,8 @@ Legacy fallback emits a deprecation warning only when a new equivalent exists an
 | Legacy key | New key |
 |---|---|
 | `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` (or `REWRITE_PROVIDER_OLLAMA_MODEL`) |
+| `OLLAMA_URL` | `REWRITE_OLLAMA_URL` (or `REWRITE_PROVIDER_OLLAMA_URL`) |
+| `OLLAMA_PS_URL` | `REWRITE_OLLAMA_PS_URL` (or `REWRITE_PROVIDER_OLLAMA_PS_URL`) |
 | `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` (or `REWRITE_PROVIDER_MINIMAX_MODEL`) |
 | `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` (or `REWRITE_PROVIDER_MINIMAX_API_URL`) |
 | `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
@@ -74,6 +76,8 @@ Rewrite service today:
 REWRITE_PROVIDER=minimax \
 REWRITE_MINIMAX_MODEL=M2-her \
 REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2 \
+REWRITE_OLLAMA_URL=http://127.0.0.1:11434/api/generate \
+REWRITE_OLLAMA_PS_URL=http://127.0.0.1:11434/api/ps \
 REWRITE_MAX_COMPLETION_TOKENS=400 \
 REWRITE_READY_TIMEOUT_MS=45000 \
 REWRITE_COLD_TIMEOUT_MS=180000 \
@@ -94,14 +98,18 @@ Tune runtime behavior without code changes:
 
 | Key | Default | Meaning |
 |---|---:|---|
-| `OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Ollama generate endpoint used by `POST /rewrite`. |
+| `OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Legacy fallback for rewrite Ollama generate endpoint; prefer `REWRITE_OLLAMA_URL` or `REWRITE_PROVIDER_OLLAMA_URL`. |
 | `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Legacy fallback for rewrite Ollama model; prefer `REWRITE_OLLAMA_MODEL` or `REWRITE_PROVIDER_OLLAMA_MODEL`. |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Ollama keep-alive duration; longer keeps model loaded longer. |
 | `REWRITE_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Preferred rewrite Ollama model key. |
 | `REWRITE_PROVIDER_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Alternate preferred rewrite Ollama model key. |
+| `REWRITE_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Preferred rewrite Ollama generate endpoint key. |
+| `REWRITE_PROVIDER_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Alternate preferred rewrite Ollama generate endpoint key. |
+| `REWRITE_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Preferred rewrite Ollama readiness endpoint key. |
+| `REWRITE_PROVIDER_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Alternate preferred rewrite Ollama readiness endpoint key. |
 | `OLLAMA_TIMEOUT_MS` | `30000` | Legacy fallback for rewrite ready timeout; prefer `REWRITE_READY_TIMEOUT_MS`. |
 | `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Legacy fallback for rewrite cold timeout; prefer `REWRITE_COLD_TIMEOUT_MS`. |
-| `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Ollama status endpoint used to probe readiness. |
+| `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Legacy fallback for rewrite Ollama readiness endpoint; prefer `REWRITE_OLLAMA_PS_URL` or `REWRITE_PROVIDER_OLLAMA_PS_URL`. |
 | `OLLAMA_PS_CACHE_MS` | `2000` | Cache TTL (ms) for readiness probe results. |
 | `OLLAMA_PS_TIMEOUT_MS` | `1000` | Timeout (ms) for each `/api/ps` probe call. |
 | `WARMUP_PS_CACHE_MS` | fallback alias | Legacy/alias for `OLLAMA_PS_CACHE_MS` when primary key is unset. |

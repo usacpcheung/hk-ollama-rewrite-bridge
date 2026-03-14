@@ -26,8 +26,8 @@ function createProvider({
 
   if (provider === 'ollama') {
     return createOllamaProvider({
-      generateUrl: ollamaUrl,
-      psUrl: ollamaPsUrl,
+      generateUrl: selectedRuntime.generateUrl || ollamaUrl,
+      psUrl: selectedRuntime.psUrl || ollamaPsUrl,
       model: selectedRuntime.model,
       keepAlive: ollamaKeepAlive,
       maxCompletionTokens,

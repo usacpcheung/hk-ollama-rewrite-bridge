@@ -177,6 +177,27 @@ function resolveRewriteConfig({
     warningLabel: 'coldTimeoutMs'
   });
 
+
+  const ollamaUrlResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_OLLAMA_URL`, `${serviceId}_PROVIDER_OLLAMA_URL`],
+    legacyKeys: ['OLLAMA_URL'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'http://127.0.0.1:11434/api/generate',
+    warnLegacyUsage,
+    warningLabel: 'ollamaUrl'
+  });
+
+  const ollamaPsUrlResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_OLLAMA_PS_URL`, `${serviceId}_PROVIDER_OLLAMA_PS_URL`],
+    legacyKeys: ['OLLAMA_PS_URL'],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: 'http://127.0.0.1:11434/api/ps',
+    warnLegacyUsage,
+    warningLabel: 'ollamaPsUrl'
+  });
+
   const ollamaModelResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_OLLAMA_MODEL`, `${serviceId}_PROVIDER_OLLAMA_MODEL`],
@@ -221,6 +242,8 @@ function resolveRewriteConfig({
     providers: {
       ollama: {
         model: ollamaModelResolution.value,
+        generateUrl: ollamaUrlResolution.value,
+        psUrl: ollamaPsUrlResolution.value,
         capabilities: providerCapabilities.ollama || { streaming: false }
       },
       minimax: {
@@ -237,6 +260,8 @@ function resolveRewriteConfig({
       readyTimeoutMs: readyTimeoutResolution.source,
       coldTimeoutMs: coldTimeoutResolution.source,
       ollamaModel: ollamaModelResolution.source,
+      ollamaUrl: ollamaUrlResolution.source,
+      ollamaPsUrl: ollamaPsUrlResolution.source,
       minimaxModel: minimaxModelResolution.source,
       minimaxApiUrl: minimaxApiUrlResolution.source
     }

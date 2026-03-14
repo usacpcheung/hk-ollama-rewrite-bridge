@@ -60,6 +60,10 @@ test('defaults apply when both new and legacy keys are absent', () => {
   assert.equal(config.maxTextLength, 200);
   assert.equal(config.sources.maxCompletionTokens.type, 'default');
   assert.equal(config.sources.maxTextLength.type, 'default');
+  assert.equal(config.providers.ollama.generateUrl, 'http://127.0.0.1:11434/api/generate');
+  assert.equal(config.providers.ollama.psUrl, 'http://127.0.0.1:11434/api/ps');
+  assert.equal(config.sources.ollamaUrl.type, 'default');
+  assert.equal(config.sources.ollamaPsUrl.type, 'default');
   assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
   assert.equal(config.sources.minimaxApiUrl.type, 'default');
 });
@@ -95,4 +99,45 @@ test('legacy minimax api url works when preferred keys are absent', () => {
 
   assert.equal(config.providers.minimax.apiUrl, 'https://legacy-minimax.example/v1/chat');
   assert.equal(config.sources.minimaxApiUrl.type, 'legacy');
+});
+
+
+test('preferred ollama urls override legacy keys', () => {
+  const env = {
+    REWRITE_OLLAMA_URL: 'http://preferred-ollama.example/api/generate',
+    REWRITE_PROVIDER_OLLAMA_PS_URL: 'http://preferred-ollama.example/api/ps',
+    OLLAMA_URL: 'http://legacy-ollama.example/api/generate',
+    OLLAMA_PS_URL: 'http://legacy-ollama.example/api/ps'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.ollama.generateUrl, 'http://preferred-ollama.example/api/generate');
+  assert.equal(config.providers.ollama.psUrl, 'http://preferred-ollama.example/api/ps');
+  assert.equal(config.sources.ollamaUrl.type, 'preferred');
+  assert.equal(config.sources.ollamaPsUrl.type, 'preferred');
+});
+
+test('legacy ollama urls work when preferred keys are absent', () => {
+  const env = {
+    OLLAMA_URL: 'http://legacy-ollama.example/api/generate',
+    OLLAMA_PS_URL: 'http://legacy-ollama.example/api/ps'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.ollama.generateUrl, 'http://legacy-ollama.example/api/generate');
+  assert.equal(config.providers.ollama.psUrl, 'http://legacy-ollama.example/api/ps');
+  assert.equal(config.sources.ollamaUrl.type, 'legacy');
+  assert.equal(config.sources.ollamaPsUrl.type, 'legacy');
 });
