@@ -57,7 +57,7 @@ Tune runtime behavior without code changes:
 | `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Timeout (ms) for each warm-up trigger call; higher helps cold loads complete on tiny VPS. |
 | `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Cooldown window (ms) before another warm-up trigger is allowed; recommend `5000-15000` (max `120000`). |
 | `READY_REWRITE_STRICT_PROBE_MAX_AGE_MS` | `min(1000, OLLAMA_PS_CACHE_MS)` | When service state is `ready`, forces a fresh Ollama readiness probe if cached probe age exceeds this limit. Helps avoid stale-ready rewrites after upstream restarts. |
-| `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. |
+| `WARMUP_ON_START` | `true` | Enable startup warm-up loop at boot. Boolean parser accepts true: `1`,`true`,`yes`,`on`; false: `0`,`false`,`no`,`off` (case-insensitive). |
 | `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warm-up budget before service transitions to degraded startup state. |
 | `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warm-up attempts. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). Values outside range are ignored and default is used. |
@@ -67,13 +67,9 @@ Tune runtime behavior without code changes:
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax chat-completion endpoint used when `REWRITE_PROVIDER=minimax`. |
 | `MINIMAX_MODEL` | `M2-her` | Minimax model name used for rewrite requests. |
 | `MINIMAX_API_KEY` | empty | Minimax API key. `/readyz` returns `MINIMAX_API_KEY_MISSING` if unset in Minimax mode. |
-| `REWRITE_SYSTEM_PROMPT` | built-in rewrite policy text | Shared rewrite system instructions/persona/output constraints. |
-| `REWRITE_USER_TEMPLATE` | `原文：{TEXT}` | Shared user-content wrapper. Use `{TEXT}` placeholder to inject request text. |
-| `MINIMAX_SYSTEM_PROMPT` | fallback to `REWRITE_SYSTEM_PROMPT` | Minimax-only system role override. Set empty string to force single-user-message fallback mode. |
-| `MINIMAX_USER_TEMPLATE` | `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`) | Minimax-only user role wrapper template. Effective chain: `MINIMAX_USER_TEMPLATE` → `REWRITE_USER_TEMPLATE` (legacy compatibility fallback) → Minimax built-in default. Set `MINIMAX_USER_TEMPLATE` explicitly. |
 | `MINIMAX_READINESS_TIMEOUT_MS` | `5000` | Timeout for Minimax readiness checks (kept for compatibility; passive readiness does not actively probe from control-plane routes). |
 | `MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Passive readiness grace window (ms). If failures are stale beyond this window, readiness returns to green when policy allows. |
-| `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. |
+| `MINIMAX_FAIL_OPEN_ON_IDLE` | `true` | Keep Minimax readiness green during idle periods to avoid false red caused only by inactivity. Boolean parser accepts true: `1`,`true`,`yes`,`on`; false: `0`,`false`,`no`,`off` (case-insensitive). |
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
@@ -117,14 +113,7 @@ When `REWRITE_PROVIDER=minimax`, requests are serialized as chat `messages`:
 ]
 ```
 
-If `MINIMAX_SYSTEM_PROMPT` is empty, the bridge safely falls back to a single `user` message.
-
-Minimax user-template resolution order during migration:
-- `MINIMAX_USER_TEMPLATE` (recommended explicit setting)
-- `REWRITE_USER_TEMPLATE` (legacy compatibility fallback)
-- built-in `MINIMAX_DEFAULT_USER_TEMPLATE` (`把下方文字改寫為繁體書面語：\n{TEXT}`)
-
-When running with `REWRITE_PROVIDER=minimax`, if `MINIMAX_USER_TEMPLATE` is unset but `REWRITE_USER_TEMPLATE` is set, startup logs a one-time warning recommending migration to `MINIMAX_USER_TEMPLATE`.
+The bridge uses built-in prompt construction for Minimax and does not support runtime prompt-template overrides via environment variables.
 
 ## Public API path behind reverse proxy
 
@@ -216,8 +205,8 @@ When `REWRITE_PROVIDER=minimax`, readiness is **passive**:
 This keeps readiness checks non-billable and avoids probe-induced usage/cost spikes. Tradeoff: upstream outages may be detected less immediately when traffic is idle.
 
 Policy details:
-- `MINIMAX_FAIL_OPEN_ON_IDLE=true` keeps the time/idle fail-open behavior. Once failures are old enough (or traffic has been idle past `MINIMAX_PASSIVE_READY_GRACE_MS`), passive readiness can return to green.
-- `MINIMAX_FAIL_OPEN_ON_IDLE=false` is strict fail-closed after threshold failures: elapsed time alone does not recover readiness; a successful rewrite is required to clear failure streak state.
+- `MINIMAX_FAIL_OPEN_ON_IDLE=true` (also `1`, `yes`, `on`) keeps the time/idle fail-open behavior. Once failures are old enough (or traffic has been idle past `MINIMAX_PASSIVE_READY_GRACE_MS`), passive readiness can return to green.
+- `MINIMAX_FAIL_OPEN_ON_IDLE=false` (also `0`, `no`, `off`) is strict fail-closed after threshold failures: elapsed time alone does not recover readiness; a successful rewrite is required to clear failure streak state.
 
 Controlled recovery-attempt mechanism (backend guardrail):
 - Even in strict fail-closed state (`MINIMAX_RECENT_FAILURES`), backend allows bounded `POST /rewrite` recovery attempts to break deadlock.
