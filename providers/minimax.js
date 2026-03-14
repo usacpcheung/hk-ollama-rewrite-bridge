@@ -226,6 +226,7 @@ function createMinimaxProvider({
       let streamedText = '';
       let doneEventEmitted = false;
       let doneReason = 'stop';
+      let authoritativeDoneReason = null;
       let finalCompletionEvent = null;
       let finalMessageContent = '';
       const streamId = `chatcmpl-${typeof randomUUID === 'function' ? randomUUID() : `${Date.now()}`}`;
@@ -239,7 +240,7 @@ function createMinimaxProvider({
           return;
         }
 
-        doneReason = reason || doneReason || 'stop';
+        doneReason = authoritativeDoneReason || reason || doneReason || 'stop';
         doneEventEmitted = true;
         await emit(
           streamDoneEvent({
@@ -275,7 +276,7 @@ function createMinimaxProvider({
         }
 
         if (payload === '[DONE]') {
-          await emitDone('done');
+          await emitDone();
           return;
         }
 
@@ -309,6 +310,10 @@ function createMinimaxProvider({
         }
 
         if (parsedFrame.chunk?.done) {
+          if (parsedFrame.chunk.done_reason && !authoritativeDoneReason) {
+            authoritativeDoneReason = parsedFrame.chunk.done_reason;
+          }
+
           if (!streamedText && finalMessageContent) {
             await emitMappedChunk(
               buildMappedChunk({
@@ -321,7 +326,7 @@ function createMinimaxProvider({
             streamedText += finalMessageContent;
           }
 
-          await emitDone(parsedFrame.chunk.done_reason || 'stop');
+          await emitDone(parsedFrame.chunk.done_reason);
         }
       };
 
