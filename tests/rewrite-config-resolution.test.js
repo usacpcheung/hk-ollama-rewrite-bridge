@@ -141,3 +141,56 @@ test('legacy ollama urls work when preferred keys are absent', () => {
   assert.equal(config.sources.ollamaUrl.type, 'legacy');
   assert.equal(config.sources.ollamaPsUrl.type, 'legacy');
 });
+
+test('malformed preferred ready timeout falls back to legacy timeout', () => {
+  const env = {
+    REWRITE_READY_TIMEOUT_MS: 'not-a-number',
+    OLLAMA_TIMEOUT_MS: '45000'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.timeouts.readyMs, 45000);
+  assert.equal(config.sources.readyTimeoutMs.type, 'legacy');
+  assert.equal(config.sources.readyTimeoutMs.key, 'OLLAMA_TIMEOUT_MS');
+});
+
+test('malformed preferred cold timeout falls back to legacy timeout', () => {
+  const env = {
+    REWRITE_COLD_TIMEOUT_MS: 'not-a-number',
+    OLLAMA_COLD_TIMEOUT_MS: '180000'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.timeouts.coldMs, 180000);
+  assert.equal(config.sources.coldTimeoutMs.type, 'legacy');
+  assert.equal(config.sources.coldTimeoutMs.key, 'OLLAMA_COLD_TIMEOUT_MS');
+});
+
+test('malformed bounded integer key falls back to default with default source metadata', () => {
+  const env = {
+    REWRITE_MAX_TEXT_LENGTH: 'not-a-number'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.maxTextLength, 200);
+  assert.equal(config.sources.maxTextLength.type, 'default');
+  assert.equal(config.sources.maxTextLength.key, null);
+});

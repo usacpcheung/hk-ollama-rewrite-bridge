@@ -807,6 +807,15 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
     const streamEnabled = streamRequested && rewriteService.capabilities.streaming;
 
     if (streamEnabled) {
+      if (!providerAdapter.hasStreamHandler({ serviceId: rewriteService.id })) {
+        return errorResponse(
+          res,
+          501,
+          'STREAMING_UNSUPPORTED',
+          `Streaming is not supported for service "${rewriteService.id}" with provider "${rewriteService.provider.selected}".`
+        );
+      }
+
       setStreamHeaders(res);
       let streamedText = '';
       let streamedChunkEmitted = false;
@@ -816,14 +825,16 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
 
       const streamWriter = createStreamWriter(res);
 
-      const rewriteResult = providerAdapter.rewriteStream
-        ? await providerAdapter.rewriteStream({
-            requestId,
-            prompt,
-            systemPrompt,
-            userContent,
-            timeoutMs: selectedTimeoutMs,
-            onChunk: async (event) => {
+      const rewriteResult = await providerAdapter.invokeStream({
+        serviceId: rewriteService.id,
+        requestId,
+        payload: {
+          prompt,
+          systemPrompt,
+          userContent
+        },
+        timeoutMs: selectedTimeoutMs,
+        onChunk: async (event) => {
               if (!event || typeof event !== 'object') {
                 return;
               }
@@ -850,8 +861,7 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
                 streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
               }
             }
-          })
-        : await providerAdapter.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+          });
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
@@ -893,7 +903,16 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
       return res.end();
     }
 
-    const rewriteResult = await providerAdapter.rewrite({ requestId, prompt, systemPrompt, userContent, timeoutMs: selectedTimeoutMs });
+    const rewriteResult = await providerAdapter.invokeSync({
+      serviceId: rewriteService.id,
+      requestId,
+      payload: {
+        prompt,
+        systemPrompt,
+        userContent
+      },
+      timeoutMs: selectedTimeoutMs
+    });
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
