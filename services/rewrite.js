@@ -15,6 +15,9 @@ const REWRITE_USER_TEMPLATE = '原文：{TEXT}';
 const MINIMAX_SYSTEM_PROMPT = REWRITE_SYSTEM_PROMPT;
 const MINIMAX_DEFAULT_USER_TEMPLATE = '把下方文字改寫為繁體書面語：\n{TEXT}';
 const MINIMAX_USER_TEMPLATE = MINIMAX_DEFAULT_USER_TEMPLATE;
+const OpenCC = require('opencc-js');
+
+const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
 function renderUserContent(userTemplate, text) {
   if (typeof userTemplate !== 'string' || userTemplate.length === 0) {
@@ -370,6 +373,17 @@ function createRewriteServiceDefinition({
       }
 
       return buildRewritePrompt(REWRITE_SYSTEM_PROMPT, REWRITE_USER_TEMPLATE, text);
+    },
+    postProcessOutput: ({ payload }) => {
+      if (!payload || typeof payload !== 'object') {
+        return payload;
+      }
+
+      return {
+        ...payload,
+        ...(typeof payload.response === 'string' ? { response: toHK(payload.response) } : {}),
+        ...(typeof payload.result === 'string' ? { result: toHK(payload.result) } : {})
+      };
     },
     validateRequest: ({ body }) => {
       const { text, stream } = body || {};
