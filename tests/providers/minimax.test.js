@@ -408,7 +408,13 @@ test('triggerWarmup is a no-op success and does not send rewrite prompt payload'
 
     const result = await provider.triggerWarmup({ timeoutMs: 5_000 });
 
-    assert.deepEqual(result, { ok: true, data: { response: '' } });
+    assert.deepEqual(result, {
+      ok: true,
+      data: {
+        output: { text: '', artifacts: [], meta: {} },
+        response: ''
+      }
+    });
     assert.equal(fetchCalled, false);
   } finally {
     global.fetch = originalFetch;
