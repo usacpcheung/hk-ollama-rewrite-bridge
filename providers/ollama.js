@@ -5,6 +5,11 @@ const {
   streamDoneEvent,
   streamErrorEvent
 } = require('../lib/bridge-contract');
+const {
+  extractOllamaUsage,
+  normalizeProviderSyncResponse,
+  normalizeProviderStreamTerminal
+} = require('../lib/provider-response-normalizer');
 
 function createOllamaProvider({
   generateUrl,
@@ -125,7 +130,12 @@ function createOllamaProvider({
         return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
       }
 
-      return successResult({ response: data?.response || '', usage: extractOllamaUsage(data) });
+      const normalized = normalizeProviderSyncResponse({ provider: 'ollama', payload: data });
+      return successResult({
+        response: normalized.text,
+        usage: normalized.usage,
+        ...(normalized.doneReason ? { doneReason: normalized.doneReason } : {})
+      });
     } catch (err) {
       return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
@@ -208,10 +218,15 @@ function createOllamaProvider({
         }
 
         if (payload?.done) {
+          const terminal = normalizeProviderStreamTerminal({
+            provider: 'ollama',
+            payload,
+            fallbackDoneReason: 'stop'
+          });
           await emit(
             streamDoneEvent({
-              reason: payload.done_reason || 'stop',
-              usage: extractOllamaUsage(payload),
+              reason: terminal.doneReason,
+              usage: terminal.usage,
               raw: payload
             })
           );
@@ -241,10 +256,17 @@ function createOllamaProvider({
         throw invalidChunkError();
       }
 
+      const terminal = normalizeProviderStreamTerminal({
+        provider: 'ollama',
+        payload: lastChunk,
+        fallbackText: responseText,
+        fallbackDoneReason: 'stop'
+      });
+
       return successResult({
-        response: responseText,
-        usage: extractOllamaUsage(lastChunk),
-        doneReason: lastChunk?.done_reason || 'stop'
+        response: terminal.text,
+        usage: terminal.usage,
+        doneReason: terminal.doneReason
       });
     } catch (err) {
       const mappedError = err?.code === 'INVALID_JSON_CHUNK'
@@ -315,28 +337,5 @@ function createOllamaProvider({
 }
 
 
-function extractOllamaUsage(payload) {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const usage = {};
-  const fields = [
-    'prompt_eval_count',
-    'prompt_eval_duration',
-    'eval_count',
-    'eval_duration',
-    'total_duration',
-    'load_duration'
-  ];
-
-  for (const field of fields) {
-    if (typeof payload[field] === 'number') {
-      usage[field] = payload[field];
-    }
-  }
-
-  return Object.keys(usage).length > 0 ? usage : null;
-}
 
 module.exports = { createOllamaProvider, extractOllamaUsage };

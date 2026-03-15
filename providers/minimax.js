@@ -7,6 +7,10 @@ const {
   streamDoneEvent,
   streamErrorEvent
 } = require('../lib/bridge-contract');
+const {
+  normalizeProviderSyncResponse,
+  normalizeProviderStreamTerminal
+} = require('../lib/provider-response-normalizer');
 
 function createMinimaxProvider({
   apiUrl,
@@ -149,13 +153,13 @@ function createMinimaxProvider({
         }
       });
 
-      const responseText =
-        data?.reply ||
-        data?.choices?.[0]?.message?.content ||
-        data?.choices?.[0]?.text ||
-        '';
+      const normalized = normalizeProviderSyncResponse({ provider: 'minimax', payload: data });
 
-      return successResult({ response: responseText, usage: data?.usage || null });
+      return successResult({
+        response: normalized.text,
+        usage: normalized.usage,
+        ...(normalized.doneReason ? { doneReason: normalized.doneReason } : {})
+      });
     } catch (err) {
       return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
@@ -240,19 +244,26 @@ function createMinimaxProvider({
           return;
         }
 
-        doneReason = authoritativeDoneReason || reason || doneReason || 'stop';
+        const terminal = normalizeProviderStreamTerminal({
+          provider: 'minimax',
+          payload: finalCompletionEvent,
+          fallbackText: finalMessageContent || streamedText,
+          fallbackDoneReason: authoritativeDoneReason || reason || doneReason || 'stop'
+        });
+
+        doneReason = terminal.doneReason;
         doneEventEmitted = true;
         await emit(
           streamDoneEvent({
-            reason: doneReason,
-            usage: finalCompletionEvent?.usage || null,
+            reason: terminal.doneReason,
+            usage: terminal.usage,
             raw: buildMappedChunk({
               id: streamId,
               model,
               response: '',
               done: true,
-              doneReason,
-              usage: finalCompletionEvent?.usage || null
+              doneReason: terminal.doneReason,
+              usage: terminal.usage
             })
           })
         );
@@ -351,13 +362,13 @@ function createMinimaxProvider({
         await processSseFrame(buffer);
       }
 
-      const finalResponseText =
-        finalCompletionEvent?.reply ||
-        finalMessageContent ||
-        finalCompletionEvent?.choices?.[0]?.message?.content ||
-        finalCompletionEvent?.choices?.[0]?.text ||
-        streamedText ||
-        '';
+      const finalTerminal = normalizeProviderStreamTerminal({
+        provider: 'minimax',
+        payload: finalCompletionEvent,
+        fallbackText: finalMessageContent || streamedText || '',
+        fallbackDoneReason: authoritativeDoneReason || doneReason || 'stop'
+      });
+      const finalResponseText = finalTerminal.text;
 
       debugLog?.({
         requestId,
@@ -384,8 +395,8 @@ function createMinimaxProvider({
       await emitDone(doneReason);
       return successResult({
         response: finalResponseText,
-        usage: finalCompletionEvent?.usage || null,
-        doneReason
+        usage: finalTerminal.usage,
+        doneReason: doneReason || finalTerminal.doneReason
       });
     } catch (err) {
       const mappedError = mapError(err, { kind: err?.code === 'INVALID_JSON_CHUNK' ? 'invalid_json' : 'fetch' });

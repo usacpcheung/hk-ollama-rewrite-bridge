@@ -42,6 +42,7 @@ Naming convention:
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
 - Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Streaming toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 
 ### Compatibility table (rewrite)
 
@@ -54,8 +55,21 @@ Naming convention:
 | `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` / `REWRITE_PROVIDER_MINIMAX_API_URL` |
 | `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
 | `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
+| (none) | `REWRITE_STREAMING_ENABLED` / `REWRITE_PROVIDER_STREAMING_ENABLED` / `REWRITE_<PROVIDER>_STREAMING_ENABLED` |
 
 `REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is.
+
+Streaming capability for the selected provider resolves with this precedence:
+1. `REWRITE_STREAMING_ENABLED`
+2. `REWRITE_PROVIDER_STREAMING_ENABLED`
+3. `REWRITE_<PROVIDER>_STREAMING_ENABLED` (for example `REWRITE_OLLAMA_STREAMING_ENABLED`)
+
+Accepted values are `true`/`false` and `1`/`0` (case-insensitive). Unset or invalid values default to `false`.
+
+Effective streaming support is computed as:
+`providerSupportsStreaming && envStreamingEnabled`
+
+This preserves provider hard limits while allowing operator control.
 
 ### Migration examples
 
@@ -123,6 +137,7 @@ journalctl -u rewrite-bridge -n 200 --no-pager | rg '"eventType":"provider_(requ
 
 - `text` (required): string, trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters (default 200; capped at 600).
 - `stream` (optional): supports `true`, `"true"`, `1`, `"1"` to enable NDJSON streaming.
+  - Server-side capability still applies: streaming runs only when provider supports it and env-controlled streaming capability resolves to enabled; otherwise API returns `501 STREAMING_UNSUPPORTED`.
 
 ### Calling methods
 
@@ -162,6 +177,13 @@ In Minimax mode, the bridge sends a role-split payload:
 
 The bridge uses built-in system/user prompt construction for Minimax and ignores prompt-template environment-variable overrides.
 
+### Forward-compatible response convention
+
+- Primary response remains JSON.
+- Rewrite output remains text-first today via `result`.
+- Encoded values (for example hex/base64) must be nested in explicit fields such as `artifacts[].encoding` and `artifacts[].data`, rather than overloading `result`.
+- Encoded artifact fields are optional and service-dependent.
+
 ### Success (`stream=false`)
 
 `200 OK`
@@ -170,6 +192,13 @@ The bridge uses built-in system/user prompt construction for Minimax and ignores
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。",
+  "artifacts": [
+    {
+      "kind": "provider_trace",
+      "encoding": "base64",
+      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
+    }
+  ],
   "usage": {
     "prompt_eval_count": 18,
     "eval_count": 24

@@ -45,6 +45,7 @@ Services now resolve runtime config with a service prefix:
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL` (for example `REWRITE_OLLAMA_MODEL`, `REWRITE_PROVIDER_MINIMAX_MODEL`)
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
 - Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS` and `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Streaming capability toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, and optional provider-specific `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 
 Resolution order for rewrite service:
 1. New service-scoped keys (preferred)
@@ -67,6 +68,7 @@ Legacy fallback emits a deprecation warning only when a new equivalent exists an
 | `REWRITE_MAX_COMPLETION_TOKENS` | `REWRITE_MAX_COMPLETION_TOKENS` (already service-scoped) |
 | `REWRITE_MAX_TEXT_LENGTH` | `REWRITE_MAX_TEXT_LENGTH` (already service-scoped) |
 | `REWRITE_PROVIDER` | `REWRITE_PROVIDER` (already service-scoped) |
+| (none) | `REWRITE_STREAMING_ENABLED` / `REWRITE_PROVIDER_STREAMING_ENABLED` / `REWRITE_<PROVIDER>_STREAMING_ENABLED` |
 
 ### Migration examples
 
@@ -107,6 +109,9 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Alternate preferred rewrite Ollama generate endpoint key. |
 | `REWRITE_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Preferred rewrite Ollama readiness endpoint key. |
 | `REWRITE_PROVIDER_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Alternate preferred rewrite Ollama readiness endpoint key. |
+| `REWRITE_STREAMING_ENABLED` | `false` | Preferred service-scoped streaming toggle. Accepted values: `true`/`false`, `1`/`0` (case-insensitive). Invalid/unset values resolve to `false`. |
+| `REWRITE_PROVIDER_STREAMING_ENABLED` | `false` | Alternate service-scoped streaming toggle checked after `REWRITE_STREAMING_ENABLED`. Same accepted values and fallback behavior. |
+| `REWRITE_<PROVIDER>_STREAMING_ENABLED` | `false` | Optional provider-specific variant for the selected provider (for example `REWRITE_OLLAMA_STREAMING_ENABLED`). Checked after the two service-level keys. |
 | `OLLAMA_TIMEOUT_MS` | `30000` | Legacy fallback for rewrite ready timeout; prefer `REWRITE_READY_TIMEOUT_MS`. |
 | `OLLAMA_COLD_TIMEOUT_MS` | `120000` | Legacy fallback for rewrite cold timeout; prefer `REWRITE_COLD_TIMEOUT_MS`. |
 | `OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Legacy fallback for rewrite Ollama readiness endpoint; prefer `REWRITE_OLLAMA_PS_URL` or `REWRITE_PROVIDER_OLLAMA_PS_URL`. |
@@ -140,6 +145,15 @@ Tune runtime behavior without code changes:
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
+
+### Streaming capability control
+
+Selected-provider streaming is enabled only when both conditions are true:
+
+1. Provider capability declares streaming support (`providerSupportsStreaming=true`).
+2. A valid streaming env toggle resolves to `true` using this precedence: `REWRITE_STREAMING_ENABLED` → `REWRITE_PROVIDER_STREAMING_ENABLED` → `REWRITE_<PROVIDER>_STREAMING_ENABLED`.
+
+If unset or invalid, the toggle defaults to `false`. This means streaming is opt-in even when the provider supports it.
 
 ### Example startup with overrides
 
@@ -220,9 +234,37 @@ Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
 Detailed endpoint contracts, response formats, streaming behavior, and provider-specific result normalization are documented in `docs/api-reference.md`.
 
+### Forward-compatible response convention
+
+- Primary rewrite response remains JSON.
+- Text output remains text-first in `result` for current rewrite behavior.
+- Encoded payloads (for example hex/base64) must be added as explicit artifact fields (such as `artifacts[].encoding` + `artifacts[].data`) rather than overloading `result`.
+- Artifact fields are optional and service/provider-dependent; clients should treat them as additive metadata.
+
+Example response with text plus an optional encoded artifact:
+
+```json
+{
+  "ok": true,
+  "result": "我今天身體不適，想請半天假。",
+  "artifacts": [
+    {
+      "kind": "provider_trace",
+      "encoding": "base64",
+      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
+    }
+  ],
+  "usage": {
+    "prompt_eval_count": 18,
+    "eval_count": 24
+  }
+}
+```
+
 ## Deployment
 
-Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/depolyment_guide.md`.
+Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/deployment-guide.md`.
+Manual auth validation checklist is in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 
 ### `GET /model-status` (internal app route)
@@ -294,11 +336,8 @@ Operationally:
 
 ## Deployment
 
-See detailed server deployment steps in `docs/depolyment_guide.md`.
-
-## Contributor task tracking
-
-- Agent guideline rollout task: `tasks/agent-guidelines-task.md`
+See detailed server deployment steps in `docs/deployment-guide.md`.
+For post-deploy auth boundary validation, run the checklist in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 ## Operator validation checklist
 
