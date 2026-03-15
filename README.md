@@ -145,6 +145,7 @@ Tune runtime behavior without code changes:
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
+| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:<remoteAddress>`. |
 
 ### Streaming capability control
 
@@ -224,11 +225,27 @@ Backend enforces that `X-Bridge-Auth` exactly matches `BRIDGE_INTERNAL_AUTH_SECR
 Deployment requirements:
 
 - Set a strong random `BRIDGE_INTERNAL_AUTH_SECRET` in the rewrite-bridge runtime environment.
-- In Apache/Nginx, **unset inbound** `X-Authenticated-Email` and `X-Bridge-Auth` from clients.
-- Re-set both headers server-side after successful OIDC/auth processing.
+- In Apache/Nginx, **unset inbound** `X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`, and `X-Bridge-Auth` from clients.
+- Re-set trusted auth headers server-side after successful OIDC/auth processing.
 - Keep the shared secret out of git and inject via secret management.
 
 Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
+
+### Limiter key identity extraction
+
+For request identity keying, middleware resolves `req.clientIdentity.limiterKey` as:
+
+1. `oidc:<value>` when request source IP is trusted (`TRUSTED_PROXY_ADDRESSES`, default `127.0.0.1,::1`), `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`, and one trusted OIDC header is present.
+2. Otherwise `ip:<remoteAddress>`.
+
+Trusted OIDC header precedence is:
+
+1. `X-Authenticated-Email`
+2. `X-Authenticated-User`
+3. `X-Authenticated-Subject`
+
+This prevents direct public callers from spoofing identity headers because OIDC headers are ignored unless both trusted-proxy source and shared-secret checks pass.
+
 
 ## API
 

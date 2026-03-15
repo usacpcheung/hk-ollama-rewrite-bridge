@@ -28,6 +28,21 @@ Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
 
 Reverse proxy must unset these headers from inbound client traffic and set them server-side only after successful auth.
 
+### Limiter key identity extraction
+
+Request middleware computes `req.clientIdentity.limiterKey` with this logic:
+
+1. Use `oidc:<value>` only when all conditions are true:
+   - socket remote address is in `TRUSTED_PROXY_ADDRESSES` (default `127.0.0.1,::1`)
+   - `X-Bridge-Auth` exactly matches `BRIDGE_INTERNAL_AUTH_SECRET`
+   - first non-empty trusted identity header exists in this order:
+     1. `X-Authenticated-Email`
+     2. `X-Authenticated-User`
+     3. `X-Authenticated-Subject`
+2. Otherwise use `ip:<remoteAddress>`.
+
+Because trusted OIDC headers are ignored when source IP or shared secret checks fail, direct public backend access cannot spoof limiter identity with forged OIDC headers.
+
 ---
 
 ## Service-scoped environment naming and compatibility
