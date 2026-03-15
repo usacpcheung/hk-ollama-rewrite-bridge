@@ -181,8 +181,8 @@ The bridge uses built-in system/user prompt construction for Minimax and ignores
 
 - Primary response remains JSON.
 - Rewrite output remains text-first today via `result`.
-- Encoded values (for example hex/base64) must be nested in explicit fields such as `artifacts[].encoding` and `artifacts[].data`, rather than overloading `result`.
-- Encoded artifact fields are optional and service-dependent.
+- Encoded values, when introduced, should be nested in explicit fields such as `artifacts[].encoding` and `artifacts[].data`, rather than overloading `result`.
+- Encoded artifact fields are forward-compatible, optional, and service-dependent. Clients should treat them as additive metadata and should not assume they are present today.
 
 ### Success (`stream=false`)
 
@@ -192,13 +192,6 @@ The bridge uses built-in system/user prompt construction for Minimax and ignores
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。",
-  "artifacts": [
-    {
-      "kind": "provider_trace",
-      "encoding": "base64",
-      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
-    }
-  ],
   "usage": {
     "prompt_eval_count": 18,
     "eval_count": 24

@@ -201,6 +201,12 @@ Use `apache/proxy-snippet.conf` as the base, and replace all sensitive placehold
 - `OIDCRedirectURI`
 - `OIDCCryptoPassphrase`
 
+Minimum required header handling (must be present in your active VirtualHost):
+
+- Unset inbound `X-Authenticated-Email` and `X-Bridge-Auth` from clients.
+- Set trusted `X-Authenticated-Email` from OIDC claim mapping.
+- Set trusted `X-Bridge-Auth` to the same shared secret value as backend `BRIDGE_INTERNAL_AUTH_SECRET`.
+
 Map canonical public namespace `/api/rewrite-bridge/*` to internal routes:
 
 ```apache
@@ -219,7 +225,9 @@ ProxyPassReverse /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
 </Location>
 
 RequestHeader unset X-Authenticated-Email
+RequestHeader unset X-Bridge-Auth
 RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e" env=OIDC_CLAIM_email
+RequestHeader set X-Bridge-Auth "<REPLACE_WITH_STRONG_SHARED_SECRET>"
 ```
 
 Optional legacy compatibility alias:

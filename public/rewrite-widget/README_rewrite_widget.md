@@ -69,7 +69,7 @@ app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-w
 
 You can also pass optional tuning flags:
 
-- `statusPollIntervalMs` (number, min 1000) to change shared poll interval
+- `statusPollIntervalMs` (number, default `5000`, min `1000`) to change shared poll interval
 - `pollModelStatus` (boolean, default `true`) to skip the initial forced poll
 
 ------------------------------------------------------------------------

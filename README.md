@@ -238,22 +238,15 @@ Detailed endpoint contracts, response formats, streaming behavior, and provider-
 
 - Primary rewrite response remains JSON.
 - Text output remains text-first in `result` for current rewrite behavior.
-- Encoded payloads (for example hex/base64) must be added as explicit artifact fields (such as `artifacts[].encoding` + `artifacts[].data`) rather than overloading `result`.
-- Artifact fields are optional and service/provider-dependent; clients should treat them as additive metadata.
+- Encoded payloads, when introduced, should be added as explicit artifact fields (such as `artifacts[].encoding` + `artifacts[].data`) rather than overloading `result`.
+- Artifact fields are forward-compatible, optional, and service/provider-dependent; clients should treat them as additive metadata and should not assume they are present today.
 
-Example response with text plus an optional encoded artifact:
+Current `stream=false` success response shape:
 
 ```json
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。",
-  "artifacts": [
-    {
-      "kind": "provider_trace",
-      "encoding": "base64",
-      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
-    }
-  ],
   "usage": {
     "prompt_eval_count": 18,
     "eval_count": 24
