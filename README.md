@@ -234,9 +234,37 @@ Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
 Detailed endpoint contracts, response formats, streaming behavior, and provider-specific result normalization are documented in `docs/api-reference.md`.
 
+### Forward-compatible response convention
+
+- Primary rewrite response remains JSON.
+- Text output remains text-first in `result` for current rewrite behavior.
+- Encoded payloads (for example hex/base64) must be added as explicit artifact fields (such as `artifacts[].encoding` + `artifacts[].data`) rather than overloading `result`.
+- Artifact fields are optional and service/provider-dependent; clients should treat them as additive metadata.
+
+Example response with text plus an optional encoded artifact:
+
+```json
+{
+  "ok": true,
+  "result": "我今天身體不適，想請半天假。",
+  "artifacts": [
+    {
+      "kind": "provider_trace",
+      "encoding": "base64",
+      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
+    }
+  ],
+  "usage": {
+    "prompt_eval_count": 18,
+    "eval_count": 24
+  }
+}
+```
+
 ## Deployment
 
-Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/depolyment_guide.md`.
+Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/deployment-guide.md`.
+Manual auth validation checklist is in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 
 ### `GET /model-status` (internal app route)
@@ -308,11 +336,8 @@ Operationally:
 
 ## Deployment
 
-See detailed server deployment steps in `docs/depolyment_guide.md`.
-
-## Contributor task tracking
-
-- Agent guideline rollout task: `tasks/agent-guidelines-task.md`
+See detailed server deployment steps in `docs/deployment-guide.md`.
+For post-deploy auth boundary validation, run the checklist in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 ## Operator validation checklist
 
