@@ -263,7 +263,8 @@ Example response with text plus an optional encoded artifact:
 
 ## Deployment
 
-Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/depolyment_guide.md`.
+Deployment/runbook documentation (systemd, reverse proxy, provider settings, and readiness troubleshooting) is in `docs/deployment-guide.md`.
+Manual auth validation checklist is in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 
 ### `GET /model-status` (internal app route)
@@ -335,11 +336,8 @@ Operationally:
 
 ## Deployment
 
-See detailed server deployment steps in `docs/depolyment_guide.md`.
-
-## Contributor task tracking
-
-- Agent guideline rollout task: `tasks/agent-guidelines-task.md`
+See detailed server deployment steps in `docs/deployment-guide.md`.
+For post-deploy auth boundary validation, run the checklist in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
 
 ## Operator validation checklist
 
