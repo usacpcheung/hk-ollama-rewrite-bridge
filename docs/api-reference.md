@@ -177,6 +177,13 @@ In Minimax mode, the bridge sends a role-split payload:
 
 The bridge uses built-in system/user prompt construction for Minimax and ignores prompt-template environment-variable overrides.
 
+### Forward-compatible response convention
+
+- Primary response remains JSON.
+- Rewrite output remains text-first today via `result`.
+- Encoded values (for example hex/base64) must be nested in explicit fields such as `artifacts[].encoding` and `artifacts[].data`, rather than overloading `result`.
+- Encoded artifact fields are optional and service-dependent.
+
 ### Success (`stream=false`)
 
 `200 OK`
@@ -185,6 +192,13 @@ The bridge uses built-in system/user prompt construction for Minimax and ignores
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。",
+  "artifacts": [
+    {
+      "kind": "provider_trace",
+      "encoding": "base64",
+      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
+    }
+  ],
   "usage": {
     "prompt_eval_count": 18,
     "eval_count": 24
