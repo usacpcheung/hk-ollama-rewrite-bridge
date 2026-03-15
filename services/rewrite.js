@@ -55,6 +55,23 @@ function readPreferredEnv(env, keys = []) {
   return null;
 }
 
+function parseBooleanFlag(raw, fallback) {
+  if (typeof raw !== 'string') {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') {
+    return true;
+  }
+
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+
+  return fallback;
+}
+
 function readWithLegacyFallback({
   env,
   preferredKeys,
@@ -246,6 +263,22 @@ function resolveRewriteConfig({
 
   const provider = providerResolution.value;
   const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
+  const providerStreamingEnvResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [
+      `${serviceId}_STREAMING_ENABLED`,
+      `${serviceId}_PROVIDER_STREAMING_ENABLED`,
+      `${serviceId}_${String(provider).toUpperCase()}_STREAMING_ENABLED`
+    ],
+    legacyKeys: [],
+    parse: parseBooleanFlag,
+    defaultValue: false,
+    warnLegacyUsage,
+    warningLabel: 'streamingEnabled'
+  });
+  const providerSupportsStreaming = selectedProviderCapabilities.streaming === true;
+  const selectedProviderStreamingEnabled =
+    providerSupportsStreaming && providerStreamingEnvResolution.value === true;
 
   return {
     provider,
@@ -269,6 +302,7 @@ function resolveRewriteConfig({
       }
     },
     selectedProviderCapabilities,
+    selectedProviderStreamingEnabled,
     sources: {
       provider: providerResolution.source,
       maxCompletionTokens: maxCompletionTokensResolution.source,
@@ -279,7 +313,8 @@ function resolveRewriteConfig({
       ollamaUrl: ollamaUrlResolution.source,
       ollamaPsUrl: ollamaPsUrlResolution.source,
       minimaxModel: minimaxModelResolution.source,
-      minimaxApiUrl: minimaxApiUrlResolution.source
+      minimaxApiUrl: minimaxApiUrlResolution.source,
+      streamingEnabled: providerStreamingEnvResolution.source
     }
   };
 }
@@ -310,7 +345,7 @@ function createRewriteServiceDefinition({
       sources: resolvedConfig.sources
     },
     capabilities: {
-      streaming: resolvedConfig.selectedProviderCapabilities.streaming === true,
+      streaming: resolvedConfig.selectedProviderStreamingEnabled === true,
       byProvider: {
         ollama: resolvedConfig.providers.ollama.capabilities,
         minimax: resolvedConfig.providers.minimax.capabilities

@@ -254,6 +254,7 @@ test('POST /rewrite stream emits a single terminal error chunk when provider str
     env: {
       ...process.env,
       REWRITE_PROVIDER: 'minimax',
+      REWRITE_STREAMING_ENABLED: 'true',
       WARMUP_ON_START: 'false',
       BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
       MINIMAX_API_URL: `http://127.0.0.1:${unusedPort}/v1/text/chatcompletion_v2`,
@@ -309,6 +310,7 @@ test('POST /rewrite stream done chunk includes usage and debug logs redact secre
     env: {
       ...process.env,
       REWRITE_PROVIDER: 'minimax',
+      REWRITE_STREAMING_ENABLED: 'true',
       WARMUP_ON_START: 'false',
       BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
       REWRITE_DEBUG_RAW_OUTPUT: 'true',

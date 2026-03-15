@@ -194,3 +194,73 @@ test('malformed bounded integer key falls back to default with default source me
   assert.equal(config.sources.maxTextLength.type, 'default');
   assert.equal(config.sources.maxTextLength.key, null);
 });
+
+
+test('streaming defaults to false when env is unset', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_PROVIDER: 'ollama'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: {
+      ollama: { streaming: true }
+    }
+  });
+
+  assert.equal(config.selectedProviderStreamingEnabled, false);
+  assert.equal(config.sources.streamingEnabled.type, 'default');
+});
+
+test('streaming is enabled when env is true and provider supports it', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_PROVIDER: 'ollama',
+      REWRITE_STREAMING_ENABLED: 'TrUe'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: {
+      ollama: { streaming: true }
+    }
+  });
+
+  assert.equal(config.selectedProviderStreamingEnabled, true);
+  assert.equal(config.sources.streamingEnabled.type, 'preferred');
+  assert.equal(config.sources.streamingEnabled.key, 'REWRITE_STREAMING_ENABLED');
+});
+
+test('streaming stays disabled when env is true but provider does not support it', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_PROVIDER: 'minimax',
+      REWRITE_PROVIDER_STREAMING_ENABLED: '1'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: {
+      minimax: { streaming: false }
+    }
+  });
+
+  assert.equal(config.selectedProviderStreamingEnabled, false);
+  assert.equal(config.sources.streamingEnabled.type, 'preferred');
+  assert.equal(config.sources.streamingEnabled.key, 'REWRITE_PROVIDER_STREAMING_ENABLED');
+});
+
+test('invalid streaming env value falls back to false', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_PROVIDER: 'ollama',
+      REWRITE_OLLAMA_STREAMING_ENABLED: 'maybe'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: {
+      ollama: { streaming: true }
+    }
+  });
+
+  assert.equal(config.selectedProviderStreamingEnabled, false);
+  assert.equal(config.sources.streamingEnabled.type, 'default');
+});
