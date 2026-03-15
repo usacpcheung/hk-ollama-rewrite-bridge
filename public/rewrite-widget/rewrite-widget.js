@@ -447,6 +447,8 @@
       streamEnabledByDefault: cfg.streamEnabledByDefault
     });
 
+    const DRAFT_KEY = `rw_draft_v1:${window.location.pathname}:${cfg.containerSelector}:${apiBase}`;
+
     // Per-widget state
     let inFlight = false;
     let lastOriginalText = "";
@@ -485,6 +487,21 @@
       ui.toast.className = "rw-toast" + (type ? " " + type : "");
     }
 
+    function saveDraft() {
+      try { sessionStorage.setItem(DRAFT_KEY, getCurrentText()); } catch { /* ignore storage errors */ }
+    }
+
+    function restoreDraft() {
+      try {
+        const saved = sessionStorage.getItem(DRAFT_KEY);
+        if (typeof saved === "string" && saved.length > 0) {
+          ui.ta.value = saved;
+        }
+      } catch {
+        // Ignore storage errors.
+      }
+    }
+
     function syncButtons() {
       const text = (ui.ta.value || "").trim();
       const okLen = text.length > 0 && text.length <= maxChars;
@@ -495,6 +512,7 @@
     function updateCount() {
       ui.countSpan.textContent = String(getCurrentText().length);
       textChange.emit({ text: getCurrentText() });
+      saveDraft();
       syncButtons();
     }
 
@@ -546,6 +564,8 @@
       const RELOAD_MAX_ATTEMPTS = 3;
 
       if (cfg.reloadOnLoginRequired !== false) {
+        saveDraft();
+
         let now = Date.now();
         let firstTs = now;
         let count = 0;
@@ -595,6 +615,7 @@
       const before = getCurrentText();
       let success = false;
       let errorMessage = "";
+      let restoreTextOnError = "";
       rewriteStart.emit({ text: before });
 
       inFlight = true;
@@ -653,12 +674,20 @@
           }
 
           if (useStream) {
-            ui.ta.value = "";
-            updateCount();
+            restoreTextOnError = before;
+
+            let streamedText = "";
+            let streamStarted = false;
 
             const streamResult = await consumeNdjsonStream(res, {
               onChunk: (chunkText) => {
-                ui.ta.value += chunkText;
+                if (!streamStarted) {
+                  // Only clear once we actually receive stream content.
+                  ui.ta.value = "";
+                  streamStarted = true;
+                }
+                streamedText += chunkText;
+                ui.ta.value = streamedText;
                 updateCount();
               }
             });
@@ -686,6 +715,11 @@
 
         throw new Error("Model not ready after multiple retries. Please try again.");
       } catch (err) {
+        if (restoreTextOnError) {
+          ui.ta.value = restoreTextOnError;
+          updateCount();
+        }
+
         const msg = (err?.name === "AbortError") ? "Timeout. Please retry." : (err?.message || "Unknown error.");
         errorMessage = msg;
         toast(msg, "error");
@@ -717,6 +751,7 @@
     ui.undoBtn.addEventListener("click", () => undo());
 
     // Init
+    restoreDraft();
     updateCount();
     // Force one shared poll now (subscribe already got a state, but do fresh poll)
     if (cfg.pollModelStatus !== false) await poller.pollOnce();
