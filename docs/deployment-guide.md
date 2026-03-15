@@ -270,3 +270,5 @@ Common causes:
 - Minimax mode without `MINIMAX_API_KEY` -> readiness remains non-ready.
 - Ollama unavailable or model not loaded -> prolonged warming / degraded startup.
 - Too-aggressive timeout values on small VPS -> frequent timeout or warmup failures.
+
+For auth boundary verification after deployment, use `docs/runbooks/auth-matrix-manual-cli-checklist.md`.

@@ -13,6 +13,9 @@ function createServiceRegistry({
 
   const services = [rewriteService].map((service) => ({
     ...service,
+    postProcessOutput: typeof service.postProcessOutput === 'function'
+      ? service.postProcessOutput
+      : ({ payload }) => payload,
     capabilities: {
       ...service.capabilities,
       streaming: service.capabilities?.streaming === true

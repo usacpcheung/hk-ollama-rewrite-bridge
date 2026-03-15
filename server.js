@@ -1,6 +1,5 @@
 const express = require('express');
 const crypto = require('crypto');
-const OpenCC = require('opencc-js');
 const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRegistry } = require('./services');
@@ -225,7 +224,6 @@ let lastRewriteFailureAtMs = 0;
 let consecutiveRewriteFailures = 0;
 let lastMinimaxRecoveryAttemptAtMs = 0;
 
-const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
 
 app.use(express.json({ limit: '16kb' }));
 
@@ -847,7 +845,8 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
               if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
                 streamedText += event.text;
                 streamedChunkEmitted = true;
-                streamWriter.writeChunk({ response: toHK(event.text), done: false });
+                const processedChunk = rewriteService.postProcessOutput({ payload: { response: event.text } });
+                streamWriter.writeChunk({ response: processedChunk?.response || '', done: false });
                 return;
               }
 
@@ -893,8 +892,8 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
-        const finalText = toHK(streamResponse);
-        streamWriter.writeChunk({ response: finalText, done: false });
+        const processedStreamResponse = rewriteService.postProcessOutput({ payload: { response: streamResponse } });
+        streamWriter.writeChunk({ response: processedStreamResponse?.response || '', done: false });
       }
 
       if (!streamDoneEmitted) {
@@ -948,8 +947,8 @@ app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath]
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
-    const finalText = toHK(modelText);
-    return writeJsonSuccess(res, { result: finalText, ...(usage ? { usage } : {}) });
+    const processedOutput = rewriteService.postProcessOutput({ payload: { result: modelText } });
+    return writeJsonSuccess(res, { result: processedOutput?.result || '', ...(usage ? { usage } : {}) });
   } finally {
     logRewriteRequest({
       req,
