@@ -4,6 +4,7 @@ const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
+const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createDebugLogger } = require('./providers/debug-logger');
 const {
   writeJsonError,
@@ -227,6 +228,12 @@ let lastMinimaxRecoveryAttemptAtMs = 0;
 
 app.use(express.json({ limit: '16kb' }));
 
+const resolveClientIdentity = createClientIdentityResolver({
+  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET
+});
+
+app.use(resolveClientIdentity);
+
 function errorResponse(res, status, code, message, extra = {}) {
   return writeJsonError(res, status, code, message, extra);
 }
@@ -248,11 +255,17 @@ const logRewriteRequest = ({
   const elapsedMs = Date.now() - startedAt;
   const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const limiterKey = req.clientIdentity?.limiterKey || `ip:${ip}`;
+  const limiterSource = req.clientIdentity?.source || 'ip';
+  const limiterHeader = req.clientIdentity?.headerName || null;
 
   console.log(
     JSON.stringify({
       requestId,
       ip,
+      limiterKey,
+      limiterSource,
+      limiterHeader,
       email,
       inputLength,
       elapsedMs,
