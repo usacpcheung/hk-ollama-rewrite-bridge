@@ -5,6 +5,7 @@ const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
+const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
 const {
   writeJsonError,
@@ -233,6 +234,17 @@ const resolveClientIdentity = createClientIdentityResolver({
 });
 
 app.use(resolveClientIdentity);
+
+const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, opsLimiter } = createRateLimitMiddlewares();
+const OPS_ENDPOINTS = new Set(['/healthz', '/readyz']);
+
+app.use((req, res, next) => {
+  if (OPS_ENDPOINTS.has(req.path)) {
+    return next();
+  }
+
+  return globalLimiter(req, res, next);
+});
 
 function errorResponse(res, status, code, message, extra = {}) {
   return writeJsonError(res, status, code, message, extra);
@@ -593,11 +605,11 @@ app.get('/model-status', async (_req, res) => {
   });
 });
 
-app.get('/healthz', (_req, res) => {
+app.get('/healthz', opsLimiter, (_req, res) => {
   return writeJsonSuccess(res);
 });
 
-app.get('/readyz', async (_req, res) => {
+app.get('/readyz', opsLimiter, async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
   const isMinimax = rewriteService.provider.selected === 'minimax';
@@ -649,7 +661,11 @@ app.get('/readyz', async (_req, res) => {
   return res.status(503).json({ ok: false, serviceState, reason });
 });
 
-app.post([rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath], rewriteHeaderAuth, async (req, res) => {
+app.post(
+  [rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath],
+  rewriteLimiter,
+  rewriteHeaderAuth,
+  async (req, res) => {
   const requestId = crypto.randomUUID();
   const startedAt = Date.now();
   let email = null;
@@ -1003,6 +1019,7 @@ app.listen(PORT, HOST, () => {
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
       warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS,
+      rateLimitPolicy,
       rewriteDebugRawOutput: REWRITE_DEBUG_RAW_OUTPUT,
       warmupOnStart: WARMUP_ON_START,
       warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,

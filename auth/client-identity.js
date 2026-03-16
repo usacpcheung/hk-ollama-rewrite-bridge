@@ -63,7 +63,7 @@ function createClientIdentityResolver({ bridgeInternalAuthSecret, trustedProxyAd
 
     if (trustedOidcIdentity) {
       req.clientIdentity = {
-        limiterKey: `oidc:${trustedOidcIdentity.value}`,
+        limiterKey: `user:${trustedOidcIdentity.value}`,
         source: 'oidc',
         headerName: trustedOidcIdentity.headerName,
         value: trustedOidcIdentity.value,

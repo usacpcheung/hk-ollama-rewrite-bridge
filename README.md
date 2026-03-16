@@ -146,6 +146,14 @@ Tune runtime behavior without code changes:
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
 | `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:<remoteAddress>`. |
+| `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global baseline fixed-window duration in seconds for non-ops routes. |
+| `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global baseline fixed-window request budget per principal for non-ops routes. |
+| `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for authenticated principals (`user:*`). |
+| `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite fixed-window request budget for authenticated principals (`user:*`). |
+| `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite fixed-window request budget for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint (`/healthz`, `/readyz`) fixed-window duration in seconds (relaxed by default). |
+| `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint fixed-window request budget (relaxed by default). |
 
 ### Streaming capability control
 
@@ -235,7 +243,7 @@ Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
 For request identity keying, middleware resolves `req.clientIdentity.limiterKey` as:
 
-1. `oidc:<value>` when request source IP is trusted (`TRUSTED_PROXY_ADDRESSES`, default `127.0.0.1,::1`), `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`, and one trusted OIDC header is present.
+1. `user:<value>` when request source IP is trusted (`TRUSTED_PROXY_ADDRESSES`, default `127.0.0.1,::1`), `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`, and one trusted OIDC header is present.
 2. Otherwise `ip:<remoteAddress>`.
 
 Trusted OIDC header precedence is:
@@ -296,11 +304,14 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - If startup warm-up budget is exhausted (`serviceState=degraded`), returns HTTP `503` with `MODEL_STARTUP_DEGRADED` and actionable remediation text.
 - Control-plane probes can self-heal state: when readiness probe becomes healthy again, service state can auto-recover from `degraded` to `ready`.
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
+- Layered rate limiting is enforced with a global baseline plus rewrite-service quotas by principal type (`user:*` first, `ip:*` fallback).
+- Exceeded quotas return `429 RATE_LIMITED`, include `Retry-After` seconds, and a stable payload with `error.reason=RATE_LIMIT_EXCEEDED` and retry metadata.
 
 ### `GET /healthz` / `GET /readyz`
 
 Intended audience:
 - `/healthz`: infra/process liveness checks (`200` if process is up).
+- `/healthz` and `/readyz` use separate relaxed ops limiter settings (`RATE_LIMIT_OPS_*`) and are excluded from the global baseline limiter.
 - `/readyz`: traffic gating for load balancers (`200` only when `serviceState=ready`, otherwise `503`).
 - `/model-status`: richer diagnostics for UI polling and operator troubleshooting.
 

@@ -50,7 +50,7 @@ test('uses trusted oidc header as limiter key only when proxy source is trusted 
   resolver(req, {}, () => {});
 
   assert.deepEqual(req.clientIdentity, {
-    limiterKey: 'oidc:tester@hs.edu.hk',
+    limiterKey: 'user:tester@hs.edu.hk',
     source: 'oidc',
     headerName: 'X-Authenticated-Email',
     value: 'tester@hs.edu.hk',
