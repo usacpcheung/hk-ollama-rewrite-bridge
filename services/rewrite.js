@@ -2,6 +2,9 @@ const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 600;
 const DEFAULT_MAX_COMPLETION_TOKENS = 300;
 const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
+const DEFAULT_ADMISSION_MAX_CONCURRENCY = 4;
+const DEFAULT_ADMISSION_MAX_QUEUE_SIZE = 100;
+const DEFAULT_ADMISSION_MAX_WAIT_MS = 15000;
 
 const REWRITE_SYSTEM_PROMPT =
   '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
@@ -134,6 +137,7 @@ function resolveRewriteConfig({
   providerCapabilities = {}
 }) {
   const serviceId = 'REWRITE';
+  const supportedProviders = ['ollama', 'minimax'];
 
   const warnLegacyUsage = ({ legacyKey, preferredKeys, warningLabel }) => {
     if (!preferredKeys.length) {
@@ -265,6 +269,58 @@ function resolveRewriteConfig({
   });
 
   const provider = providerResolution.value;
+
+  const admissionGlobalLimits = {
+    maxConcurrency: parseEnvBoundedInteger(
+      env.ADMISSION_MAX_CONCURRENCY,
+      DEFAULT_ADMISSION_MAX_CONCURRENCY,
+      { min: 1, max: 1000 },
+      'ADMISSION_MAX_CONCURRENCY'
+    ),
+    maxQueueSize: parseEnvBoundedInteger(
+      env.ADMISSION_MAX_QUEUE_SIZE,
+      DEFAULT_ADMISSION_MAX_QUEUE_SIZE,
+      { min: 0, max: 10000 },
+      'ADMISSION_MAX_QUEUE_SIZE'
+    ),
+    maxWaitMs: parseEnvMilliseconds(
+      env.ADMISSION_MAX_WAIT_MS,
+      DEFAULT_ADMISSION_MAX_WAIT_MS,
+      { max: 600_000 },
+      'ADMISSION_MAX_WAIT_MS'
+    )
+  };
+
+  const admissionByProvider = supportedProviders.reduce((acc, providerName) => {
+    const providerEnvPrefix = providerName.toUpperCase();
+    const maxConcurrency = parseEnvBoundedInteger(
+      env[`${providerEnvPrefix}_MAX_CONCURRENCY`],
+      null,
+      { min: 1, max: 1000 },
+      `${providerEnvPrefix}_MAX_CONCURRENCY`
+    );
+    const maxQueueSize = parseEnvBoundedInteger(
+      env[`${providerEnvPrefix}_MAX_QUEUE_SIZE`],
+      null,
+      { min: 0, max: 10000 },
+      `${providerEnvPrefix}_MAX_QUEUE_SIZE`
+    );
+    const maxWaitMs = parseEnvMilliseconds(
+      env[`${providerEnvPrefix}_MAX_WAIT_MS`],
+      null,
+      { max: 600_000 },
+      `${providerEnvPrefix}_MAX_WAIT_MS`
+    );
+
+    acc[providerName] = {
+      ...(maxConcurrency != null ? { maxConcurrency } : {}),
+      ...(maxQueueSize != null ? { maxQueueSize } : {}),
+      ...(maxWaitMs != null ? { maxWaitMs } : {})
+    };
+
+    return acc;
+  }, {});
+
   const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
   const providerStreamingEnvResolution = readWithLegacyFallback({
     env,
@@ -290,6 +346,10 @@ function resolveRewriteConfig({
     timeouts: {
       readyMs: readyTimeoutResolution.value,
       coldMs: coldTimeoutResolution.value
+    },
+    admission: {
+      global: admissionGlobalLimits,
+      byProvider: admissionByProvider
     },
     providers: {
       ollama: {
@@ -345,6 +405,7 @@ function createRewriteServiceDefinition({
       maxCompletionTokens: resolvedConfig.maxCompletionTokens,
       runtime: resolvedConfig.providers[resolvedConfig.provider] || {},
       runtimeByProvider: resolvedConfig.providers,
+      admission: resolvedConfig.admission,
       sources: resolvedConfig.sources
     },
     capabilities: {

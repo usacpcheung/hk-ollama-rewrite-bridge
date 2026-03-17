@@ -7,6 +7,7 @@ const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
+const { createAdmissionController, isAdmissionOverloadError } = require('./lib/admission-controller');
 const {
   writeJsonError,
   writeJsonSuccess,
@@ -198,6 +199,11 @@ const debugLog = createDebugLogger({
   defaultProvider: rewriteService.provider.selected
 });
 
+const admissionController = createAdmissionController({
+  globalLimits: rewriteService.provider.admission?.global || {},
+  providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
+});
+
 const providerAdapter = createProviderAdapter(createProvider({
   serviceConfig: rewriteService,
   ollamaUrl: OLLAMA_URL,
@@ -248,6 +254,29 @@ app.use((req, res, next) => {
 
 function errorResponse(res, status, code, message, extra = {}) {
   return writeJsonError(res, status, code, message, extra);
+}
+
+function admissionOverloadResponse(res, overloadError) {
+  const admission = overloadError?.admission || {};
+  return errorResponse(
+    res,
+    overloadError?.status || 503,
+    overloadError?.code || 'ADMISSION_OVERLOADED',
+    overloadError?.message || 'Admission controller overloaded. Please retry shortly.',
+    {
+      reason: overloadError?.reason || 'overloaded',
+      admission
+    }
+  );
+}
+
+async function executeWithAdmission({ providerName, requestId, execute }) {
+  const ticket = await admissionController.acquire({ providerName, requestId });
+  try {
+    return await execute({ waitMs: ticket.waitMs });
+  } finally {
+    ticket.release();
+  }
 }
 
 const logRewriteRequest = ({
@@ -852,16 +881,21 @@ app.post(
 
       const streamWriter = createStreamWriter(res);
 
-      const rewriteResult = await providerAdapter.invokeStream({
-        serviceId: rewriteService.id,
-        requestId,
-        payload: {
-          prompt,
-          systemPrompt,
-          userContent
-        },
-        timeoutMs: selectedTimeoutMs,
-        onChunk: async (event) => {
+      let rewriteResult;
+      try {
+        rewriteResult = await executeWithAdmission({
+          providerName: rewriteService.provider.selected,
+          requestId,
+          execute: () => providerAdapter.invokeStream({
+            serviceId: rewriteService.id,
+            requestId,
+            payload: {
+              prompt,
+              systemPrompt,
+              userContent
+            },
+            timeoutMs: selectedTimeoutMs,
+            onChunk: async (event) => {
               if (!event || typeof event !== 'object') {
                 return;
               }
@@ -889,7 +923,22 @@ app.post(
                 streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
               }
             }
+          })
+        });
+      } catch (error) {
+        if (isAdmissionOverloadError(error)) {
+          streamWriter.writeError({
+            code: error.code,
+            message: error.message,
+            status: error.status || 503,
+            reason: error.reason,
+            admission: error.admission || {}
           });
+          return res.end();
+        }
+
+        throw error;
+      }
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
@@ -931,16 +980,29 @@ app.post(
       return res.end();
     }
 
-    const rewriteResult = await providerAdapter.invokeSync({
-      serviceId: rewriteService.id,
-      requestId,
-      payload: {
-        prompt,
-        systemPrompt,
-        userContent
-      },
-      timeoutMs: selectedTimeoutMs
-    });
+    let rewriteResult;
+    try {
+      rewriteResult = await executeWithAdmission({
+        providerName: rewriteService.provider.selected,
+        requestId,
+        execute: () => providerAdapter.invokeSync({
+          serviceId: rewriteService.id,
+          requestId,
+          payload: {
+            prompt,
+            systemPrompt,
+            userContent
+          },
+          timeoutMs: selectedTimeoutMs
+        })
+      });
+    } catch (error) {
+      if (isAdmissionOverloadError(error)) {
+        return admissionOverloadResponse(res, error);
+      }
+
+      throw error;
+    }
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;

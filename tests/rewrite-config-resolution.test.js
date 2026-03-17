@@ -264,3 +264,47 @@ test('invalid streaming env value falls back to false', () => {
   assert.equal(config.selectedProviderStreamingEnabled, false);
   assert.equal(config.sources.streamingEnabled.type, 'default');
 });
+
+
+test('admission controller defaults are present in rewrite config', () => {
+  const config = resolveRewriteConfig({
+    env: {},
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.deepEqual(config.admission.global, {
+    maxConcurrency: 4,
+    maxQueueSize: 100,
+    maxWaitMs: 15000
+  });
+  assert.deepEqual(config.admission.byProvider.ollama, {});
+  assert.deepEqual(config.admission.byProvider.minimax, {});
+});
+
+test('provider-specific admission env overrides are resolved when present', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      ADMISSION_MAX_CONCURRENCY: '5',
+      ADMISSION_MAX_QUEUE_SIZE: '50',
+      ADMISSION_MAX_WAIT_MS: '2000',
+      OLLAMA_MAX_CONCURRENCY: '2',
+      OLLAMA_MAX_WAIT_MS: '500'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.deepEqual(config.admission.global, {
+    maxConcurrency: 5,
+    maxQueueSize: 50,
+    maxWaitMs: 2000
+  });
+  assert.deepEqual(config.admission.byProvider.ollama, {
+    maxConcurrency: 2,
+    maxWaitMs: 500
+  });
+  assert.deepEqual(config.admission.byProvider.minimax, {});
+});

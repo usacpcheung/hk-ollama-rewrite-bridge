@@ -135,6 +135,12 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Alternate preferred rewrite Minimax endpoint key. |
 | `REWRITE_READY_TIMEOUT_MS` | `30000` | Preferred rewrite request timeout (ms) when model is in ready phase. |
 | `REWRITE_COLD_TIMEOUT_MS` | `120000` | Preferred rewrite request timeout (ms) during cold/warming phases. |
+| `ADMISSION_MAX_CONCURRENCY` | `4` | Global admission limit for concurrent provider executions across rewrite requests. |
+| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Global max queued rewrite requests waiting for admission when concurrency is exhausted. |
+| `ADMISSION_MAX_WAIT_MS` | `15000` | Global max wait time in queue before request is rejected as overloaded. |
+| `<PROVIDER>_MAX_CONCURRENCY` | unset | Optional provider-specific admission concurrency override (for example `OLLAMA_MAX_CONCURRENCY`, `MINIMAX_MAX_CONCURRENCY`). Falls back to global value when unset. |
+| `<PROVIDER>_MAX_QUEUE_SIZE` | unset | Optional provider-specific admission queue-size override (for example `OLLAMA_MAX_QUEUE_SIZE`). Falls back to global value when unset. |
+| `<PROVIDER>_MAX_WAIT_MS` | unset | Optional provider-specific admission queue wait-time override (for example `MINIMAX_MAX_WAIT_MS`). Falls back to global value when unset. |
 | `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Legacy fallback for rewrite Minimax endpoint; prefer `REWRITE_MINIMAX_API_URL` or `REWRITE_PROVIDER_MINIMAX_API_URL`. |
 | `MINIMAX_MODEL` | `M2-her` | Legacy fallback for rewrite Minimax model; prefer `REWRITE_MINIMAX_MODEL` or `REWRITE_PROVIDER_MINIMAX_MODEL`. |
@@ -306,6 +312,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 - Layered rate limiting is enforced with a global baseline plus rewrite-service quotas by principal type (`user:*` first, `ip:*` fallback).
 - Exceeded quotas return `429 RATE_LIMITED`, include `Retry-After` seconds, and a stable payload with `error.reason=RATE_LIMIT_EXCEEDED` and retry metadata.
+- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata.
 
 ### `GET /healthz` / `GET /readyz`
 
