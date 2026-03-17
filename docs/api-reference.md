@@ -28,6 +28,8 @@ Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
 
 Reverse proxy must unset these headers from inbound client traffic and set them server-side only after successful auth.
 
+`EXPRESS_TRUST_PROXY` controls whether Express should derive client IP from forwarded headers. Allowed values are `false`, `loopback`, or numeric hop count (`1`, `2`, ...). Use `loopback` when Apache/Nginx is local; avoid broad `true` because it trusts all upstream forwarding metadata.
+
 ### Limiter key identity extraction
 
 Request middleware computes `req.clientIdentity.limiterKey` with this logic:
@@ -39,7 +41,7 @@ Request middleware computes `req.clientIdentity.limiterKey` with this logic:
      1. `X-Authenticated-Email`
      2. `X-Authenticated-User`
      3. `X-Authenticated-Subject`
-2. Otherwise use `ip:<remoteAddress>`.
+2. Otherwise use `ip:*` fallback identity: when `EXPRESS_TRUST_PROXY` is enabled (recommended `loopback` for local reverse proxy), key on Express-computed `req.ip`; when `EXPRESS_TRUST_PROXY=false`, key on socket `remoteAddress`.
 
 Because trusted OIDC headers are ignored when source IP or shared secret checks fail, direct public backend access cannot spoof limiter identity with forged OIDC headers.
 

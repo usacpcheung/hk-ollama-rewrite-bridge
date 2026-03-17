@@ -20,6 +20,39 @@ const HOST = '127.0.0.1';
 const PORT = 3001;
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
 
+function parseExpressTrustProxy(rawValue, fallback = 'loopback') {
+  if (rawValue == null || String(rawValue).trim() === '') {
+    return fallback;
+  }
+
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+
+  if (normalized === 'loopback') {
+    return 'loopback';
+  }
+
+  const hopCount = parseBoundedInteger(normalized, { min: 1, max: 32 });
+  if (hopCount != null) {
+    return hopCount;
+  }
+
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: 'Invalid EXPRESS_TRUST_PROXY; using default',
+      provided: rawValue,
+      fallback
+    })
+  );
+  return fallback;
+}
+
+const EXPRESS_TRUST_PROXY = parseExpressTrustProxy(process.env.EXPRESS_TRUST_PROXY, 'loopback');
+app.set('trust proxy', EXPRESS_TRUST_PROXY);
+
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
@@ -236,7 +269,8 @@ let lastMinimaxRecoveryAttemptAtMs = 0;
 app.use(express.json({ limit: '16kb' }));
 
 const resolveClientIdentity = createClientIdentityResolver({
-  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET
+  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
+  preferExpressIp: EXPRESS_TRUST_PROXY !== false
 });
 
 app.use(resolveClientIdentity);
