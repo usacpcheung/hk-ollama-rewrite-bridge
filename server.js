@@ -1107,7 +1107,7 @@ app.listen(PORT, HOST, () => {
   console.log(
     JSON.stringify({
       level: 'info',
-      msg: 'Effective Ollama config',
+      msg: 'Effective provider config',
       ...providerInfo,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
