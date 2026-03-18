@@ -45,14 +45,22 @@ function extractTrustedOidcIdentity(req) {
   return null;
 }
 
-function createClientIdentityResolver({ bridgeInternalAuthSecret, trustedProxyAddresses } = {}) {
+function createClientIdentityResolver({
+  bridgeInternalAuthSecret,
+  trustedProxyAddresses,
+  preferExpressIp = false
+} = {}) {
   const trustedProxyAddressSet =
     trustedProxyAddresses instanceof Set
       ? trustedProxyAddresses
       : parseTrustedProxyAddresses(trustedProxyAddresses || process.env.TRUSTED_PROXY_ADDRESSES);
 
   return function resolveClientIdentity(req, _res, next) {
-    const remoteAddress = normalizeRemoteAddress(req.socket?.remoteAddress || req.ip || 'unknown');
+    const socketRemoteAddress = normalizeRemoteAddress(req.socket?.remoteAddress || '');
+    const expressIp = normalizeRemoteAddress(req.ip || '');
+    const remoteAddress = socketRemoteAddress || expressIp || 'unknown';
+    const fallbackIp =
+      preferExpressIp && expressIp ? expressIp : socketRemoteAddress || expressIp || 'unknown';
     const trustHeader = (req.get('X-Bridge-Auth') || '').trim();
     const hasSharedSecret = Boolean(bridgeInternalAuthSecret);
     const fromTrustedProxy = trustedProxyAddressSet.has(remoteAddress);
@@ -63,7 +71,7 @@ function createClientIdentityResolver({ bridgeInternalAuthSecret, trustedProxyAd
 
     if (trustedOidcIdentity) {
       req.clientIdentity = {
-        limiterKey: `oidc:${trustedOidcIdentity.value}`,
+        limiterKey: `user:${trustedOidcIdentity.value}`,
         source: 'oidc',
         headerName: trustedOidcIdentity.headerName,
         value: trustedOidcIdentity.value,
@@ -73,10 +81,10 @@ function createClientIdentityResolver({ bridgeInternalAuthSecret, trustedProxyAd
     }
 
     req.clientIdentity = {
-      limiterKey: `ip:${remoteAddress || 'unknown'}`,
+      limiterKey: `ip:${fallbackIp}`,
       source: 'ip',
       headerName: null,
-      value: remoteAddress || 'unknown',
+      value: fallbackIp,
       remoteAddress: remoteAddress || 'unknown'
     };
 

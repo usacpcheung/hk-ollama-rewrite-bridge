@@ -50,7 +50,7 @@ test('uses trusted oidc header as limiter key only when proxy source is trusted 
   resolver(req, {}, () => {});
 
   assert.deepEqual(req.clientIdentity, {
-    limiterKey: 'oidc:tester@hs.edu.hk',
+    limiterKey: 'user:tester@hs.edu.hk',
     source: 'oidc',
     headerName: 'X-Authenticated-Email',
     value: 'tester@hs.edu.hk',
@@ -67,8 +67,10 @@ test('falls back to ip limiter key when request is from non-trusted source even 
   const req = createReq({
     headers: {
       'X-Bridge-Auth': 'shared-secret',
-      'X-Authenticated-Email': 'spoofed@hs.edu.hk'
+      'X-Authenticated-Email': 'spoofed@hs.edu.hk',
+      'X-Forwarded-For': '203.0.113.88'
     },
+    ip: '203.0.113.88',
     remoteAddress: '198.51.100.24'
   });
 
@@ -100,4 +102,44 @@ test('falls back to ip limiter key when auth secret is missing', () => {
 
   assert.equal(req.clientIdentity.limiterKey, 'ip:127.0.0.1');
   assert.equal(req.clientIdentity.source, 'ip');
+});
+
+test('uses Express-computed req.ip for fallback limiter identity only when enabled', () => {
+  const trustedProxyAddresses = new Set(['127.0.0.1']);
+
+  const withTrustProxyResolver = createClientIdentityResolver({
+    bridgeInternalAuthSecret: 'shared-secret',
+    trustedProxyAddresses,
+    preferExpressIp: true
+  });
+
+  const withoutTrustProxyResolver = createClientIdentityResolver({
+    bridgeInternalAuthSecret: 'shared-secret',
+    trustedProxyAddresses,
+    preferExpressIp: false
+  });
+
+  const trustedProxyReq = createReq({
+    headers: {
+      'X-Bridge-Auth': 'shared-secret'
+    },
+    ip: '203.0.113.9',
+    remoteAddress: '127.0.0.1'
+  });
+
+  withTrustProxyResolver(trustedProxyReq, {}, () => {});
+  assert.equal(trustedProxyReq.clientIdentity.limiterKey, 'ip:203.0.113.9');
+  assert.equal(trustedProxyReq.clientIdentity.remoteAddress, '127.0.0.1');
+
+  const strictReq = createReq({
+    headers: {
+      'X-Bridge-Auth': 'shared-secret'
+    },
+    ip: '203.0.113.9',
+    remoteAddress: '127.0.0.1'
+  });
+
+  withoutTrustProxyResolver(strictReq, {}, () => {});
+  assert.equal(strictReq.clientIdentity.limiterKey, 'ip:127.0.0.1');
+  assert.equal(strictReq.clientIdentity.remoteAddress, '127.0.0.1');
 });

@@ -28,22 +28,47 @@ Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
 
 Reverse proxy must unset these headers from inbound client traffic and set them server-side only after successful auth.
 
+`EXPRESS_TRUST_PROXY` controls whether Express should derive client IP from forwarded headers. Allowed values are `false`, `loopback`, or numeric hop count (`1`, `2`, ...). Use `loopback` when Apache/Nginx is local; avoid broad `true` because it trusts all upstream forwarding metadata.
+
 ### Limiter key identity extraction
 
 Request middleware computes `req.clientIdentity.limiterKey` with this logic:
 
-1. Use `oidc:<value>` only when all conditions are true:
+1. Use `user:<value>` only when all conditions are true:
    - socket remote address is in `TRUSTED_PROXY_ADDRESSES` (default `127.0.0.1,::1`)
    - `X-Bridge-Auth` exactly matches `BRIDGE_INTERNAL_AUTH_SECRET`
    - first non-empty trusted identity header exists in this order:
      1. `X-Authenticated-Email`
      2. `X-Authenticated-User`
      3. `X-Authenticated-Subject`
-2. Otherwise use `ip:<remoteAddress>`.
+2. Otherwise use `ip:*` fallback identity: when `EXPRESS_TRUST_PROXY` is enabled (recommended `loopback` for local reverse proxy), key on Express-computed `req.ip`; when `EXPRESS_TRUST_PROXY=false`, key on socket `remoteAddress`.
 
 Because trusted OIDC headers are ignored when source IP or shared secret checks fail, direct public backend access cannot spoof limiter identity with forged OIDC headers.
 
 ---
+
+
+## Rate-limiting policy and environment
+
+Rate limiting uses layered fixed-window policies:
+- Global baseline limiter for non-ops routes (`RATE_LIMIT_GLOBAL_*`).
+- Rewrite service limiter (`POST /rewrite`) with principal-aware quotas:
+  - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_REWRITE_AUTH_*`.
+  - IP fallback (`ip:*`) uses `RATE_LIMIT_REWRITE_IP_*`.
+- Ops limiter for `/healthz` and `/readyz` (`RATE_LIMIT_OPS_*`, relaxed defaults).
+
+Invalid rate-limit env values fail fast during startup.
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global baseline window length (seconds). |
+| `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global baseline max requests per principal/window. |
+| `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite authenticated principal window length. |
+| `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite authenticated principal request budget. |
+| `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite IP-fallback window length. |
+| `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite IP-fallback request budget. |
+| `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint window length. |
+| `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint request budget. |
 
 ## Service-scoped environment naming and compatibility
 
@@ -58,6 +83,8 @@ Naming convention:
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
 - Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
 - Streaming toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
+- Admission defaults: `ADMISSION_MAX_CONCURRENCY`, `ADMISSION_MAX_QUEUE_SIZE`, `ADMISSION_MAX_WAIT_MS`
+- Optional provider admission overrides: `<PROVIDER>_MAX_CONCURRENCY`, `<PROVIDER>_MAX_QUEUE_SIZE`, `<PROVIDER>_MAX_WAIT_MS`
 
 ### Compatibility table (rewrite)
 
@@ -267,6 +294,28 @@ or
 - `202 MODEL_WARMING` can still occur in Ollama mode even when prior `/readyz` was green, because the rewrite path enforces a strict freshness check on readiness probe cache before forwarding requests.
 - `429 MINIMAX_RECOVERY_COOLDOWN` (Minimax mode, bounded recovery cooldown active) + `Retry-After`.
 - `503 MODEL_STARTUP_DEGRADED` (startup warmup budget exceeded and not in active Minimax recovery attempt).
+- `429 RATE_LIMITED` when any configured limiter budget is exceeded, with `Retry-After` and a stable payload contract.
+- `503 ADMISSION_OVERLOADED` when admission queue is full or queue wait time exceeds budget (`reason` is `queue_full` or `wait_timeout`).
+
+Example (`429 RATE_LIMITED`):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Too many requests, please retry later.",
+    "reason": "RATE_LIMIT_EXCEEDED"
+  },
+  "retryAfterSec": 12,
+  "limit": {
+    "scope": "rewrite",
+    "principalType": "user",
+    "windowSec": 60,
+    "maxRequests": 60
+  }
+}
+```
 
 Example (`429`):
 
@@ -293,6 +342,27 @@ Example (`503`):
   "serviceState": "degraded",
   "startupWarmupAttempts": 12,
   "startupWarmupDeadlineAt": "2026-01-01T10:00:00.000Z"
+}
+```
+
+Example (`503 ADMISSION_OVERLOADED`):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "ADMISSION_OVERLOADED",
+    "message": "Admission controller overloaded. Please retry shortly."
+  },
+  "reason": "queue_full",
+  "admission": {
+    "provider": "ollama",
+    "maxConcurrency": 4,
+    "maxQueueSize": 100,
+    "maxWaitMs": 15000,
+    "queueDepth": 100,
+    "inFlight": 4
+  }
 }
 ```
 
