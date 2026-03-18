@@ -151,7 +151,8 @@ Tune runtime behavior without code changes:
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
-| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:<remoteAddress>`. |
+| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:*` fallback identity. |
+| `EXPRESS_TRUST_PROXY` | `loopback` | Express `trust proxy` mode used for client-IP derivation. Allowed values are `false`, `loopback`, or a numeric hop count (`1`, `2`, …). Unsafe free-form values are ignored with warning and fallback to `loopback`. Avoid broad `true`, which trusts all upstream proxy metadata. |
 | `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global baseline fixed-window duration in seconds for non-ops routes. |
 | `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global baseline fixed-window request budget per principal for non-ops routes. |
 | `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for authenticated principals (`user:*`). |
@@ -245,12 +246,14 @@ Deployment requirements:
 
 Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
+Set `EXPRESS_TRUST_PROXY=loopback` when your reverse proxy is on the same host and forwards requests from loopback. Do not set `EXPRESS_TRUST_PROXY=true`; broad trust lets arbitrary upstream paths influence `req.ip` and weakens IP-based controls.
+
 ### Limiter key identity extraction
 
 For request identity keying, middleware resolves `req.clientIdentity.limiterKey` as:
 
 1. `user:<value>` when request source IP is trusted (`TRUSTED_PROXY_ADDRESSES`, default `127.0.0.1,::1`), `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`, and one trusted OIDC header is present.
-2. Otherwise `ip:<remoteAddress>`.
+2. Otherwise `ip:*` fallback is used: with `EXPRESS_TRUST_PROXY` enabled (recommended `loopback` when Apache/Nginx is local) it keys on Express-computed `req.ip` (real client IP); when `EXPRESS_TRUST_PROXY=false`, it keys on socket remote address.
 
 Trusted OIDC header precedence is:
 
