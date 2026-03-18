@@ -91,6 +91,31 @@ test('resolveRateLimitPrincipal prefers trusted identity and falls back to ip', 
   assert.deepEqual(fromIp, { key: 'ip:198.51.100.20', principalType: 'ip' });
 });
 
+test('resolveRateLimitPrincipal uses precomputed ip limiter key from client identity', () => {
+  const principal = resolveRateLimitPrincipal({
+    clientIdentity: {
+      limiterKey: 'ip:203.0.113.9',
+      source: 'ip',
+      value: '203.0.113.9',
+      remoteAddress: '127.0.0.1'
+    },
+    auth: { email: 'teacher@hs.edu.hk' },
+    ip: '203.0.113.9',
+    socket: { remoteAddress: '127.0.0.1' }
+  });
+
+  assert.deepEqual(principal, { key: 'ip:203.0.113.9', principalType: 'ip' });
+});
+
+test('resolveRateLimitPrincipal falls back to req.ip when client identity is missing', () => {
+  const principal = resolveRateLimitPrincipal({
+    ip: '::ffff:198.51.100.20',
+    socket: { remoteAddress: '127.0.0.1' }
+  });
+
+  assert.deepEqual(principal, { key: 'ip:198.51.100.20', principalType: 'ip' });
+});
+
 test('fixed window limiter returns stable 429 contract with retry headers', () => {
   const limiter = createFixedWindowRateLimiter({
     policyScope: 'rewrite',
