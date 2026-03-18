@@ -7,6 +7,7 @@ const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
+const { createAdmissionController, isAdmissionOverloadError } = require('./lib/admission-controller');
 const {
   writeJsonError,
   writeJsonSuccess,
@@ -18,6 +19,39 @@ const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
+
+function parseExpressTrustProxy(rawValue, fallback = 'loopback') {
+  if (rawValue == null || String(rawValue).trim() === '') {
+    return fallback;
+  }
+
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (normalized === 'false' || normalized === '0') {
+    return false;
+  }
+
+  if (normalized === 'loopback') {
+    return 'loopback';
+  }
+
+  const hopCount = parseBoundedInteger(normalized, { min: 1, max: 32 });
+  if (hopCount != null) {
+    return hopCount;
+  }
+
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      msg: 'Invalid EXPRESS_TRUST_PROXY; using default',
+      provided: rawValue,
+      fallback
+    })
+  );
+  return fallback;
+}
+
+const EXPRESS_TRUST_PROXY = parseExpressTrustProxy(process.env.EXPRESS_TRUST_PROXY, 'loopback');
+app.set('trust proxy', EXPRESS_TRUST_PROXY);
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(value);
@@ -198,6 +232,11 @@ const debugLog = createDebugLogger({
   defaultProvider: rewriteService.provider.selected
 });
 
+const admissionController = createAdmissionController({
+  globalLimits: rewriteService.provider.admission?.global || {},
+  providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
+});
+
 const providerAdapter = createProviderAdapter(createProvider({
   serviceConfig: rewriteService,
   ollamaUrl: OLLAMA_URL,
@@ -230,7 +269,8 @@ let lastMinimaxRecoveryAttemptAtMs = 0;
 app.use(express.json({ limit: '16kb' }));
 
 const resolveClientIdentity = createClientIdentityResolver({
-  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET
+  bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
+  preferExpressIp: EXPRESS_TRUST_PROXY !== false
 });
 
 app.use(resolveClientIdentity);
@@ -248,6 +288,29 @@ app.use((req, res, next) => {
 
 function errorResponse(res, status, code, message, extra = {}) {
   return writeJsonError(res, status, code, message, extra);
+}
+
+function admissionOverloadResponse(res, overloadError) {
+  const admission = overloadError?.admission || {};
+  return errorResponse(
+    res,
+    overloadError?.status || 503,
+    overloadError?.code || 'ADMISSION_OVERLOADED',
+    overloadError?.message || 'Admission controller overloaded. Please retry shortly.',
+    {
+      reason: overloadError?.reason || 'overloaded',
+      admission
+    }
+  );
+}
+
+async function executeWithAdmission({ providerName, requestId, execute }) {
+  const ticket = await admissionController.acquire({ providerName, requestId });
+  try {
+    return await execute({ waitMs: ticket.waitMs });
+  } finally {
+    ticket.release();
+  }
 }
 
 const logRewriteRequest = ({
@@ -852,16 +915,21 @@ app.post(
 
       const streamWriter = createStreamWriter(res);
 
-      const rewriteResult = await providerAdapter.invokeStream({
-        serviceId: rewriteService.id,
-        requestId,
-        payload: {
-          prompt,
-          systemPrompt,
-          userContent
-        },
-        timeoutMs: selectedTimeoutMs,
-        onChunk: async (event) => {
+      let rewriteResult;
+      try {
+        rewriteResult = await executeWithAdmission({
+          providerName: rewriteService.provider.selected,
+          requestId,
+          execute: () => providerAdapter.invokeStream({
+            serviceId: rewriteService.id,
+            requestId,
+            payload: {
+              prompt,
+              systemPrompt,
+              userContent
+            },
+            timeoutMs: selectedTimeoutMs,
+            onChunk: async (event) => {
               if (!event || typeof event !== 'object') {
                 return;
               }
@@ -889,7 +957,22 @@ app.post(
                 streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
               }
             }
+          })
+        });
+      } catch (error) {
+        if (isAdmissionOverloadError(error)) {
+          streamWriter.writeError({
+            code: error.code,
+            message: error.message,
+            status: error.status || 503,
+            reason: error.reason,
+            admission: error.admission || {}
           });
+          return res.end();
+        }
+
+        throw error;
+      }
 
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
@@ -931,16 +1014,29 @@ app.post(
       return res.end();
     }
 
-    const rewriteResult = await providerAdapter.invokeSync({
-      serviceId: rewriteService.id,
-      requestId,
-      payload: {
-        prompt,
-        systemPrompt,
-        userContent
-      },
-      timeoutMs: selectedTimeoutMs
-    });
+    let rewriteResult;
+    try {
+      rewriteResult = await executeWithAdmission({
+        providerName: rewriteService.provider.selected,
+        requestId,
+        execute: () => providerAdapter.invokeSync({
+          serviceId: rewriteService.id,
+          requestId,
+          payload: {
+            prompt,
+            systemPrompt,
+            userContent
+          },
+          timeoutMs: selectedTimeoutMs
+        })
+      });
+    } catch (error) {
+      if (isAdmissionOverloadError(error)) {
+        return admissionOverloadResponse(res, error);
+      }
+
+      throw error;
+    }
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
@@ -1011,7 +1107,7 @@ app.listen(PORT, HOST, () => {
   console.log(
     JSON.stringify({
       level: 'info',
-      msg: 'Effective Ollama config',
+      msg: 'Effective provider config',
       ...providerInfo,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,

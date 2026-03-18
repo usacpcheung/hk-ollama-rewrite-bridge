@@ -38,10 +38,26 @@ function buildRateLimitPolicyFromEnv() {
 }
 
 function resolveRateLimitPrincipal(req) {
+  const limiterKey = (req.clientIdentity?.limiterKey || '').trim();
+  if (limiterKey) {
+    return {
+      key: limiterKey,
+      principalType: req.clientIdentity?.source === 'oidc' ? 'user' : 'ip'
+    };
+  }
+
   if (req.clientIdentity?.source === 'oidc' && req.clientIdentity.value) {
     return {
       key: `user:${req.clientIdentity.value}`,
       principalType: 'user'
+    };
+  }
+
+  if (req.clientIdentity?.source === 'ip' && req.clientIdentity.value) {
+    const normalizedClientIp = normalizeRemoteAddress(req.clientIdentity.value);
+    return {
+      key: `ip:${normalizedClientIp || 'unknown'}`,
+      principalType: 'ip'
     };
   }
 
@@ -54,7 +70,7 @@ function resolveRateLimitPrincipal(req) {
   }
 
   const normalizedIp = normalizeRemoteAddress(
-    req.clientIdentity?.remoteAddress || req.ip || req.socket?.remoteAddress || 'unknown'
+    req.ip || req.socket?.remoteAddress || 'unknown'
   );
 
   return {

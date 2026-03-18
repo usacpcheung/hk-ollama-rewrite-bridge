@@ -135,6 +135,12 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Alternate preferred rewrite Minimax endpoint key. |
 | `REWRITE_READY_TIMEOUT_MS` | `30000` | Preferred rewrite request timeout (ms) when model is in ready phase. |
 | `REWRITE_COLD_TIMEOUT_MS` | `120000` | Preferred rewrite request timeout (ms) during cold/warming phases. |
+| `ADMISSION_MAX_CONCURRENCY` | `4` | Global admission limit for concurrent provider executions across rewrite requests. |
+| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Global max queued rewrite requests waiting for admission when concurrency is exhausted. |
+| `ADMISSION_MAX_WAIT_MS` | `15000` | Global max wait time in queue before request is rejected as overloaded. |
+| `<PROVIDER>_MAX_CONCURRENCY` | unset | Optional provider-specific admission concurrency override (for example `OLLAMA_MAX_CONCURRENCY`, `MINIMAX_MAX_CONCURRENCY`). Falls back to global value when unset. |
+| `<PROVIDER>_MAX_QUEUE_SIZE` | unset | Optional provider-specific admission queue-size override (for example `OLLAMA_MAX_QUEUE_SIZE`). Falls back to global value when unset. |
+| `<PROVIDER>_MAX_WAIT_MS` | unset | Optional provider-specific admission queue wait-time override (for example `MINIMAX_MAX_WAIT_MS`). Falls back to global value when unset. |
 | `REWRITE_DEBUG_RAW_OUTPUT` | `false` | Enable structured debug logs for provider rewrite requests/response metadata (`provider_request`, `provider_response_meta`), including request body and usage when available. Sensitive headers/secrets are redacted. |
 | `MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Legacy fallback for rewrite Minimax endpoint; prefer `REWRITE_MINIMAX_API_URL` or `REWRITE_PROVIDER_MINIMAX_API_URL`. |
 | `MINIMAX_MODEL` | `M2-her` | Legacy fallback for rewrite Minimax model; prefer `REWRITE_MINIMAX_MODEL` or `REWRITE_PROVIDER_MINIMAX_MODEL`. |
@@ -145,7 +151,8 @@ Tune runtime behavior without code changes:
 | `MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite-failure threshold before Minimax readiness can be marked degraded. |
 | `MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS` | `15000` | Cooldown (ms) that rate-limits Minimax bounded recovery attempts when strict readiness is fail-closed on recent failures. |
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty (required in production) | Shared secret that must match `X-Bridge-Auth` from reverse proxy before backend accepts `X-Authenticated-Email`. Leave unset only for local/dev setups where auth is intentionally disabled. |
-| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:<remoteAddress>`. |
+| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Comma-separated remote addresses allowed to forward trusted OIDC identity headers for limiter keying (`X-Authenticated-Email`, `X-Authenticated-User`, `X-Authenticated-Subject`). Non-matching sources always fall back to `ip:*` fallback identity. |
+| `EXPRESS_TRUST_PROXY` | `loopback` | Express `trust proxy` mode used for client-IP derivation. Allowed values are `false`, `loopback`, or a numeric hop count (`1`, `2`, …). Unsafe free-form values are ignored with warning and fallback to `loopback`. Avoid broad `true`, which trusts all upstream proxy metadata. |
 | `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global baseline fixed-window duration in seconds for non-ops routes. |
 | `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global baseline fixed-window request budget per principal for non-ops routes. |
 | `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for authenticated principals (`user:*`). |
@@ -239,12 +246,14 @@ Deployment requirements:
 
 Use `apache/proxy-snippet.conf` as the baseline hardened proxy configuration.
 
+Set `EXPRESS_TRUST_PROXY=loopback` when your reverse proxy is on the same host and forwards requests from loopback. Do not set `EXPRESS_TRUST_PROXY=true`; broad trust lets arbitrary upstream paths influence `req.ip` and weakens IP-based controls.
+
 ### Limiter key identity extraction
 
 For request identity keying, middleware resolves `req.clientIdentity.limiterKey` as:
 
 1. `user:<value>` when request source IP is trusted (`TRUSTED_PROXY_ADDRESSES`, default `127.0.0.1,::1`), `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`, and one trusted OIDC header is present.
-2. Otherwise `ip:<remoteAddress>`.
+2. Otherwise `ip:*` fallback is used: with `EXPRESS_TRUST_PROXY` enabled (recommended `loopback` when Apache/Nginx is local) it keys on Express-computed `req.ip` (real client IP); when `EXPRESS_TRUST_PROXY=false`, it keys on socket remote address.
 
 Trusted OIDC header precedence is:
 
@@ -306,6 +315,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 - Layered rate limiting is enforced with a global baseline plus rewrite-service quotas by principal type (`user:*` first, `ip:*` fallback).
 - Exceeded quotas return `429 RATE_LIMITED`, include `Retry-After` seconds, and a stable payload with `error.reason=RATE_LIMIT_EXCEEDED` and retry metadata.
+- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata.
 
 ### `GET /healthz` / `GET /readyz`
 

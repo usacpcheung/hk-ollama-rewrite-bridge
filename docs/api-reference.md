@@ -28,6 +28,8 @@ Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
 
 Reverse proxy must unset these headers from inbound client traffic and set them server-side only after successful auth.
 
+`EXPRESS_TRUST_PROXY` controls whether Express should derive client IP from forwarded headers. Allowed values are `false`, `loopback`, or numeric hop count (`1`, `2`, ...). Use `loopback` when Apache/Nginx is local; avoid broad `true` because it trusts all upstream forwarding metadata.
+
 ### Limiter key identity extraction
 
 Request middleware computes `req.clientIdentity.limiterKey` with this logic:
@@ -39,7 +41,7 @@ Request middleware computes `req.clientIdentity.limiterKey` with this logic:
      1. `X-Authenticated-Email`
      2. `X-Authenticated-User`
      3. `X-Authenticated-Subject`
-2. Otherwise use `ip:<remoteAddress>`.
+2. Otherwise use `ip:*` fallback identity: when `EXPRESS_TRUST_PROXY` is enabled (recommended `loopback` for local reverse proxy), key on Express-computed `req.ip`; when `EXPRESS_TRUST_PROXY=false`, key on socket `remoteAddress`.
 
 Because trusted OIDC headers are ignored when source IP or shared secret checks fail, direct public backend access cannot spoof limiter identity with forged OIDC headers.
 
@@ -81,6 +83,8 @@ Naming convention:
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
 - Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
 - Streaming toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
+- Admission defaults: `ADMISSION_MAX_CONCURRENCY`, `ADMISSION_MAX_QUEUE_SIZE`, `ADMISSION_MAX_WAIT_MS`
+- Optional provider admission overrides: `<PROVIDER>_MAX_CONCURRENCY`, `<PROVIDER>_MAX_QUEUE_SIZE`, `<PROVIDER>_MAX_WAIT_MS`
 
 ### Compatibility table (rewrite)
 
@@ -291,6 +295,7 @@ or
 - `429 MINIMAX_RECOVERY_COOLDOWN` (Minimax mode, bounded recovery cooldown active) + `Retry-After`.
 - `503 MODEL_STARTUP_DEGRADED` (startup warmup budget exceeded and not in active Minimax recovery attempt).
 - `429 RATE_LIMITED` when any configured limiter budget is exceeded, with `Retry-After` and a stable payload contract.
+- `503 ADMISSION_OVERLOADED` when admission queue is full or queue wait time exceeds budget (`reason` is `queue_full` or `wait_timeout`).
 
 Example (`429 RATE_LIMITED`):
 
@@ -337,6 +342,27 @@ Example (`503`):
   "serviceState": "degraded",
   "startupWarmupAttempts": 12,
   "startupWarmupDeadlineAt": "2026-01-01T10:00:00.000Z"
+}
+```
+
+Example (`503 ADMISSION_OVERLOADED`):
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "ADMISSION_OVERLOADED",
+    "message": "Admission controller overloaded. Please retry shortly."
+  },
+  "reason": "queue_full",
+  "admission": {
+    "provider": "ollama",
+    "maxConcurrency": 4,
+    "maxQueueSize": 100,
+    "maxWaitMs": 15000,
+    "queueDepth": 100,
+    "inFlight": 4
+  }
 }
 ```
 
