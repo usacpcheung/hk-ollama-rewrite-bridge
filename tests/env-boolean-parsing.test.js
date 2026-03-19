@@ -62,8 +62,18 @@ async function startServerAndReadEffectiveConfig(overrides = {}) {
 
   await waitForServerReady(serverProcess);
 
-  const configLine = logLines.find((line) => line.includes('"msg":"Effective Ollama config"'));
-  const config = configLine ? JSON.parse(configLine) : null;
+  const config = logLines.reduce((found, line) => {
+    if (found) {
+      return found;
+    }
+
+    try {
+      const parsed = JSON.parse(line);
+      return parsed?.msg === 'Effective provider config' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }, null);
 
   serverProcess.kill('SIGTERM');
   await new Promise((resolve) => serverProcess.once('exit', resolve));
