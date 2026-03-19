@@ -226,27 +226,36 @@ const serviceRegistry = createServiceRegistry({
   providerCapabilities: PROVIDER_CAPABILITIES
 });
 const rewriteService = serviceRegistry.get('rewrite');
+const t2aService = serviceRegistry.get('t2a');
+const runtimeServices = {
+  rewrite: rewriteService,
+  t2a: t2aService
+};
 
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
   defaultProvider: rewriteService.provider.selected
 });
 
+function createRuntimeProvider(serviceConfig) {
+  return createProvider({
+    serviceConfig,
+    ollamaUrl: OLLAMA_URL,
+    ollamaPsUrl: OLLAMA_PS_URL,
+    ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
+    minimaxApiKey: MINIMAX_API_KEY,
+    minimaxSystemPrompt: rewriteService?.prompts?.minimaxSystemPrompt,
+    minimaxUserTemplate: rewriteService?.prompts?.minimaxUserTemplate,
+    debugLog
+  });
+}
+
 const admissionController = createAdmissionController({
   globalLimits: rewriteService.provider.admission?.global || {},
   providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
 });
 
-const providerAdapter = createProviderAdapter(createProvider({
-  serviceConfig: rewriteService,
-  ollamaUrl: OLLAMA_URL,
-  ollamaPsUrl: OLLAMA_PS_URL,
-  ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-  minimaxApiKey: MINIMAX_API_KEY,
-  minimaxSystemPrompt: rewriteService.prompts.minimaxSystemPrompt,
-  minimaxUserTemplate: rewriteService.prompts.minimaxUserTemplate,
-  debugLog
-}));
+const providerAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.rewrite));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;

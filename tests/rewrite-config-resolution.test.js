@@ -101,6 +101,34 @@ test('legacy minimax api url works when preferred keys are absent', () => {
   assert.equal(config.sources.minimaxApiUrl.type, 'legacy');
 });
 
+test('rewrite config is unchanged when t2a env vars are present', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      T2A_MODEL: 'speech-02-hd',
+      T2A_MINIMAX_API_URL: 'https://preferred.example/v1/t2a',
+      T2A_VOICE_ID: 'female-tianmei',
+      T2A_SPEED: '1.5',
+      T2A_VOLUME: '4',
+      T2A_PITCH: '-2'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.provider, 'ollama');
+  assert.equal(config.maxCompletionTokens, 300);
+  assert.equal(config.maxTextLength, 200);
+  assert.equal(config.providers.ollama.generateUrl, 'http://127.0.0.1:11434/api/generate');
+  assert.equal(config.providers.ollama.psUrl, 'http://127.0.0.1:11434/api/ps');
+  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
+  assert.equal(config.providers.minimax.model, 'M2-her');
+  assert.equal(config.sources.maxCompletionTokens.type, 'default');
+  assert.equal(config.sources.maxTextLength.type, 'default');
+  assert.equal(config.sources.minimaxApiUrl.type, 'default');
+  assert.equal(config.sources.minimaxModel.type, 'default');
+});
+
 
 test('preferred ollama urls override legacy keys', () => {
   const env = {
