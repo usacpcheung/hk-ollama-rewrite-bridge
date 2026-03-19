@@ -19,7 +19,7 @@ All error responses use:
 
 ## Authentication trust model (reverse-proxy deployments)
 
-Protected routes (for example `POST /rewrite`) require two trusted headers from the reverse proxy:
+Protected routes (for example `POST /rewrite` and `POST /t2a`) require two trusted headers from the reverse proxy:
 
 - `X-Authenticated-Email`: normalized user email claim (must end with `@hs.edu.hk`)
 - `X-Bridge-Auth`: shared secret that must match backend env `BRIDGE_INTERNAL_AUTH_SECRET`
@@ -52,7 +52,7 @@ Because trusted OIDC headers are ignored when source IP or shared secret checks 
 
 Rate limiting uses layered fixed-window policies:
 - Global baseline limiter for non-ops routes (`RATE_LIMIT_GLOBAL_*`).
-- Rewrite service limiter (`POST /rewrite`) with principal-aware quotas:
+- Rewrite-style service limiter (`POST /rewrite`, `POST /t2a`) with principal-aware quotas:
   - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_REWRITE_AUTH_*`.
   - IP fallback (`ip:*`) uses `RATE_LIMIT_REWRITE_IP_*`.
 - Ops limiter for `/healthz` and `/readyz` (`RATE_LIMIT_OPS_*`, relaxed defaults).
@@ -397,6 +397,120 @@ Streaming error chunk example:
 ```
 
 ---
+
+
+## 1b) `POST /t2a`
+
+Generate speech audio from validated text input using the T2A service definition.
+
+### Routes
+
+- Internal: `POST /t2a`
+- Internal alternate: `POST /api/t2a`
+- Typical public reverse-proxy mapping: `POST /api/rewrite-bridge/t2a`
+
+### Middleware parity
+
+T2A uses the same middleware chain and request identity behavior as rewrite:
+- `express.json()` body parsing
+- shared `req.clientIdentity` resolution from `auth/client-identity.js`
+- global limiter + rewrite-style route limiter
+- shared header auth from `auth/header-auth.js`
+- admission controller execution wrapper
+- shared JSON error envelope and provider error mapping pattern
+
+### Request body
+
+```json
+{
+  "text": "你好，歡迎使用",
+  "response_mode": "binary",
+  "voice_id": "female-tianmei",
+  "speed": 1,
+  "volume": 1,
+  "pitch": 0,
+  "sample_rate": 32000,
+  "bitrate": 128000,
+  "format": "mp3"
+}
+```
+
+Validation rules:
+- `text` is required, trimmed, non-empty, and capped by `T2A_MAX_TEXT_LENGTH` Unicode characters.
+- `response_mode` accepts `binary`, `default`, `base64_json`, or `base64-json`.
+- `voice_id` must be a non-empty string when provided.
+- `speed` must be between `0.5` and `2`.
+- `volume` must be between `0` and `10`.
+- `pitch` must be between `-12` and `12`.
+- `sample_rate` must be an integer between `8000` and `48000`.
+- `bitrate` must be an integer between `32000` and `320000`.
+- `format` must be one of `mp3`, `wav`, or `pcm`.
+- `stream=true` is not supported in v1 and returns `501 STREAMING_UNSUPPORTED`.
+
+### Binary success (default)
+
+`200 OK`
+
+Headers:
+- `Content-Type: audio/mpeg`
+- `Content-Length: <bytes>`
+- `Content-Disposition: inline; filename="speech.mp3"`
+
+Body: raw MP3 bytes.
+
+### JSON success (`response_mode=base64_json`)
+
+`200 OK`
+
+```json
+{
+  "ok": true,
+  "audio": "<base64-audio>",
+  "format": "mp3",
+  "mime": "audio/mpeg",
+  "contentType": "audio/mpeg",
+  "size": 12345,
+  "provider": {
+    "traceId": "trace-123",
+    "audioLength": 12345,
+    "sourcePath": "data.audio"
+  }
+}
+```
+
+The bridge does not write audio files to disk; it returns provider audio bytes directly from memory.
+
+### Common non-2xx responses
+
+- `400 INVALID_INPUT`
+- `401 AUTH_REQUIRED`
+- `401 AUTH_HEADER_INVALID`
+- `403 FORBIDDEN_DOMAIN`
+- `413 TOO_LONG`
+- `429 RATE_LIMITED`
+- `501 STREAMING_UNSUPPORTED`
+- `503 MINIMAX_API_KEY_MISSING`
+- `503 ADMISSION_OVERLOADED`
+- provider-mapped upstream failures such as `PROVIDER_AUTH_ERROR`, `PROVIDER_ERROR`, or `MODEL_TIMEOUT`
+
+### Examples
+
+```bash
+curl -i -sS http://127.0.0.1:3001/t2a \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bridge-Auth: <shared-secret>' \
+  -H 'X-Authenticated-Email: user@hs.edu.hk' \
+  --data '{"text":"你好，歡迎使用"}' \
+  --output speech.mp3
+```
+
+```bash
+curl -i -sS http://127.0.0.1:3001/t2a \
+  -H 'Content-Type: application/json' \
+  -H 'X-Bridge-Auth: <shared-secret>' \
+  -H 'X-Authenticated-Email: user@hs.edu.hk' \
+  --data '{"text":"你好，歡迎使用","response_mode":"base64_json"}'
+```
 
 ## 2) `GET /model-status`
 

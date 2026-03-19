@@ -1,6 +1,6 @@
 # hk-ollama-rewrite-bridge
 
-Production-ready Node.js Express bridge that rewrites Hong Kong colloquial Cantonese into formal Traditional Chinese via configurable backend providers (`ollama` or `minimax`).
+Production-ready Node.js Express bridge that rewrites Hong Kong colloquial Cantonese into formal Traditional Chinese and exposes Minimax-backed text-to-audio (T2A) generation via configurable backend providers (`ollama` or `minimax`).
 
 ## Requirements
 
@@ -29,7 +29,8 @@ All automated tests are centralized under `tests/` so they are easy to discover 
 - `tests/rewrite-validation.test.js`: validates input and body-parsing guards (`INVALID_INPUT`, `TOO_LONG`, `INVALID_JSON`).
 - `tests/rewrite-auth-parity.test.js`: validates auth and domain policy behavior for rewrite access control headers.
 - `tests/providers/ollama.test.js`: validates Ollama stream parsing/error handling for malformed or incomplete JSONL responses.
-- `tests/providers/minimax.test.js`: validates Minimax SSE frame normalization and done/fallback streaming behavior.
+- `tests/providers/minimax.test.js`: validates Minimax SSE frame normalization, done/fallback streaming behavior, and T2A response normalization.
+- `tests/t2a-routes.test.js`: validates T2A route auth, validation, binary/JSON responses, and rewrite regression coverage.
 
 Run all tests:
 
@@ -129,6 +130,32 @@ Tune runtime behavior without code changes:
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Max completion tokens sent to both Ollama (`num_predict`) and Minimax (`max_completion_tokens`) for `POST /rewrite` stream and non-stream paths. Must be an integer in range `1-8192`; invalid/empty values fall back to `300`. |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
+| `T2A_PROVIDER` | `minimax` | T2A backend provider. Currently resolves to Minimax-compatible T2A handling. |
+| `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /t2a` in Unicode characters (1-600). |
+| `T2A_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
+| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
+| `T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
+| `T2A_MINIMAX_MODEL` | `speech-02-hd` | Preferred T2A Minimax model key. |
+| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-02-hd` | Alternate preferred T2A Minimax model key. |
+| `T2A_MODEL` | `speech-02-hd` | Alternate preferred T2A model alias. |
+| `T2A_MINIMAX_VOICE_ID` | `female-tianmei` | Preferred default T2A voice ID. |
+| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice ID. |
+| `T2A_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice alias. |
+| `T2A_MINIMAX_SPEED` | `1` | Preferred default T2A speaking speed. |
+| `T2A_PROVIDER_MINIMAX_SPEED` | `1` | Alternate preferred default T2A speaking speed. |
+| `T2A_SPEED` | `1` | Alternate preferred default T2A speed alias. |
+| `T2A_MINIMAX_VOLUME` | `1` | Preferred default T2A volume. |
+| `T2A_PROVIDER_MINIMAX_VOLUME` | `1` | Alternate preferred default T2A volume. |
+| `T2A_VOLUME` | `1` | Alternate preferred default T2A volume alias. |
+| `T2A_MINIMAX_PITCH` | `0` | Preferred default T2A pitch. |
+| `T2A_PROVIDER_MINIMAX_PITCH` | `0` | Alternate preferred default T2A pitch. |
+| `T2A_PITCH` | `0` | Alternate preferred default T2A pitch alias. |
+| `MINIMAX_T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Legacy fallback for T2A Minimax endpoint. |
+| `MINIMAX_T2A_MODEL` | `speech-02-hd` | Legacy fallback for T2A Minimax model. |
+| `MINIMAX_T2A_VOICE_ID` | `female-tianmei` | Legacy fallback for T2A default voice ID. |
+| `MINIMAX_T2A_SPEED` | `1` | Legacy fallback for T2A default speed. |
+| `MINIMAX_T2A_VOLUME` | `1` | Legacy fallback for T2A default volume. |
+| `MINIMAX_T2A_PITCH` | `0` | Legacy fallback for T2A default pitch. |
 | `REWRITE_MINIMAX_MODEL` | `M2-her` | Preferred rewrite Minimax model key. |
 | `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate preferred rewrite Minimax model key. |
 | `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Preferred rewrite Minimax endpoint key. |
@@ -217,6 +244,7 @@ The bridge uses built-in prompt construction for Minimax and does not support ru
 Canonical public namespace is **`/api/rewrite-bridge/`**.
 
 - `POST /api/rewrite-bridge/rewrite`
+- `POST /api/rewrite-bridge/t2a`
 - `GET /api/rewrite-bridge/model-status`
 - `GET /api/rewrite-bridge/healthz`
 - `GET /api/rewrite-bridge/readyz`
@@ -224,6 +252,7 @@ Canonical public namespace is **`/api/rewrite-bridge/`**.
 Backend service still listens on local-only internal routes:
 
 - `POST /rewrite`
+- `POST /t2a`
 - `GET /model-status`
 - `GET /healthz`
 - `GET /readyz`
@@ -393,3 +422,44 @@ curl -i -sS http://127.0.0.1:3001/rewrite -H 'Content-Type: application/json' -d
 # 4) Confirm single in-flight warm-up behavior
 sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt completed|warmupInFlight|MODEL_WARMUP_STARTED'
 ```
+
+
+### `POST /t2a` (internal app route)
+
+Protected T2A routes use the same auth middleware, client-identity resolver, global/rewrite rate-limit integration, and admission-control flow as rewrite routes.
+
+Request body:
+
+```json
+{
+  "text": "你好，歡迎使用",
+  "response_mode": "binary"
+}
+```
+
+Supported fields:
+- `text` (required): trimmed, non-empty string, max `T2A_MAX_TEXT_LENGTH` Unicode characters.
+- `response_mode` (optional): `binary`/`default` for raw MP3 bytes, or `base64_json` for JSON-wrapped base64 audio.
+- `voice_id`, `speed`, `volume`, `pitch` (optional): voice controls passed through to Minimax.
+- `sample_rate`, `bitrate`, `format` (optional): audio options validated against the T2A service definition.
+- `stream=true` is rejected with `501 STREAMING_UNSUPPORTED`.
+
+Binary success returns `200 OK` with `Content-Type: audio/mpeg`, `Content-Length`, and `Content-Disposition: inline; filename="speech.mp3"`.
+
+JSON success returns:
+
+```json
+{
+  "ok": true,
+  "audio": "<base64>",
+  "format": "mp3",
+  "mime": "audio/mpeg",
+  "contentType": "audio/mpeg",
+  "size": 12345,
+  "provider": {
+    "traceId": "trace-123"
+  }
+}
+```
+
+The bridge does not persist MP3 files on disk; audio is streamed directly from provider response data back to the caller.
