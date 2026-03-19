@@ -21,6 +21,8 @@ function createMinimaxProvider({
   maxCompletionTokens = 300,
   debugLog
 }) {
+  const t2aFormat = 'mp3';
+  const t2aMimeType = 'audio/mpeg';
   const probeBody = {
     model,
     messages: buildProbeMessages(),
@@ -94,6 +96,105 @@ function createMinimaxProvider({
       maxTokens: maxCompletionTokens,
       onChunk
     });
+  }
+
+  async function t2a({ requestId, text, voice, audio, timeoutMs }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      };
+      const body = {
+        model,
+        text,
+        voice_setting: {
+          voice_id: voice?.voiceId,
+          speed: voice?.speed,
+          vol: voice?.volume,
+          pitch: voice?.pitch
+        },
+        audio_setting: {
+          sample_rate: audio?.sampleRate,
+          bitrate: audio?.bitrate,
+          format: audio?.format || t2aFormat
+        }
+      };
+
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_request',
+        payload: { headers, body, service: 't2a' }
+      });
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (_err) {
+        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
+      }
+
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: false,
+          service: 't2a',
+          response: data
+        }
+      });
+
+      if (!response.ok) {
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
+      }
+
+      const extractedAudio = extractMinimaxT2AAudio(data);
+      if (!extractedAudio.ok) {
+        return failureResult(mapError(new Error(extractedAudio.reason), { kind: extractedAudio.reason }));
+      }
+
+      const providerMeta = extractMinimaxT2AProviderMetadata(data, extractedAudio.sourcePath);
+      const audioBuffer = Buffer.from(extractedAudio.hexAudio, 'hex');
+
+      return successResult({
+        output: {
+          text: '',
+          artifacts: [
+            {
+              kind: 'audio',
+              data: audioBuffer,
+              mime: t2aMimeType,
+              contentType: providerMeta.contentType || t2aMimeType,
+              format: t2aFormat
+            }
+          ],
+          meta: {
+            audio: audioBuffer,
+            mime: t2aMimeType,
+            contentType: providerMeta.contentType || t2aMimeType,
+            format: t2aFormat,
+            provider: providerMeta
+          }
+        },
+        response: ''
+      });
+    } catch (err) {
+      return failureResult(mapError(err, { kind: 'fetch' }));
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async function generate({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens }) {
@@ -427,7 +528,15 @@ function createMinimaxProvider({
     }
 
     if (context.kind === 'invalid_json') {
-      return { code: 'PROVIDER_ERROR', message: 'Invalid provider response', status: 502 };
+      return { code: 'PROVIDER_ERROR', message: 'Invalid provider response', status: 502, detail: 'minimax_invalid_json' };
+    }
+
+    if (context.kind === 'missing_audio') {
+      return { code: 'PROVIDER_ERROR', message: 'Provider response did not include audio data', status: 502, detail: 'minimax_missing_audio' };
+    }
+
+    if (context.kind === 'schema_drift') {
+      return { code: 'PROVIDER_ERROR', message: 'Provider response schema changed unexpectedly', status: 502, detail: 'minimax_schema_drift' };
     }
 
     if (err?.name === 'AbortError') {
@@ -452,10 +561,14 @@ function createMinimaxProvider({
       rewrite: {
         sync: rewrite,
         stream: rewriteStream
+      },
+      t2a: {
+        sync: t2a
       }
     },
     rewrite,
     rewriteStream,
+    t2a,
     checkReadiness,
     triggerWarmup,
     mapError,
@@ -559,11 +672,120 @@ function buildProbeMessages() {
   return [{ role: 'user', content: 'ping' }];
 }
 
+function extractMinimaxT2AAudio(payload) {
+  const directCandidates = [
+    { value: payload?.audio, path: 'audio' },
+    { value: payload?.audio_hex, path: 'audio_hex' },
+    { value: payload?.audioHex, path: 'audioHex' },
+    { value: payload?.data?.audio, path: 'data.audio' },
+    { value: payload?.data?.audio_hex, path: 'data.audio_hex' },
+    { value: payload?.data?.audioHex, path: 'data.audioHex' },
+    { value: payload?.data?.audio_data, path: 'data.audio_data' },
+    { value: payload?.base_resp?.audio, path: 'base_resp.audio' }
+  ];
+
+  for (const candidate of directCandidates) {
+    if (isLikelyHexAudio(candidate.value)) {
+      return { ok: true, hexAudio: candidate.value, sourcePath: candidate.path, search: 'direct' };
+    }
+  }
+
+  const deepMatch = deepFindHexAudio(payload);
+  if (deepMatch) {
+    return { ok: true, hexAudio: deepMatch.value, sourcePath: deepMatch.path, search: 'deep' };
+  }
+
+  if (payload && typeof payload === 'object') {
+    return { ok: false, reason: 'missing_audio' };
+  }
+
+  return { ok: false, reason: 'schema_drift' };
+}
+
+function deepFindHexAudio(node, path = 'root', seen = new WeakSet()) {
+  if (node == null) {
+    return null;
+  }
+
+  if (typeof node === 'string') {
+    return isLikelyHexAudio(node) ? { value: node, path } : null;
+  }
+
+  if (typeof node !== 'object') {
+    return null;
+  }
+
+  if (seen.has(node)) {
+    return null;
+  }
+  seen.add(node);
+
+  if (Array.isArray(node)) {
+    for (let index = 0; index < node.length; index += 1) {
+      const found = deepFindHexAudio(node[index], `${path}[${index}]`, seen);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  for (const [key, value] of Object.entries(node)) {
+    const found = deepFindHexAudio(value, path === 'root' ? key : `${path}.${key}`, seen);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function isLikelyHexAudio(value) {
+  return typeof value === 'string' && value.length > 64 && value.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(value);
+}
+
+function extractMinimaxT2AProviderMetadata(payload, sourcePath) {
+  const baseResp = payload?.base_resp && typeof payload.base_resp === 'object' ? payload.base_resp : null;
+  const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
+  const contentType = (typeof payload?.content_type === 'string' && payload.content_type)
+    || (typeof data?.content_type === 'string' && data.content_type)
+    || t2aContentTypeFromFormat((typeof data?.format === 'string' && data.format) || null)
+    || 'audio/mpeg';
+
+  return {
+    statusCode: typeof payload?.status_code === 'number' ? payload.status_code : null,
+    status: typeof payload?.status === 'string' ? payload.status : null,
+    traceId: typeof payload?.trace_id === 'string' ? payload.trace_id : null,
+    extraInfo: payload?.extra_info || null,
+    subtitles: data?.subtitles || null,
+    audioLength: typeof data?.audio_length === 'number' ? data.audio_length : null,
+    sourcePath,
+    contentType,
+    baseResp
+  };
+}
+
+function t2aContentTypeFromFormat(format) {
+  if (format === 'mp3') {
+    return 'audio/mpeg';
+  }
+  if (format === 'wav') {
+    return 'audio/wav';
+  }
+  if (format === 'pcm') {
+    return 'audio/pcm';
+  }
+  return null;
+}
+
 module.exports = {
   createMinimaxProvider,
   parseMinimaxSseFrame,
   buildMappedChunk,
   buildMessages,
   renderUserContent,
-  buildProbeMessages
+  buildProbeMessages,
+  extractMinimaxT2AAudio,
+  deepFindHexAudio,
+  isLikelyHexAudio
 };
