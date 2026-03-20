@@ -30,6 +30,7 @@ test('preferred service-scoped T2A keys override legacy minimax smoke envs', () 
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -61,6 +62,7 @@ test('legacy minimax smoke envs work when preferred T2A keys are absent', () => 
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -82,6 +84,7 @@ test('defaults apply when T2A env keys are absent', () => {
   const config = resolveT2AConfig({
     env: {},
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -117,6 +120,7 @@ test('malformed preferred T2A env values fall back to legacy values or defaults'
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -128,4 +132,30 @@ test('malformed preferred T2A env values fall back to legacy values or defaults'
   assert.equal(config.sources.speed.type, 'legacy');
   assert.equal(config.sources.volume.type, 'legacy');
   assert.equal(config.sources.pitch.type, 'legacy');
+});
+
+
+test('t2a invoke timeout uses service-scoped config with default and preferred override', () => {
+  const defaultConfig = resolveT2AConfig({
+    env: {},
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  const overrideConfig = resolveT2AConfig({
+    env: {
+      T2A_INVOKE_TIMEOUT_MS: '45000',
+      REWRITE_READY_TIMEOUT_MS: '99999'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  assert.equal(defaultConfig.timeouts.invokeMs, 30000);
+  assert.equal(defaultConfig.sources.invokeTimeoutMs.type, 'default');
+  assert.equal(overrideConfig.timeouts.invokeMs, 45000);
+  assert.equal(overrideConfig.sources.invokeTimeoutMs.type, 'preferred');
+  assert.equal(overrideConfig.sources.invokeTimeoutMs.key, 'T2A_INVOKE_TIMEOUT_MS');
 });

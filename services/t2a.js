@@ -155,6 +155,7 @@ function parseOptionalEnum(value, allowedValues = []) {
 function resolveT2AConfig({
   env = process.env,
   parseEnvBoundedInteger,
+  parseEnvMilliseconds,
   providerCapabilities = {}
 }) {
   const serviceId = 'T2A';
@@ -196,6 +197,19 @@ function resolveT2AConfig({
     defaultValue: DEFAULT_MAX_TEXT_LENGTH,
     warnLegacyUsage,
     warningLabel: 'maxTextLength'
+  });
+
+  const invokeTimeoutResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_INVOKE_TIMEOUT_MS`],
+    legacyKeys: [],
+    parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, {
+      min: 1_000,
+      max: 300_000
+    }),
+    defaultValue: 30_000,
+    warnLegacyUsage,
+    warningLabel: 'invokeTimeoutMs'
   });
 
   const minimaxApiUrlResolution = readWithLegacyFallback({
@@ -264,6 +278,9 @@ function resolveT2AConfig({
   return {
     provider,
     maxTextLength: maxTextLengthResolution.value,
+    timeouts: {
+      invokeMs: invokeTimeoutResolution.value
+    },
     providers: {
       minimax: {
         apiUrl: minimaxApiUrlResolution.value,
@@ -293,6 +310,7 @@ function resolveT2AConfig({
     sources: {
       provider: providerResolution.source,
       maxTextLength: maxTextLengthResolution.source,
+      invokeTimeoutMs: invokeTimeoutResolution.source,
       minimaxApiUrl: minimaxApiUrlResolution.source,
       minimaxModel: minimaxModelResolution.source,
       voiceId: voiceIdResolution.source,
@@ -313,10 +331,12 @@ function resolveT2AConfig({
 
 function createT2AServiceDefinition({
   parseEnvBoundedInteger,
+  parseEnvMilliseconds,
   providerCapabilities = {}
 }) {
   const resolvedConfig = resolveT2AConfig({
     parseEnvBoundedInteger,
+    parseEnvMilliseconds,
     providerCapabilities
   });
   const maxTextLength = resolvedConfig.maxTextLength;
@@ -342,6 +362,9 @@ function createT2AServiceDefinition({
     },
     limits: {
       maxTextLength
+    },
+    timeouts: {
+      invokeMs: resolvedConfig.timeouts.invokeMs
     },
     validateRequest: ({ body }) => {
       const {

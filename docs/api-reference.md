@@ -89,7 +89,7 @@ Naming convention:
 - `<SERVICE_ID>_PROVIDER`
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`, or service-specific invoke keys like `T2A_INVOKE_TIMEOUT_MS`
 - Streaming toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 - Admission defaults: `ADMISSION_MAX_CONCURRENCY`, `ADMISSION_MAX_QUEUE_SIZE`, `ADMISSION_MAX_WAIT_MS`
 - Optional provider admission overrides: `<PROVIDER>_MAX_CONCURRENCY`, `<PROVIDER>_MAX_QUEUE_SIZE`, `<PROVIDER>_MAX_WAIT_MS`
@@ -107,7 +107,7 @@ Naming convention:
 | `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
 | (none) | `REWRITE_STREAMING_ENABLED` / `REWRITE_PROVIDER_STREAMING_ENABLED` / `REWRITE_<PROVIDER>_STREAMING_ENABLED` |
 
-`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is.
+`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is. T2A invocation timeout is configured separately through `T2A_INVOKE_TIMEOUT_MS` (default `30000`) and does not inherit rewrite ready timeout settings.
 
 Streaming capability for the selected provider resolves with this precedence:
 1. `REWRITE_STREAMING_ENABLED`
@@ -410,6 +410,8 @@ Streaming error chunk example:
 ## 1b) `POST /t2a`
 
 Generate speech audio from validated text input using the T2A service definition.
+
+Runtime timeout for provider invocation is controlled by `T2A_INVOKE_TIMEOUT_MS` (default `30000` ms), independent of rewrite service timeout configuration.
 
 ### Routes
 
