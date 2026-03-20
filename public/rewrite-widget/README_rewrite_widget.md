@@ -72,6 +72,13 @@ You can also pass optional tuning flags:
 - `statusPollIntervalMs` (number, min 1000) to change shared poll interval
 - `pollModelStatus` (boolean, default `true`) to skip the initial forced poll
 
+`maxChars` is a **soft submission limit** for the widget UI:
+
+- The title/placeholder/counter continue to show the configured limit for guidance.
+- **Rewrite** is only enabled when the trimmed text length is between `1` and `maxChars`.
+- The textarea itself is not hard-clipped, so rewritten output may exceed `maxChars`.
+- Users can continue editing oversized text and can submit again once the content is shortened back to `maxChars` or less.
+
 ------------------------------------------------------------------------
 
 # Multiple Widgets on One Page
