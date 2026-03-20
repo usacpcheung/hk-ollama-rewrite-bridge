@@ -186,6 +186,10 @@ Tune runtime behavior without code changes:
 | `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite fixed-window request budget for authenticated principals (`user:*`). |
 | `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for IP fallback principals (`ip:*`). |
 | `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite fixed-window request budget for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A fixed-window duration (seconds) for authenticated principals (`user:*`). |
+| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A fixed-window request budget for authenticated principals (`user:*`). |
+| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A fixed-window duration (seconds) for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A fixed-window request budget for IP fallback principals (`ip:*`). |
 | `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint (`/healthz`, `/readyz`) fixed-window duration in seconds (relaxed by default). |
 | `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint fixed-window request budget (relaxed by default). |
 
@@ -344,7 +348,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 - Layered rate limiting is enforced with a global baseline plus rewrite-service quotas by principal type (`user:*` first, `ip:*` fallback).
 - Exceeded quotas return `429 RATE_LIMITED`, include `Retry-After` seconds, and a stable payload with `error.reason=RATE_LIMIT_EXCEEDED` and retry metadata.
-- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata.
+- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata. Shared admission controls still come from rewrite/provider admission settings in `services/rewrite.js`, so rewrite and T2A continue to share the same execute-with-admission path.
 
 ### `GET /healthz` / `GET /readyz`
 

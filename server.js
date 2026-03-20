@@ -285,7 +285,7 @@ const resolveClientIdentity = createClientIdentityResolver({
 
 app.use(resolveClientIdentity);
 
-const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, opsLimiter } = createRateLimitMiddlewares();
+const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, t2aLimiter, opsLimiter } = createRateLimitMiddlewares();
 const OPS_ENDPOINTS = new Set(['/healthz', '/readyz']);
 
 app.use((req, res, next) => {
@@ -1104,7 +1104,7 @@ app.post(
 
 app.post(
   [t2aService.routes.legacyPath, t2aService.routes.futureApiPath],
-  rewriteLimiter,
+  t2aLimiter,
   rewriteHeaderAuth,
   async (req, res) => {
     const requestId = crypto.randomUUID();

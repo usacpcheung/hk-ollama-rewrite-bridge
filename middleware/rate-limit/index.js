@@ -30,6 +30,16 @@ function buildRateLimitPolicyFromEnv() {
         maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_REWRITE_IP_MAX_REQUESTS', 20, { max: 100000 })
       }
     },
+    t2a: {
+      auth: {
+        windowSec: parsePositiveIntegerEnv('RATE_LIMIT_T2A_AUTH_WINDOW_SEC', 60, { max: 3600 }),
+        maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_T2A_AUTH_MAX_REQUESTS', 30, { max: 100000 })
+      },
+      ip: {
+        windowSec: parsePositiveIntegerEnv('RATE_LIMIT_T2A_IP_WINDOW_SEC', 60, { max: 3600 }),
+        maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_T2A_IP_MAX_REQUESTS', 10, { max: 100000 })
+      }
+    },
     ops: {
       windowSec: parsePositiveIntegerEnv('RATE_LIMIT_OPS_WINDOW_SEC', 60, { max: 3600 }),
       maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_OPS_MAX_REQUESTS', 1000, { max: 100000 })
@@ -145,6 +155,11 @@ function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
     getPolicy: (principal) => (principal.principalType === 'user' ? policy.rewrite.auth : policy.rewrite.ip)
   });
 
+  const t2aLimiter = createFixedWindowRateLimiter({
+    policyScope: 't2a',
+    getPolicy: (principal) => (principal.principalType === 'user' ? policy.t2a.auth : policy.t2a.ip)
+  });
+
   const opsLimiter = createFixedWindowRateLimiter({
     policyScope: 'ops',
     getPolicy: () => policy.ops
@@ -154,6 +169,7 @@ function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
     policy,
     globalLimiter,
     rewriteLimiter,
+    t2aLimiter,
     opsLimiter
   };
 }

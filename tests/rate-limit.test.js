@@ -5,7 +5,8 @@ const {
   parsePositiveIntegerEnv,
   buildRateLimitPolicyFromEnv,
   resolveRateLimitPrincipal,
-  createFixedWindowRateLimiter
+  createFixedWindowRateLimiter,
+  createRateLimitMiddlewares
 } = require('../middleware/rate-limit');
 
 function withEnv(env, fn) {
@@ -72,6 +73,73 @@ test('buildRateLimitPolicyFromEnv resolves defaults and overrides', () => {
   assert.equal(policy.rewrite.auth.maxRequests, 15);
   assert.equal(policy.rewrite.ip.maxRequests, 5);
   assert.equal(policy.ops.maxRequests, 1000);
+});
+
+
+test('buildRateLimitPolicyFromEnv keeps rewrite defaults unchanged and adds conservative t2a defaults', () => {
+  const policy = withEnv(
+    {
+      RATE_LIMIT_GLOBAL_WINDOW_SEC: null,
+      RATE_LIMIT_GLOBAL_MAX_REQUESTS: null,
+      RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC: null,
+      RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS: null,
+      RATE_LIMIT_REWRITE_IP_WINDOW_SEC: null,
+      RATE_LIMIT_REWRITE_IP_MAX_REQUESTS: null,
+      RATE_LIMIT_T2A_AUTH_WINDOW_SEC: null,
+      RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: null,
+      RATE_LIMIT_T2A_IP_WINDOW_SEC: null,
+      RATE_LIMIT_T2A_IP_MAX_REQUESTS: null,
+      RATE_LIMIT_OPS_WINDOW_SEC: null,
+      RATE_LIMIT_OPS_MAX_REQUESTS: null
+    },
+    () => buildRateLimitPolicyFromEnv()
+  );
+
+  assert.deepEqual(policy.rewrite, {
+    auth: { windowSec: 60, maxRequests: 60 },
+    ip: { windowSec: 60, maxRequests: 20 }
+  });
+  assert.deepEqual(policy.t2a, {
+    auth: { windowSec: 60, maxRequests: 30 },
+    ip: { windowSec: 60, maxRequests: 10 }
+  });
+});
+
+test('buildRateLimitPolicyFromEnv resolves t2a values from dedicated env keys only', () => {
+  const policy = withEnv(
+    {
+      RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC: '90',
+      RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS: '19',
+      RATE_LIMIT_REWRITE_IP_WINDOW_SEC: '75',
+      RATE_LIMIT_REWRITE_IP_MAX_REQUESTS: '7',
+      RATE_LIMIT_T2A_AUTH_WINDOW_SEC: '45',
+      RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: '9',
+      RATE_LIMIT_T2A_IP_WINDOW_SEC: '30',
+      RATE_LIMIT_T2A_IP_MAX_REQUESTS: '3'
+    },
+    () => buildRateLimitPolicyFromEnv()
+  );
+
+  assert.deepEqual(policy.rewrite, {
+    auth: { windowSec: 90, maxRequests: 19 },
+    ip: { windowSec: 75, maxRequests: 7 }
+  });
+  assert.deepEqual(policy.t2a, {
+    auth: { windowSec: 45, maxRequests: 9 },
+    ip: { windowSec: 30, maxRequests: 3 }
+  });
+});
+
+test('invalid t2a env values fail with the same parsing contract', () => {
+  assert.throws(
+    () => withEnv({ RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: 'nope' }, () => buildRateLimitPolicyFromEnv()),
+    /Invalid RATE_LIMIT_T2A_AUTH_MAX_REQUESTS/
+  );
+
+  assert.throws(
+    () => withEnv({ RATE_LIMIT_T2A_IP_WINDOW_SEC: '0' }, () => buildRateLimitPolicyFromEnv()),
+    /Invalid RATE_LIMIT_T2A_IP_WINDOW_SEC/
+  );
 });
 
 test('resolveRateLimitPrincipal prefers trusted identity and falls back to ip', () => {
@@ -146,4 +214,59 @@ test('fixed window limiter returns stable 429 contract with retry headers', () =
   assert.equal(secondRes.body.error.reason, 'RATE_LIMIT_EXCEEDED');
   assert.equal(secondRes.body.limit.scope, 'rewrite');
   assert.equal(secondRes.body.limit.principalType, 'user');
+});
+
+
+test('createRateLimitMiddlewares keeps rewrite and t2a limiter buckets isolated', () => {
+  const { rewriteLimiter, t2aLimiter } = createRateLimitMiddlewares({
+    global: { windowSec: 60, maxRequests: 999 },
+    rewrite: {
+      auth: { windowSec: 60, maxRequests: 1 },
+      ip: { windowSec: 60, maxRequests: 1 }
+    },
+    t2a: {
+      auth: { windowSec: 60, maxRequests: 2 },
+      ip: { windowSec: 60, maxRequests: 2 }
+    },
+    ops: { windowSec: 60, maxRequests: 999 }
+  });
+
+  const req = {
+    clientIdentity: {
+      source: 'oidc',
+      value: 'tester@hs.edu.hk',
+      limiterKey: 'user:tester@hs.edu.hk'
+    }
+  };
+
+  const firstRewriteRes = createRes();
+  let firstRewriteNext = false;
+  rewriteLimiter(req, firstRewriteRes, () => {
+    firstRewriteNext = true;
+  });
+  assert.equal(firstRewriteNext, true);
+
+  const secondRewriteRes = createRes();
+  rewriteLimiter(req, secondRewriteRes, () => {});
+  assert.equal(secondRewriteRes.statusCode, 429);
+  assert.equal(secondRewriteRes.body.limit.scope, 'rewrite');
+
+  const firstT2aRes = createRes();
+  let firstT2aNext = false;
+  t2aLimiter(req, firstT2aRes, () => {
+    firstT2aNext = true;
+  });
+  assert.equal(firstT2aNext, true);
+
+  const secondT2aRes = createRes();
+  let secondT2aNext = false;
+  t2aLimiter(req, secondT2aRes, () => {
+    secondT2aNext = true;
+  });
+  assert.equal(secondT2aNext, true);
+
+  const thirdT2aRes = createRes();
+  t2aLimiter(req, thirdT2aRes, () => {});
+  assert.equal(thirdT2aRes.statusCode, 429);
+  assert.equal(thirdT2aRes.body.limit.scope, 't2a');
 });

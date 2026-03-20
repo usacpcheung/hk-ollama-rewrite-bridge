@@ -52,10 +52,14 @@ Because trusted OIDC headers are ignored when source IP or shared secret checks 
 
 Rate limiting uses layered fixed-window policies:
 - Global baseline limiter for non-ops routes (`RATE_LIMIT_GLOBAL_*`).
-- Rewrite-style service limiter (`POST /rewrite`, `POST /t2a`) with principal-aware quotas:
+- Rewrite service limiter (`POST /rewrite`) with principal-aware quotas:
   - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_REWRITE_AUTH_*`.
   - IP fallback (`ip:*`) uses `RATE_LIMIT_REWRITE_IP_*`.
+- T2A service limiter (`POST /t2a`) with principal-aware quotas:
+  - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_T2A_AUTH_*`.
+  - IP fallback (`ip:*`) uses `RATE_LIMIT_T2A_IP_*`.
 - Ops limiter for `/healthz` and `/readyz` (`RATE_LIMIT_OPS_*`, relaxed defaults).
+- Admission controls remain shared through rewrite/provider admission settings; T2A does not introduce separate admission env vars.
 
 Invalid rate-limit env values fail fast during startup.
 
@@ -67,6 +71,10 @@ Invalid rate-limit env values fail fast during startup.
 | `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite authenticated principal request budget. |
 | `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite IP-fallback window length. |
 | `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite IP-fallback request budget. |
+| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A authenticated principal window length. |
+| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A authenticated principal request budget. |
+| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A IP-fallback window length. |
+| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A IP-fallback request budget. |
 | `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint window length. |
 | `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint request budget. |
 
@@ -414,9 +422,9 @@ Generate speech audio from validated text input using the T2A service definition
 T2A uses the same middleware chain and request identity behavior as rewrite:
 - `express.json()` body parsing
 - shared `req.clientIdentity` resolution from `auth/client-identity.js`
-- global limiter + rewrite-style route limiter
+- global limiter + service-specific route limiter (`RATE_LIMIT_REWRITE_*` for rewrite, `RATE_LIMIT_T2A_*` for T2A)
 - shared header auth from `auth/header-auth.js`
-- admission controller execution wrapper
+- shared admission controller execution wrapper sourced from rewrite/provider admission config
 - shared JSON error envelope and provider error mapping pattern
 
 ### Request body
