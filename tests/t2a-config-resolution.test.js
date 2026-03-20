@@ -87,12 +87,16 @@ test('defaults apply when T2A env keys are absent', () => {
 
   assert.equal(config.provider, 'minimax');
   assert.equal(config.maxTextLength, 200);
-  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimaxi.chat/v1/t2a_v2');
-  assert.equal(config.providers.minimax.model, 'speech-02-hd');
-  assert.equal(config.providers.minimax.defaults.voiceId, 'female-tianmei');
+  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/t2a_v2');
+  assert.equal(config.providers.minimax.model, 'speech-2.6-hd');
+  assert.equal(config.providers.minimax.defaults.voiceId, 'Cantonese_ProfessionalHost（F)');
   assert.equal(config.providers.minimax.defaults.speed, 1);
   assert.equal(config.providers.minimax.defaults.volume, 1);
   assert.equal(config.providers.minimax.defaults.pitch, 0);
+  assert.equal(config.providers.minimax.defaults.audioSetting.channel, 1);
+  assert.equal(config.providers.minimax.defaults.languageBoost, 'Chinese,Yue');
+  assert.deepEqual(config.providers.minimax.defaults.voiceModify, { pitch: 0, intensity: 0, timbre: 0 });
+  assert.equal(config.providers.minimax.defaults.outputFormat, 'hex');
   assert.equal(config.sources.maxTextLength.type, 'default');
   assert.equal(config.sources.minimaxApiUrl.type, 'default');
   assert.equal(config.sources.minimaxModel.type, 'default');

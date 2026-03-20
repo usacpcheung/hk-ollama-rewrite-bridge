@@ -433,7 +433,7 @@ T2A uses the same middleware chain and request identity behavior as rewrite:
 {
   "text": "你好，歡迎使用",
   "response_mode": "binary",
-  "voice_id": "female-tianmei",
+  "voice_id": "Cantonese_ProfessionalHost（F)",
   "speed": 1,
   "volume": 1,
   "pitch": 0,
@@ -454,6 +454,7 @@ Validation rules:
 - `bitrate` must be an integer between `32000` and `320000`.
 - `format` must be one of `mp3`, `wav`, or `pcm`.
 - `stream=true` is not supported in v1 and returns `501 STREAMING_UNSUPPORTED`.
+- Upstream Minimax requests are sent with `stream=false`, `audio_setting.channel=1`, `language_boost="Chinese,Yue"`, `voice_modify={ pitch: 0, intensity: 0, timbre: 0 }`, and `output_format="hex"`.
 
 ### Binary success (default)
 

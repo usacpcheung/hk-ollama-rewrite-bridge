@@ -132,15 +132,15 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
 | `T2A_PROVIDER` | `minimax` | T2A backend provider. Currently resolves to Minimax-compatible T2A handling. |
 | `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /t2a` in Unicode characters (1-600). |
-| `T2A_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
-| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
-| `T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
-| `T2A_MINIMAX_MODEL` | `speech-02-hd` | Preferred T2A Minimax model key. |
-| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-02-hd` | Alternate preferred T2A Minimax model key. |
-| `T2A_MODEL` | `speech-02-hd` | Alternate preferred T2A model alias. |
-| `T2A_MINIMAX_VOICE_ID` | `female-tianmei` | Preferred default T2A voice ID. |
-| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice ID. |
-| `T2A_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice alias. |
+| `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
+| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
+| `T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
+| `T2A_MINIMAX_MODEL` | `speech-2.6-hd` | Preferred T2A Minimax model key. |
+| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-2.6-hd` | Alternate preferred T2A Minimax model key. |
+| `T2A_MODEL` | `speech-2.6-hd` | Alternate preferred T2A model alias. |
+| `T2A_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Preferred default T2A voice ID. |
+| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Alternate preferred default T2A voice ID. |
+| `T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Alternate preferred default T2A voice alias. |
 | `T2A_MINIMAX_SPEED` | `1` | Preferred default T2A speaking speed. |
 | `T2A_PROVIDER_MINIMAX_SPEED` | `1` | Alternate preferred default T2A speaking speed. |
 | `T2A_SPEED` | `1` | Alternate preferred default T2A speed alias. |
@@ -150,9 +150,9 @@ Tune runtime behavior without code changes:
 | `T2A_MINIMAX_PITCH` | `0` | Preferred default T2A pitch. |
 | `T2A_PROVIDER_MINIMAX_PITCH` | `0` | Alternate preferred default T2A pitch. |
 | `T2A_PITCH` | `0` | Alternate preferred default T2A pitch alias. |
-| `MINIMAX_T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Legacy fallback for T2A Minimax endpoint. |
-| `MINIMAX_T2A_MODEL` | `speech-02-hd` | Legacy fallback for T2A Minimax model. |
-| `MINIMAX_T2A_VOICE_ID` | `female-tianmei` | Legacy fallback for T2A default voice ID. |
+| `MINIMAX_T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Legacy fallback for T2A Minimax endpoint. |
+| `MINIMAX_T2A_MODEL` | `speech-2.6-hd` | Legacy fallback for T2A Minimax model. |
+| `MINIMAX_T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Legacy fallback for T2A default voice ID. |
 | `MINIMAX_T2A_SPEED` | `1` | Legacy fallback for T2A default speed. |
 | `MINIMAX_T2A_VOLUME` | `1` | Legacy fallback for T2A default volume. |
 | `MINIMAX_T2A_PITCH` | `0` | Legacy fallback for T2A default pitch. |
@@ -445,6 +445,7 @@ Supported fields:
 - `text` (required): trimmed, non-empty string, max `T2A_MAX_TEXT_LENGTH` Unicode characters.
 - `response_mode` (optional): `binary`/`default` for raw MP3 bytes, or `base64_json` for JSON-wrapped base64 audio.
 - `voice_id`, `speed`, `volume`, `pitch` (optional): voice controls passed through to Minimax.
+- Upstream Minimax requests always use `stream=false`, `audio_setting.channel=1`, `language_boost="Chinese,Yue"`, `voice_modify={ pitch: 0, intensity: 0, timbre: 0 }`, and `output_format="hex"` by default.
 - `sample_rate`, `bitrate`, `format` (optional): audio options validated against the T2A service definition.
 - `stream=true` is rejected with `501 STREAMING_UNSUPPORTED`.
 

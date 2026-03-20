@@ -1141,7 +1141,10 @@ app.post(
             payload: {
               text: trimmedText,
               voice,
-              audio
+              audio,
+              languageBoost: validationResult.value.languageBoost,
+              voiceModify: validationResult.value.voiceModify,
+              outputFormat: validationResult.value.outputFormat
             },
             timeoutMs: rewriteService.timeouts.readyMs
           })
