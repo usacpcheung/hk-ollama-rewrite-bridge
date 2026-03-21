@@ -274,7 +274,8 @@
   display:flex; align-items:center; justify-content:space-between;
   padding:0 12px; pointer-events:none;
 }
-.rw-counter,.rw-hint{ font-size:12px; color:var(--muted); pointer-events:none; }
+.rw-counter,.rw-hint{ font-size:12px; color:var(--muted); pointer-events:none; transition:color .15s ease, font-weight .15s ease; }
+.rw-counter.over-limit,.rw-hint.over-limit{ color:#ffb3c2; font-weight:600; }
 .rw-actions{ margin-top:12px; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
 .rw-stream-toggle{ margin-top:10px; display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; user-select:none; }
 .rw-stream-toggle input{ width:16px; height:16px; accent-color:var(--accent); }
@@ -341,8 +342,7 @@
 
     const ta = document.createElement("textarea");
     ta.className = "rw-textarea";
-    ta.maxLength = opts.maxChars;
-    ta.placeholder = opts.placeholder || `Type up to ${opts.maxChars} characters…`;
+    ta.placeholder = opts.placeholder || `Type up to ${opts.maxChars} characters before rewriting…`;
 
     const footer = document.createElement("div");
     footer.className = "rw-footer";
@@ -502,15 +502,52 @@
       }
     }
 
+    function renderHint() {
+      const currentLength = getCurrentText().length;
+      const trimmedLength = getCurrentText().trim().length;
+      const isOverLimit = currentLength > maxChars;
+
+      ui.countSpan.textContent = String(currentLength);
+      ui.countSpan.parentElement.classList.toggle("over-limit", isOverLimit);
+      ui.hint.classList.toggle("over-limit", isOverLimit);
+
+      if (isOverLimit) {
+        ui.hint.textContent = "Text exceeds limit; shorten before rewriting";
+        return;
+      }
+
+      if (inFlight) {
+        ui.hint.textContent = "Please wait…";
+        return;
+      }
+
+      if (trimmedLength === 0) {
+        ui.hint.textContent = `Enter up to ${maxChars} characters to rewrite`;
+        return;
+      }
+
+      if (sharedPhase === "down") {
+        ui.hint.textContent = "Will retry automatically";
+      } else if (sharedPhase === "degraded") {
+        ui.hint.textContent = "Reduced quality mode (retry if output looks off)";
+      } else if (sharedPhase === "ready") {
+        ui.hint.textContent = "Click Rewrite to convert";
+      } else if (sharedPhase === "starting") {
+        ui.hint.textContent = "Rewrite disabled while loading";
+      } else {
+        ui.hint.textContent = "Waiting for ready…";
+      }
+    }
+
     function syncButtons() {
       const text = (ui.ta.value || "").trim();
       const okLen = text.length > 0 && text.length <= maxChars;
       ui.rewriteBtn.disabled = !(sharedModelReady && okLen && !inFlight);
       ui.undoBtn.disabled = !(lastOriginalText && !inFlight);
+      renderHint();
     }
 
     function updateCount() {
-      ui.countSpan.textContent = String(getCurrentText().length);
       textChange.emit({ text: getCurrentText() });
       saveDraft();
       syncButtons();
@@ -526,28 +563,23 @@
       if (sharedPhase === "down") {
         setDot(ui.dot, "down");
         ui.statusText.textContent = st.statusText || "API unreachable";
-        ui.hint.textContent = "Will retry automatically";
         toast(st.lastError ? `Cannot reach API. ${st.lastError}` : "Cannot reach API.", "error");
       } else if (sharedPhase === "degraded") {
         setDot(ui.dot, "busy");
         ui.statusText.textContent = st.statusText || "Model degraded";
-        ui.hint.textContent = "Reduced quality mode (retry if output looks off)";
         if (!inFlight) toast("Model is degraded. Results may be lower quality.", "error");
       } else if (sharedPhase === "ready") {
         setDot(ui.dot, "ready");
         ui.statusText.textContent = st.statusText || "Model ready";
-        ui.hint.textContent = "Click Rewrite to convert";
         // don't clear toast if we're mid-flight; keep "Working…"
         if (!inFlight) toast("");
       } else if (sharedPhase === "starting") {
         setDot(ui.dot, "busy");
         ui.statusText.textContent = st.statusText || "Model loading…";
-        ui.hint.textContent = "Rewrite disabled while loading";
         if (!inFlight) toast("Please wait for model to be ready.");
       } else {
         setDot(ui.dot, "busy");
         ui.statusText.textContent = st.statusText || "Checking model…";
-        ui.hint.textContent = "Waiting for ready…";
         if (!inFlight) toast("");
       }
 
@@ -624,7 +656,6 @@
 
       setDot(ui.dot, "busy");
       ui.statusText.textContent = "Rewriting…";
-      ui.hint.textContent = "Please wait…";
       toast("Working…");
       syncButtons();
 
