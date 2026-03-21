@@ -36,9 +36,18 @@ function createProvider({
   minimaxUserTemplate,
   debugLog
 }) {
+  const serviceId = serviceConfig?.id || 'rewrite';
   const provider = serviceConfig?.provider?.selected || 'ollama';
   const selectedRuntime = serviceConfig?.provider?.runtime || {};
-  const maxCompletionTokens = serviceConfig?.provider?.maxCompletionTokens;
+  const maxCompletionTokens = serviceId === 'rewrite'
+    ? serviceConfig?.provider?.maxCompletionTokens
+    : undefined;
+  const rewritePromptConfig = serviceId === 'rewrite'
+    ? {
+      minimaxSystemPrompt,
+      minimaxUserTemplate
+    }
+    : {};
 
   if (provider === 'ollama') {
     return ensureServiceHandlers(createOllamaProvider({
@@ -56,8 +65,8 @@ function createProvider({
       apiUrl: selectedRuntime.apiUrl,
       model: selectedRuntime.model,
       apiKey: minimaxApiKey,
-      systemPrompt: minimaxSystemPrompt,
-      userTemplate: minimaxUserTemplate,
+      systemPrompt: rewritePromptConfig.minimaxSystemPrompt,
+      userTemplate: rewritePromptConfig.minimaxUserTemplate,
       maxCompletionTokens,
       debugLog
     }));
