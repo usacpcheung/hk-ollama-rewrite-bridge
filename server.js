@@ -148,6 +148,10 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
 const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
   max: 30_000
 });
+const T2A_INVOKE_TIMEOUT_MS = parseEnvMilliseconds('T2A_INVOKE_TIMEOUT_MS', 30_000, {
+  min: 1_000,
+  max: 300_000
+});
 const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   'MINIMAX_PASSIVE_READY_GRACE_MS',
   10 * 60_000,
@@ -255,7 +259,8 @@ const admissionController = createAdmissionController({
   providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
 });
 
-const providerAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.rewrite));
+const rewriteProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.rewrite));
+const t2aProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.t2a));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
@@ -284,7 +289,7 @@ const resolveClientIdentity = createClientIdentityResolver({
 
 app.use(resolveClientIdentity);
 
-const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, opsLimiter } = createRateLimitMiddlewares();
+const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, t2aLimiter, opsLimiter } = createRateLimitMiddlewares();
 const OPS_ENDPOINTS = new Set(['/healthz', '/readyz']);
 
 app.use((req, res, next) => {
@@ -433,7 +438,7 @@ function warmupWithinColdWindow(nowMs) {
 
 async function probeModelReady() {
   const timeoutMs = rewriteService.provider.selected === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
-  return providerAdapter.checkReadiness({ timeoutMs });
+  return rewriteProviderAdapter.checkReadiness({ timeoutMs });
 }
 
 function getMinimaxPassiveReadiness(nowMs = Date.now()) {
@@ -473,7 +478,7 @@ async function triggerWarmupIfNeeded(nowMs) {
   lastWarmupTriggerAtMs = nowMs;
 
   try {
-    const warmupResult = await providerAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
+    const warmupResult = await rewriteProviderAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
     if (!warmupResult.ok) {
       lastWarmupResult = 'failed';
       lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
@@ -906,7 +911,7 @@ app.post(
     const streamEnabled = streamRequested && rewriteService.capabilities.streaming;
 
     if (streamEnabled) {
-      if (!providerAdapter.hasStreamHandler({ serviceId: rewriteService.id })) {
+      if (!rewriteProviderAdapter.hasStreamHandler({ serviceId: rewriteService.id })) {
         return errorResponse(
           res,
           501,
@@ -929,7 +934,7 @@ app.post(
         rewriteResult = await executeWithAdmission({
           providerName: rewriteService.provider.selected,
           requestId,
-          execute: () => providerAdapter.invokeStream({
+          execute: () => rewriteProviderAdapter.invokeStream({
             serviceId: rewriteService.id,
             requestId,
             payload: {
@@ -986,7 +991,7 @@ app.post(
       if (!rewriteResult.ok) {
         lastRewriteFailureAtMs = Date.now();
         consecutiveRewriteFailures += 1;
-        const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
+        const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
         setLastError(mappedError.code, mappedError.message);
         streamWriter.writeError({
           code: mappedError.code,
@@ -1028,7 +1033,7 @@ app.post(
       rewriteResult = await executeWithAdmission({
         providerName: rewriteService.provider.selected,
         requestId,
-        execute: () => providerAdapter.invokeSync({
+        execute: () => rewriteProviderAdapter.invokeSync({
           serviceId: rewriteService.id,
           requestId,
           payload: {
@@ -1049,7 +1054,7 @@ app.post(
     if (!rewriteResult.ok) {
       lastRewriteFailureAtMs = Date.now();
       consecutiveRewriteFailures += 1;
-      const mappedError = rewriteResult.error || providerAdapter.mapError(new Error('unknown'));
+      const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
@@ -1100,6 +1105,103 @@ app.post(
   }
 });
 
+
+app.post(
+  [t2aService.routes.legacyPath, t2aService.routes.futureApiPath],
+  t2aLimiter,
+  rewriteHeaderAuth,
+  async (req, res) => {
+    const requestId = crypto.randomUUID();
+
+    try {
+      const validationResult = t2aService.validateRequest({ body: req.body });
+      if (!validationResult.ok) {
+        return errorResponse(res, validationResult.status, validationResult.code, validationResult.message);
+      }
+
+      const { trimmedText, responseMode, voice, audio } = validationResult.value;
+
+      if (validationResult.value.streamRequested) {
+        return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
+      }
+
+      if (t2aService.provider.selected === 'minimax' && !MINIMAX_API_KEY) {
+        return errorResponse(
+          res,
+          503,
+          'MINIMAX_API_KEY_MISSING',
+          'Minimax API key is missing; set MINIMAX_API_KEY to enable t2a requests.'
+        );
+      }
+
+      let t2aResult;
+      try {
+        t2aResult = await executeWithAdmission({
+          providerName: t2aService.provider.selected,
+          requestId,
+          execute: () => t2aProviderAdapter.invokeSync({
+            serviceId: t2aService.id,
+            requestId,
+            payload: {
+              text: trimmedText,
+              voice,
+              audio,
+              languageBoost: validationResult.value.languageBoost,
+              voiceModify: validationResult.value.voiceModify,
+              outputFormat: validationResult.value.outputFormat
+            },
+            timeoutMs: t2aService.timeouts.invokeMs
+          })
+        });
+      } catch (error) {
+        if (isAdmissionOverloadError(error)) {
+          return admissionOverloadResponse(res, error);
+        }
+
+        throw error;
+      }
+
+      if (!t2aResult.ok) {
+        const mappedError = t2aResult.error || t2aProviderAdapter.mapError(new Error('unknown'));
+        return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
+      }
+
+      const output = t2aResult.data?.output || {};
+      const audioBuffer = output?.meta?.audio || output?.artifacts?.find((artifact) => artifact?.kind === 'audio')?.data;
+      const format = output?.meta?.format || output?.artifacts?.[0]?.format || 'mp3';
+      const contentType = output?.meta?.contentType || output?.meta?.mime || output?.artifacts?.[0]?.contentType || 'audio/mpeg';
+      const providerMeta = output?.meta?.provider || null;
+
+      if (!Buffer.isBuffer(audioBuffer) || audioBuffer.length === 0) {
+        return errorResponse(res, 502, 'PROVIDER_ERROR', 'Provider response did not include audio data');
+      }
+
+      if (responseMode === 'base64_json') {
+        return writeJsonSuccess(res, {
+          audio: audioBuffer.toString('base64'),
+          format,
+          mime: contentType,
+          contentType,
+          size: audioBuffer.length,
+          provider: providerMeta
+        });
+      }
+
+      res.status(200);
+      res.set('Content-Type', contentType);
+      res.set('Content-Length', String(audioBuffer.length));
+      res.set('Content-Disposition', `inline; filename="speech.${format}"`);
+      return res.end(audioBuffer);
+    } catch (error) {
+      if (error?.code === 'STREAMING_UNSUPPORTED') {
+        return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
+      }
+
+      throw error;
+    }
+  }
+);
+
 app.use((_req, res) => {
   return errorResponse(res, 404, 'NOT_FOUND', 'Not Found');
 });
@@ -1112,7 +1214,7 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  const providerInfo = providerAdapter.getInfo();
+  const providerInfo = rewriteProviderAdapter.getInfo();
   console.log(
     JSON.stringify({
       level: 'info',
@@ -1120,6 +1222,7 @@ app.listen(PORT, HOST, () => {
       ...providerInfo,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
+      t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
