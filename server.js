@@ -148,6 +148,10 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
 const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
   max: 30_000
 });
+const T2A_INVOKE_TIMEOUT_MS = parseEnvMilliseconds('T2A_INVOKE_TIMEOUT_MS', 30_000, {
+  min: 1_000,
+  max: 300_000
+});
 const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   'MINIMAX_PASSIVE_READY_GRACE_MS',
   10 * 60_000,
@@ -1146,7 +1150,7 @@ app.post(
               voiceModify: validationResult.value.voiceModify,
               outputFormat: validationResult.value.outputFormat
             },
-            timeoutMs: rewriteService.timeouts.readyMs
+            timeoutMs: t2aService.timeouts.invokeMs
           })
         });
       } catch (error) {
@@ -1218,6 +1222,7 @@ app.listen(PORT, HOST, () => {
       ...providerInfo,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
+      t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,

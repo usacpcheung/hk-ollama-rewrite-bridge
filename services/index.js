@@ -13,6 +13,7 @@ function createServiceRegistry({
   });
   const t2aService = createT2AServiceDefinition({
     parseEnvBoundedInteger,
+    parseEnvMilliseconds,
     providerCapabilities
   });
 

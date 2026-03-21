@@ -45,7 +45,7 @@ Services now resolve runtime config with a service prefix:
 - `<SERVICE_ID>_PROVIDER` (for example `REWRITE_PROVIDER`, future `SUMMARIZE_PROVIDER`)
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL` (for example `REWRITE_OLLAMA_MODEL`, `REWRITE_PROVIDER_MINIMAX_MODEL`)
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS` and `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`, or service-specific invoke keys like `T2A_INVOKE_TIMEOUT_MS`
 - Streaming capability toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, and optional provider-specific `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 
 Resolution order for rewrite service:
@@ -132,6 +132,7 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
 | `T2A_PROVIDER` | `minimax` | T2A backend provider. Currently resolves to Minimax-compatible T2A handling. |
 | `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /t2a` in Unicode characters (1-600). |
+| `T2A_INVOKE_TIMEOUT_MS` | `30000` | T2A provider invoke timeout (ms). T2A uses this service-specific timeout and no longer reuses rewrite ready timeout settings. |
 | `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
 | `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
 | `T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
@@ -430,7 +431,7 @@ sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt
 
 ### `POST /t2a` (internal app route)
 
-Protected T2A routes use the same auth middleware, client-identity resolver, global/rewrite rate-limit integration, and admission-control flow as rewrite routes.
+Protected T2A routes use the same auth middleware, client-identity resolver, global/rewrite rate-limit integration, and admission-control flow as rewrite routes, but T2A invocation timeout is isolated through `T2A_INVOKE_TIMEOUT_MS` rather than rewrite timeout config.
 
 Request body:
 
