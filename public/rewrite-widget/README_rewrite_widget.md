@@ -1,37 +1,44 @@
 # Rewrite Bridge Widget (OIDC-Protected)
 
-This repository includes a reusable **Rewrite Widget UI** for the HK
-Rewrite Bridge API.
+This repository includes a reusable **Rewrite Widget UI** for the rewrite service.
 
-It provides:
+## Scope of this widget
 
--   A demo-style card UI (textbox, character counter, **Rewrite**,
-    **Undo**)
--   A **model-ready status dot** (ready / loading / down)
--   A **single shared model-status poller** across multiple widgets (no
-    duplicated network requests)
--   Canonical status-phase handling (`down` / `degraded` / `ready` /
-    `starting` / `unknown`) derived from backend `status` and
-    `serviceState`
--   Secure API calls using browser cookies (`credentials: "include"`)
-    for OIDC-protected endpoints
--   Safe documentation templates (no sensitive information included)
+The shipped browser widget currently targets **text rewrite only**. It does **not** provide a built-in UI for the T2A service.
 
-------------------------------------------------------------------------
+That means:
 
-# Folder Structure
+- the widget calls `POST /api/rewrite-bridge/rewrite`
+- the widget polls `GET /api/rewrite-bridge/model-status`
+- it does not call `POST /api/rewrite-bridge/t2a`
 
-public/ rewrite-widget/ rewrite-widget.js example.html README.md
+If you are building an app that needs T2A, use the documented API contracts in `README.md` and `docs/api-reference.md` directly from your own frontend or backend integration layer.
 
-------------------------------------------------------------------------
+## What the widget provides
 
-# Quick Start
+- demo-style card UI with textbox, character counter, **Rewrite**, and **Undo**
+- model-ready status dot
+- one shared model-status poller across multiple widget instances
+- canonical phase handling derived from backend `status` and `serviceState`
+- secure cookie-based requests with `credentials: "include"` for OIDC-protected deployments
 
-## 1. Serve the widget statically (Node / Express)
+## Folder structure
 
-Add to your server.js:
+```text
+public/
+  rewrite-widget/
+    rewrite-widget.js
+    example.html
+    README_rewrite_widget.md
+```
 
-``` js
+## Quick start
+
+### 1. Serve the widget statically
+
+Add to your server:
+
+```js
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -41,22 +48,22 @@ const __dirname = path.dirname(__filename);
 app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-widget")));
 ```
 
-## 2. Access the demo page
+### 2. Open the example page
 
-    https://<YOUR_DOMAIN>/rewrite-widget/example.html
+```text
+https://<YOUR_DOMAIN>/rewrite-widget/example.html
+```
 
-------------------------------------------------------------------------
+## Using the widget in any page
 
-# Using the Widget in Any Page
-
-``` html
+```html
 <div id="rw"></div>
 
 <script src="/rewrite-widget/rewrite-widget.js"></script>
 <script>
   RewriteWidget.mount({
     containerSelector: "#rw",
-    apiBase: "",  // same-origin recommended
+    apiBase: "",
     title: "Rewrite",
     maxChars: 100,
     reloadOnLoginRequired: true
@@ -64,53 +71,39 @@ app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-w
 </script>
 ```
 
-`loginPageUrl` is optional and only used when you run a manual sign-in flow
-(`reloadOnLoginRequired: false`).
+Optional config:
 
-You can also pass optional tuning flags:
+- `statusPollIntervalMs` (number, minimum 1000)
+- `pollModelStatus` (boolean, default `true`)
+- `loginPageUrl` for manual sign-in flows when `reloadOnLoginRequired: false`
 
-- `statusPollIntervalMs` (number, min 1000) to change shared poll interval
-- `pollModelStatus` (boolean, default `true`) to skip the initial forced poll
+## Multiple widgets on one page
 
-`maxChars` is a **soft submission limit** for the widget UI:
+Each widget has its own editor state but shares one model-status poller.
 
-- The title/placeholder/counter continue to show the configured limit for guidance.
-- **Rewrite** is only enabled when the trimmed text length is between `1` and `maxChars`.
-- The textarea itself is not hard-clipped, so rewritten output may exceed `maxChars`.
-- Users can continue editing oversized text and can submit again once the content is shortened back to `maxChars` or less.
-
-------------------------------------------------------------------------
-
-# Multiple Widgets on One Page
-
-Each widget maintains its own textbox and Undo state, but shares one
-model-status poller (no duplicated API calls).
-
-``` html
+```html
 <div id="rw1"></div>
 <div id="rw2"></div>
 
 <script src="/rewrite-widget/rewrite-widget.js"></script>
 <script>
-  RewriteWidget.mount({ containerSelector:"#rw1", apiBase:"" });
-  RewriteWidget.mount({ containerSelector:"#rw2", apiBase:"" });
+  RewriteWidget.mount({ containerSelector: "#rw1", apiBase: "" });
+  RewriteWidget.mount({ containerSelector: "#rw2", apiBase: "" });
 </script>
 ```
 
-------------------------------------------------------------------------
-
-# Widget API
+## Widget API
 
 `RewriteWidget.mount(config)` returns an instance with:
 
-- `rewrite()` – manually trigger rewrite
-- `undo()` – restore last pre-rewrite text
-- `pollStatusOnce()` – force immediate shared status poll
-- `getCurrentText()` – read current textarea content
-- `onRewriteStart(callback)` – subscribe before each rewrite call
-- `onRewriteComplete(callback)` – subscribe after rewrite attempt
-- `onTextChange(callback)` – subscribe on textarea input changes
-- `destroy()` – unsubscribe + remove widget DOM
+- `rewrite()`
+- `undo()`
+- `pollStatusOnce()`
+- `getCurrentText()`
+- `onRewriteStart(callback)`
+- `onRewriteComplete(callback)`
+- `onTextChange(callback)`
+- `destroy()`
 
 Event payloads:
 
@@ -118,56 +111,44 @@ Event payloads:
 - `onRewriteComplete`: `{ before, after, changed, success, errorMessage }`
 - `onTextChange`: `{ text }`
 
-------------------------------------------------------------------------
+## Front-end status behavior notes
 
-# Front-end Status Behavior Notes
+The widget polls `GET /api/rewrite-bridge/model-status` and uses:
 
-The widget polls `GET /api/rewrite-bridge/model-status` and reads both:
+- `status`
+- `serviceState`
 
--   `status` (overall rewrite-model readiness)
--   `serviceState` (service lifecycle/display state)
+Phase precedence:
 
-Important behavior:
+1. down or unreachable
+2. degraded
+3. ready
+4. starting or warming
+5. unknown
 
--   The widget normalizes model state into a shared `phase` using both
-    `status` and `serviceState` with this precedence:
-    1. unreachable/down
-    2. degraded
-    3. ready
-    4. starting/warming/loading
-    5. unknown
--   **Rewrite button readiness is driven by normalized phase `ready`**.
--   `degraded` keeps Rewrite disabled and shows quality warning text.
--   `starting`/`warming`/`loading` shows loading UI and disables Rewrite.
--   `down` (or unreachable API) shows retry messaging and auto-retry polling.
+Behavior:
 
-This keeps all widget instances consistent and avoids per-widget drift in
-status interpretation.
+- Rewrite button is enabled only in normalized `ready` phase.
+- `degraded` keeps rewrite disabled and shows a warning.
+- `starting` / `warming` keeps rewrite disabled and shows loading UI.
+- `down` or unreachable API shows retry messaging.
 
-------------------------------------------------------------------------
+## OIDC protection overview
 
-# OIDC Protection Overview
+Typical deployment pattern:
 
-The rewrite endpoint is typically protected by Apache
-`mod_auth_openidc`:
+- protected: `POST /api/rewrite-bridge/rewrite`
+- often public or less restricted: `GET /api/rewrite-bridge/model-status`
 
--   Protected: POST /api/rewrite-bridge/rewrite
+The widget uses:
 
--   Usually Public: GET /api/rewrite-bridge/model-status
+```js
+fetch(..., { credentials: "include" })
+```
 
-The widget sends API calls using:
+Best UX is to protect the widget page itself with OIDC so the user is already signed in before they interact with the widget.
 
-    fetch(..., credentials: "include")
-
-This means: - The browser must already have a valid OIDC session
-cookie - If not logged in, Apache redirects to Google login
-
-Best UX: Protect the widget page itself with OIDC so login happens
-automatically.
-
-Recommended auth config by page type:
-
-- OIDC-protected widget pages (recommended):
+Recommended widget config:
 
 ```js
 RewriteWidget.mount({
@@ -177,37 +158,27 @@ RewriteWidget.mount({
 });
 ```
 
-- Public/non-protected pages:
+## Important note for T2A adopters
 
-```js
-RewriteWidget.mount({
-  containerSelector: "#rw",
-  apiBase: "",
-  reloadOnLoginRequired: false,
-  loginPageUrl: "/login"
-});
-```
+If your application needs both rewrite and T2A:
 
-If your page is public and you set `reloadOnLoginRequired: false` without a
-`loginPageUrl`, the widget shows a generic message:
-"Login required. Re-authenticate in your org portal and retry."
+- you can continue using this widget for rewrite
+- implement T2A separately using `POST /api/rewrite-bridge/t2a`
+- choose either binary audio handling or `base64_json` based on your app needs
 
-------------------------------------------------------------------------
+## Safe Apache configuration template
 
-# Safe Apache Configuration Template (NO REAL SECRETS)
+Replace placeholder values wrapped in `<...>`. Never commit real secrets.
 
-Replace placeholder values wrapped in \<...\>. DO NOT commit real
-secrets into GitHub.
-
-``` apache
+```apache
 <VirtualHost *:443>
   ServerName <YOUR_DOMAIN>
 
   OIDCProviderMetadataURL https://accounts.google.com/.well-known/openid-configuration
   OIDCClientID <GOOGLE_OIDC_CLIENT_ID>
-  OIDCClientSecret <GOOGLE_OIDC_CLIENT_SECRET>  # DO NOT COMMIT
+  OIDCClientSecret <GOOGLE_OIDC_CLIENT_SECRET>
   OIDCRedirectURI https://<YOUR_DOMAIN>/oidc/callback
-  OIDCCryptoPassphrase <RANDOM_LONG_SECRET>     # DO NOT COMMIT
+  OIDCCryptoPassphrase <RANDOM_LONG_SECRET>
 
   OIDCScope "openid email profile"
   OIDCRemoteUserClaim email
@@ -219,9 +190,11 @@ secrets into GitHub.
 
     RequestHeader unset X-Authenticated-Email
     RequestHeader unset X-Authenticated-User
+    RequestHeader unset X-Bridge-Auth
 
     RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e"
     RequestHeader set X-Authenticated-User "%{REMOTE_USER}e"
+    RequestHeader set X-Bridge-Auth "<INTERNAL_SHARED_SECRET>"
   </Location>
 
   ProxyPass        /api/rewrite-bridge/rewrite       http://127.0.0.1:3001/rewrite
@@ -235,88 +208,11 @@ secrets into GitHub.
 </VirtualHost>
 ```
 
-------------------------------------------------------------------------
+## Keeping secrets out of git
 
-# Keeping Secrets Out of Git
+Recommended approach:
 
-Recommended method:
-
-1.  Create a local Apache include file: /etc/apache2/oidc-secrets.conf
-
-2.  Store secrets there: OIDCClientID `<REAL_ID>`{=html}
-    OIDCClientSecret `<REAL_SECRET>`{=html} OIDCCryptoPassphrase
-    `<REAL_SECRET>`{=html}
-
-3.  Include in vhost: Include /etc/apache2/oidc-secrets.conf
-
-4.  Restrict permissions: chmod 600 /etc/apache2/oidc-secrets.conf
-
-Also add to .gitignore:
-
-.env .env.* *.secrets.conf
-
-------------------------------------------------------------------------
-
-# Troubleshooting
-
-Login required: - User has no valid OIDC session. - Open a protected
-page to log in, then retry.
-
-If repeated auth-triggered reloads occur, the widget now stops auto-reloading
-after a short burst and shows a stable manual login message.
-
-Rewrite disabled: - Model status is not "ready". - Check
-/api/rewrite-bridge/model-status (`status` must be `"ready"`) and
-server logs.
-
-Cross-domain usage: - Using widget from another domain requires CORS +
-credentials setup. - Recommended: host widget on same domain as API.
-
-------------------------------------------------------------------------
-
-# Production Recommendations
-
--   Keep rewrite endpoint protected
--   Keep model-status public
--   Protect widget demo page for best UX
--   Never commit secrets
--   Use pull requests for deployment changes
-
-------------------------------------------------------------------------
-
-# Migration Note (Removed Demo Login Fallback)
-
-The old demo-path fallback (`/tools/rewritedemo.html`) is deprecated and
-removed from default widget behavior.
-
-Before:
-
-```js
-RewriteWidget.mount({
-  containerSelector: "#rw",
-  apiBase: "",
-  reloadOnLoginRequired: false,
-  loginPageUrl: "/tools/rewritedemo.html"
-});
-```
-
-After (manual login flow):
-
-```js
-RewriteWidget.mount({
-  containerSelector: "#rw",
-  apiBase: "",
-  reloadOnLoginRequired: false,
-  loginPageUrl: "/login"
-});
-```
-
-After (OIDC-protected page flow):
-
-```js
-RewriteWidget.mount({
-  containerSelector: "#rw",
-  apiBase: "",
-  reloadOnLoginRequired: true
-});
-```
+1. store secrets in a local Apache include file such as `/etc/apache2/oidc-secrets.conf`
+2. include that file from the vhost
+3. restrict permissions to the secrets file
+4. ignore secret-bearing files in git
