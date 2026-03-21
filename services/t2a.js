@@ -3,12 +3,20 @@ const ABSOLUTE_MAX_TEXT_LENGTH = 600;
 const DEFAULT_AUDIO_SAMPLE_RATE = 32000;
 const DEFAULT_AUDIO_BITRATE = 128000;
 const DEFAULT_AUDIO_FORMAT = 'mp3';
-const DEFAULT_MINIMAX_API_URL = 'https://api.minimaxi.chat/v1/t2a_v2';
-const DEFAULT_MINIMAX_MODEL = 'speech-02-hd';
-const DEFAULT_MINIMAX_VOICE_ID = 'female-tianmei';
+const DEFAULT_MINIMAX_API_URL = 'https://api.minimax.io/v1/t2a_v2';
+const DEFAULT_MINIMAX_MODEL = 'speech-2.6-hd';
+const DEFAULT_MINIMAX_VOICE_ID = 'Cantonese_ProfessionalHost（F)';
 const DEFAULT_MINIMAX_SPEED = 1;
 const DEFAULT_MINIMAX_VOLUME = 1;
 const DEFAULT_MINIMAX_PITCH = 0;
+const DEFAULT_AUDIO_CHANNEL = 1;
+const DEFAULT_LANGUAGE_BOOST = 'Chinese,Yue';
+const DEFAULT_VOICE_MODIFY = Object.freeze({
+  pitch: 0,
+  intensity: 0,
+  timbre: 0
+});
+const DEFAULT_OUTPUT_FORMAT = 'hex';
 
 function countUnicodeCharacters(value) {
   return [...value].length;
@@ -147,6 +155,7 @@ function parseOptionalEnum(value, allowedValues = []) {
 function resolveT2AConfig({
   env = process.env,
   parseEnvBoundedInteger,
+  parseEnvMilliseconds,
   providerCapabilities = {}
 }) {
   const serviceId = 'T2A';
@@ -188,6 +197,19 @@ function resolveT2AConfig({
     defaultValue: DEFAULT_MAX_TEXT_LENGTH,
     warnLegacyUsage,
     warningLabel: 'maxTextLength'
+  });
+
+  const invokeTimeoutResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_INVOKE_TIMEOUT_MS`],
+    legacyKeys: [],
+    parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, {
+      min: 1_000,
+      max: 300_000
+    }),
+    defaultValue: 30_000,
+    warnLegacyUsage,
+    warningLabel: 'invokeTimeoutMs'
   });
 
   const minimaxApiUrlResolution = readWithLegacyFallback({
@@ -256,6 +278,9 @@ function resolveT2AConfig({
   return {
     provider,
     maxTextLength: maxTextLengthResolution.value,
+    timeouts: {
+      invokeMs: invokeTimeoutResolution.value
+    },
     providers: {
       minimax: {
         apiUrl: minimaxApiUrlResolution.value,
@@ -268,8 +293,14 @@ function resolveT2AConfig({
           audioSetting: {
             sampleRate: DEFAULT_AUDIO_SAMPLE_RATE,
             bitrate: DEFAULT_AUDIO_BITRATE,
-            format: DEFAULT_AUDIO_FORMAT
-          }
+            format: DEFAULT_AUDIO_FORMAT,
+            channel: DEFAULT_AUDIO_CHANNEL
+          },
+          languageBoost: DEFAULT_LANGUAGE_BOOST,
+          voiceModify: {
+            ...DEFAULT_VOICE_MODIFY
+          },
+          outputFormat: DEFAULT_OUTPUT_FORMAT
         },
         capabilities: providerCapabilities.minimax || { streaming: false }
       }
@@ -279,6 +310,7 @@ function resolveT2AConfig({
     sources: {
       provider: providerResolution.source,
       maxTextLength: maxTextLengthResolution.source,
+      invokeTimeoutMs: invokeTimeoutResolution.source,
       minimaxApiUrl: minimaxApiUrlResolution.source,
       minimaxModel: minimaxModelResolution.source,
       voiceId: voiceIdResolution.source,
@@ -288,6 +320,10 @@ function resolveT2AConfig({
       audioSampleRate: { type: 'default', key: null },
       audioBitrate: { type: 'default', key: null },
       audioFormat: { type: 'default', key: null },
+      audioChannel: { type: 'default', key: null },
+      languageBoost: { type: 'default', key: null },
+      voiceModify: { type: 'default', key: null },
+      outputFormat: { type: 'default', key: null },
       streamingEnabled: { type: 'default', key: null }
     }
   };
@@ -295,10 +331,12 @@ function resolveT2AConfig({
 
 function createT2AServiceDefinition({
   parseEnvBoundedInteger,
+  parseEnvMilliseconds,
   providerCapabilities = {}
 }) {
   const resolvedConfig = resolveT2AConfig({
     parseEnvBoundedInteger,
+    parseEnvMilliseconds,
     providerCapabilities
   });
   const maxTextLength = resolvedConfig.maxTextLength;
@@ -324,6 +362,9 @@ function createT2AServiceDefinition({
     },
     limits: {
       maxTextLength
+    },
+    timeouts: {
+      invokeMs: resolvedConfig.timeouts.invokeMs
     },
     validateRequest: ({ body }) => {
       const {
@@ -418,8 +459,14 @@ function createT2AServiceDefinition({
           audio: {
             sampleRate: parsedSampleRate === undefined ? providerDefaults.audioSetting.sampleRate : parsedSampleRate,
             bitrate: parsedBitrate === undefined ? providerDefaults.audioSetting.bitrate : parsedBitrate,
-            format: parsedFormat === undefined ? providerDefaults.audioSetting.format : parsedFormat
-          }
+            format: parsedFormat === undefined ? providerDefaults.audioSetting.format : parsedFormat,
+            channel: providerDefaults.audioSetting.channel
+          },
+          languageBoost: providerDefaults.languageBoost,
+          voiceModify: {
+            ...providerDefaults.voiceModify
+          },
+          outputFormat: providerDefaults.outputFormat
         }
       };
     }

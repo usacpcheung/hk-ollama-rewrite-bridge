@@ -159,8 +159,13 @@ test('t2a routes return base64 JSON when requested', async (t) => {
     });
     req.on('end', () => {
       const payload = JSON.parse(raw || '{}');
-      assert.equal(payload.voice_setting.voice_id, 'female-tianmei');
+      assert.equal(payload.stream, false);
+      assert.equal(payload.voice_setting.voice_id, 'Cantonese_ProfessionalHost（F)');
       assert.equal(payload.audio_setting.format, 'mp3');
+      assert.equal(payload.audio_setting.channel, 1);
+      assert.equal(payload.language_boost, 'Chinese,Yue');
+      assert.deepEqual(payload.voice_modify, { pitch: 0, intensity: 0, timbre: 0 });
+      assert.equal(payload.output_format, 'hex');
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -203,6 +208,53 @@ test('t2a routes return base64 JSON when requested', async (t) => {
   assert.equal(body.size, expectedAudio.length);
   assert.equal(body.provider.traceId, 'trace-route-json');
   assert.equal(body.provider.audioLength, 1234);
+});
+
+
+
+test('t2a routes expose isolated T2A timeout config at startup', async (t) => {
+  const expectedAudio = Buffer.from('isolated timeout audio');
+
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        trace_id: 'trace-timeout-isolation',
+        data: {
+          audio: expectedAudio.toString('hex'),
+          format: 'mp3',
+          audio_length: expectedAudio.length
+        }
+      }));
+    });
+  });
+  t.after(() => mockServer.close());
+
+  const serverProcess = spawnBridge({
+    T2A_MINIMAX_API_URL: `http://127.0.0.1:${port}/t2a`,
+    MINIMAX_API_KEY: 'test-key',
+    T2A_INVOKE_TIMEOUT_MS: '2000',
+    REWRITE_READY_TIMEOUT_MS: '50'
+  });
+  let startupOutput = '';
+  serverProcess.stdout.on('data', (chunk) => {
+    startupOutput += String(chunk);
+  });
+  serverProcess.stderr.on('data', (chunk) => {
+    startupOutput += String(chunk);
+  });
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  assert.match(startupOutput, /"serviceReadyTimeoutMs":50/);
+  assert.match(startupOutput, /"t2aInvokeTimeoutMs":2000/);
+
 });
 
 test('t2a routes reject unsupported stream requests with a stable error', async (t) => {
@@ -299,4 +351,88 @@ test('t2a routes preserve validation errors for invalid, missing, and overlong t
   const overlongBody = await overlongResponse.json();
   assert.equal(overlongResponse.status, 413);
   assert.equal(overlongBody.error.code, 'TOO_LONG');
+});
+
+
+test('rewrite and t2a routes use independent service-specific limiter buckets', async (t) => {
+  const expectedAudio = Buffer.from('independent limiter audio payload');
+  let rewriteCalls = 0;
+  let t2aCalls = 0;
+
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      if (req.url === '/rewrite') {
+        rewriteCalls += 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ reply: '正式：獨立配額測試' }));
+        return;
+      }
+
+      if (req.url === '/t2a') {
+        t2aCalls += 1;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          trace_id: 'trace-rate-limit-split',
+          data: {
+            audio: expectedAudio.toString('hex'),
+            format: 'mp3',
+            audio_length: expectedAudio.length
+          }
+        }));
+        return;
+      }
+
+      res.writeHead(404).end();
+    });
+  });
+  t.after(() => mockServer.close());
+
+  const serverProcess = spawnBridge({
+    REWRITE_MINIMAX_API_URL: `http://127.0.0.1:${port}/rewrite`,
+    T2A_MINIMAX_API_URL: `http://127.0.0.1:${port}/t2a`,
+    MINIMAX_API_KEY: 'test-key',
+    RATE_LIMIT_GLOBAL_MAX_REQUESTS: '20',
+    RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC: '60',
+    RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS: '1',
+    RATE_LIMIT_T2A_AUTH_WINDOW_SEC: '60',
+    RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: '2'
+  });
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const rewriteFirst = await postJson('/rewrite', { text: '我今日想請假。' }, authHeaders);
+  const rewriteFirstBody = await rewriteFirst.json();
+  assert.equal(rewriteFirst.status, 200);
+  assert.equal(rewriteFirstBody.ok, true);
+
+  const rewriteSecond = await postJson('/rewrite', { text: '我聽日會返學。' }, authHeaders);
+  const rewriteSecondBody = await rewriteSecond.json();
+  assert.equal(rewriteSecond.status, 429);
+  assert.equal(rewriteSecondBody.error.code, 'RATE_LIMITED');
+  assert.equal(rewriteSecondBody.limit.scope, 'rewrite');
+
+  const t2aFirst = await postJson('/t2a', { text: '你好，世界' }, authHeaders);
+  assert.equal(t2aFirst.status, 200);
+  assert.equal(await t2aFirst.arrayBuffer().then((buf) => Buffer.from(buf).equals(expectedAudio)), true);
+
+  const t2aSecond = await postJson('/t2a', { text: '你好，再見' }, authHeaders);
+  assert.equal(t2aSecond.status, 200);
+
+  const t2aThird = await postJson('/t2a', { text: '你好，第三次' }, authHeaders);
+  const t2aThirdBody = await t2aThird.json();
+  assert.equal(t2aThird.status, 429);
+  assert.equal(t2aThirdBody.error.code, 'RATE_LIMITED');
+  assert.equal(t2aThirdBody.limit.scope, 't2a');
+
+  assert.equal(rewriteCalls, 1);
+  assert.equal(t2aCalls, 2);
 });

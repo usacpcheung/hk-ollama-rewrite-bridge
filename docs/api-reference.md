@@ -52,10 +52,14 @@ Because trusted OIDC headers are ignored when source IP or shared secret checks 
 
 Rate limiting uses layered fixed-window policies:
 - Global baseline limiter for non-ops routes (`RATE_LIMIT_GLOBAL_*`).
-- Rewrite-style service limiter (`POST /rewrite`, `POST /t2a`) with principal-aware quotas:
+- Rewrite service limiter (`POST /rewrite`) with principal-aware quotas:
   - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_REWRITE_AUTH_*`.
   - IP fallback (`ip:*`) uses `RATE_LIMIT_REWRITE_IP_*`.
+- T2A service limiter (`POST /t2a`) with principal-aware quotas:
+  - Authenticated/trusted identity (`user:*`) uses `RATE_LIMIT_T2A_AUTH_*`.
+  - IP fallback (`ip:*`) uses `RATE_LIMIT_T2A_IP_*`.
 - Ops limiter for `/healthz` and `/readyz` (`RATE_LIMIT_OPS_*`, relaxed defaults).
+- Admission controls remain shared through rewrite/provider admission settings; T2A does not introduce separate admission env vars.
 
 Invalid rate-limit env values fail fast during startup.
 
@@ -67,6 +71,10 @@ Invalid rate-limit env values fail fast during startup.
 | `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite authenticated principal request budget. |
 | `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite IP-fallback window length. |
 | `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite IP-fallback request budget. |
+| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A authenticated principal window length. |
+| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A authenticated principal request budget. |
+| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A IP-fallback window length. |
+| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A IP-fallback request budget. |
 | `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint window length. |
 | `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint request budget. |
 
@@ -81,7 +89,7 @@ Naming convention:
 - `<SERVICE_ID>_PROVIDER`
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Optional timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`, or service-specific invoke keys like `T2A_INVOKE_TIMEOUT_MS`
 - Streaming toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 - Admission defaults: `ADMISSION_MAX_CONCURRENCY`, `ADMISSION_MAX_QUEUE_SIZE`, `ADMISSION_MAX_WAIT_MS`
 - Optional provider admission overrides: `<PROVIDER>_MAX_CONCURRENCY`, `<PROVIDER>_MAX_QUEUE_SIZE`, `<PROVIDER>_MAX_WAIT_MS`
@@ -99,7 +107,7 @@ Naming convention:
 | `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
 | (none) | `REWRITE_STREAMING_ENABLED` / `REWRITE_PROVIDER_STREAMING_ENABLED` / `REWRITE_<PROVIDER>_STREAMING_ENABLED` |
 
-`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is.
+`REWRITE_PROVIDER`, `REWRITE_MAX_COMPLETION_TOKENS`, and `REWRITE_MAX_TEXT_LENGTH` remain valid as-is. T2A invocation timeout is configured separately through `T2A_INVOKE_TIMEOUT_MS` (default `30000`) and does not inherit rewrite ready timeout settings.
 
 Streaming capability for the selected provider resolves with this precedence:
 1. `REWRITE_STREAMING_ENABLED`
@@ -403,6 +411,8 @@ Streaming error chunk example:
 
 Generate speech audio from validated text input using the T2A service definition.
 
+Runtime timeout for provider invocation is controlled by `T2A_INVOKE_TIMEOUT_MS` (default `30000` ms), independent of rewrite service timeout configuration.
+
 ### Routes
 
 - Internal: `POST /t2a`
@@ -414,9 +424,9 @@ Generate speech audio from validated text input using the T2A service definition
 T2A uses the same middleware chain and request identity behavior as rewrite:
 - `express.json()` body parsing
 - shared `req.clientIdentity` resolution from `auth/client-identity.js`
-- global limiter + rewrite-style route limiter
+- global limiter + service-specific route limiter (`RATE_LIMIT_REWRITE_*` for rewrite, `RATE_LIMIT_T2A_*` for T2A)
 - shared header auth from `auth/header-auth.js`
-- admission controller execution wrapper
+- shared admission controller execution wrapper sourced from rewrite/provider admission config
 - shared JSON error envelope and provider error mapping pattern
 
 ### Request body
@@ -425,7 +435,7 @@ T2A uses the same middleware chain and request identity behavior as rewrite:
 {
   "text": "你好，歡迎使用",
   "response_mode": "binary",
-  "voice_id": "female-tianmei",
+  "voice_id": "Cantonese_ProfessionalHost（F)",
   "speed": 1,
   "volume": 1,
   "pitch": 0,
@@ -446,6 +456,7 @@ Validation rules:
 - `bitrate` must be an integer between `32000` and `320000`.
 - `format` must be one of `mp3`, `wav`, or `pcm`.
 - `stream=true` is not supported in v1 and returns `501 STREAMING_UNSUPPORTED`.
+- Upstream Minimax requests are sent with `stream=false`, `audio_setting.channel=1`, `language_boost="Chinese,Yue"`, `voice_modify={ pitch: 0, intensity: 0, timbre: 0 }`, and `output_format="hex"`.
 
 ### Binary success (default)
 

@@ -148,6 +148,10 @@ const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
 const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
   max: 30_000
 });
+const T2A_INVOKE_TIMEOUT_MS = parseEnvMilliseconds('T2A_INVOKE_TIMEOUT_MS', 30_000, {
+  min: 1_000,
+  max: 300_000
+});
 const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
   'MINIMAX_PASSIVE_READY_GRACE_MS',
   10 * 60_000,
@@ -285,7 +289,7 @@ const resolveClientIdentity = createClientIdentityResolver({
 
 app.use(resolveClientIdentity);
 
-const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, opsLimiter } = createRateLimitMiddlewares();
+const { policy: rateLimitPolicy, globalLimiter, rewriteLimiter, t2aLimiter, opsLimiter } = createRateLimitMiddlewares();
 const OPS_ENDPOINTS = new Set(['/healthz', '/readyz']);
 
 app.use((req, res, next) => {
@@ -1104,7 +1108,7 @@ app.post(
 
 app.post(
   [t2aService.routes.legacyPath, t2aService.routes.futureApiPath],
-  rewriteLimiter,
+  t2aLimiter,
   rewriteHeaderAuth,
   async (req, res) => {
     const requestId = crypto.randomUUID();
@@ -1141,9 +1145,12 @@ app.post(
             payload: {
               text: trimmedText,
               voice,
-              audio
+              audio,
+              languageBoost: validationResult.value.languageBoost,
+              voiceModify: validationResult.value.voiceModify,
+              outputFormat: validationResult.value.outputFormat
             },
-            timeoutMs: rewriteService.timeouts.readyMs
+            timeoutMs: t2aService.timeouts.invokeMs
           })
         });
       } catch (error) {
@@ -1215,6 +1222,7 @@ app.listen(PORT, HOST, () => {
       ...providerInfo,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
+      t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,
       ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
       ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,

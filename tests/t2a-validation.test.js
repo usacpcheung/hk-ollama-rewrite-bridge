@@ -17,6 +17,7 @@ function createService(env = {}) {
   try {
     return createT2AServiceDefinition({
       parseEnvBoundedInteger: parseBounded,
+      parseEnvMilliseconds: parseBounded,
       providerCapabilities: { minimax: { streaming: false } }
     });
   } finally {

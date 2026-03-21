@@ -45,7 +45,7 @@ Services now resolve runtime config with a service prefix:
 - `<SERVICE_ID>_PROVIDER` (for example `REWRITE_PROVIDER`, future `SUMMARIZE_PROVIDER`)
 - `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL` (for example `REWRITE_OLLAMA_MODEL`, `REWRITE_PROVIDER_MINIMAX_MODEL`)
 - `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS` and `<SERVICE_ID>_COLD_TIMEOUT_MS`
+- Optional service-level timeout keys such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`, or service-specific invoke keys like `T2A_INVOKE_TIMEOUT_MS`
 - Streaming capability toggle keys: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, and optional provider-specific `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
 
 Resolution order for rewrite service:
@@ -132,15 +132,16 @@ Tune runtime behavior without code changes:
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
 | `T2A_PROVIDER` | `minimax` | T2A backend provider. Currently resolves to Minimax-compatible T2A handling. |
 | `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /t2a` in Unicode characters (1-600). |
-| `T2A_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
-| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
-| `T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
-| `T2A_MINIMAX_MODEL` | `speech-02-hd` | Preferred T2A Minimax model key. |
-| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-02-hd` | Alternate preferred T2A Minimax model key. |
-| `T2A_MODEL` | `speech-02-hd` | Alternate preferred T2A model alias. |
-| `T2A_MINIMAX_VOICE_ID` | `female-tianmei` | Preferred default T2A voice ID. |
-| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice ID. |
-| `T2A_VOICE_ID` | `female-tianmei` | Alternate preferred default T2A voice alias. |
+| `T2A_INVOKE_TIMEOUT_MS` | `30000` | T2A provider invoke timeout (ms). T2A uses this service-specific timeout and no longer reuses rewrite ready timeout settings. |
+| `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Preferred T2A Minimax endpoint key. |
+| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint key. |
+| `T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A endpoint alias. |
+| `T2A_MINIMAX_MODEL` | `speech-2.6-hd` | Preferred T2A Minimax model key. |
+| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-2.6-hd` | Alternate preferred T2A Minimax model key. |
+| `T2A_MODEL` | `speech-2.6-hd` | Alternate preferred T2A model alias. |
+| `T2A_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Preferred default T2A voice ID. |
+| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Alternate preferred default T2A voice ID. |
+| `T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Alternate preferred default T2A voice alias. |
 | `T2A_MINIMAX_SPEED` | `1` | Preferred default T2A speaking speed. |
 | `T2A_PROVIDER_MINIMAX_SPEED` | `1` | Alternate preferred default T2A speaking speed. |
 | `T2A_SPEED` | `1` | Alternate preferred default T2A speed alias. |
@@ -150,9 +151,9 @@ Tune runtime behavior without code changes:
 | `T2A_MINIMAX_PITCH` | `0` | Preferred default T2A pitch. |
 | `T2A_PROVIDER_MINIMAX_PITCH` | `0` | Alternate preferred default T2A pitch. |
 | `T2A_PITCH` | `0` | Alternate preferred default T2A pitch alias. |
-| `MINIMAX_T2A_URL` | `https://api.minimaxi.chat/v1/t2a_v2` | Legacy fallback for T2A Minimax endpoint. |
-| `MINIMAX_T2A_MODEL` | `speech-02-hd` | Legacy fallback for T2A Minimax model. |
-| `MINIMAX_T2A_VOICE_ID` | `female-tianmei` | Legacy fallback for T2A default voice ID. |
+| `MINIMAX_T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Legacy fallback for T2A Minimax endpoint. |
+| `MINIMAX_T2A_MODEL` | `speech-2.6-hd` | Legacy fallback for T2A Minimax model. |
+| `MINIMAX_T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Legacy fallback for T2A default voice ID. |
 | `MINIMAX_T2A_SPEED` | `1` | Legacy fallback for T2A default speed. |
 | `MINIMAX_T2A_VOLUME` | `1` | Legacy fallback for T2A default volume. |
 | `MINIMAX_T2A_PITCH` | `0` | Legacy fallback for T2A default pitch. |
@@ -186,6 +187,10 @@ Tune runtime behavior without code changes:
 | `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite fixed-window request budget for authenticated principals (`user:*`). |
 | `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite fixed-window duration (seconds) for IP fallback principals (`ip:*`). |
 | `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite fixed-window request budget for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A fixed-window duration (seconds) for authenticated principals (`user:*`). |
+| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A fixed-window request budget for authenticated principals (`user:*`). |
+| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A fixed-window duration (seconds) for IP fallback principals (`ip:*`). |
+| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A fixed-window request budget for IP fallback principals (`ip:*`). |
 | `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops endpoint (`/healthz`, `/readyz`) fixed-window duration in seconds (relaxed by default). |
 | `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops endpoint fixed-window request budget (relaxed by default). |
 
@@ -344,7 +349,7 @@ Warm-up metadata includes: `status`, `serviceState`, `startupWarmupAttempts`, `s
 - Once ready, returns HTTP `200` with `{ "ok": true, "result": "..." }` and optional additive `usage` metadata when provider usage counters are available.
 - Layered rate limiting is enforced with a global baseline plus rewrite-service quotas by principal type (`user:*` first, `ip:*` fallback).
 - Exceeded quotas return `429 RATE_LIMITED`, include `Retry-After` seconds, and a stable payload with `error.reason=RATE_LIMIT_EXCEEDED` and retry metadata.
-- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata.
+- Admission overload (queue full or queue wait timeout) returns `503 ADMISSION_OVERLOADED` with a consistent payload shape that includes `reason` (`queue_full` or `wait_timeout`) and `admission` limit metadata. Shared admission controls still come from rewrite/provider admission settings in `services/rewrite.js`, so rewrite and T2A continue to share the same execute-with-admission path.
 
 ### `GET /healthz` / `GET /readyz`
 
@@ -426,7 +431,7 @@ sudo journalctl -u rewrite-bridge -n 200 --no-pager | rg 'Startup warmup attempt
 
 ### `POST /t2a` (internal app route)
 
-Protected T2A routes use the same auth middleware, client-identity resolver, global/rewrite rate-limit integration, and admission-control flow as rewrite routes.
+Protected T2A routes use the same auth middleware, client-identity resolver, global/rewrite rate-limit integration, and admission-control flow as rewrite routes, but T2A invocation timeout is isolated through `T2A_INVOKE_TIMEOUT_MS` rather than rewrite timeout config.
 
 Request body:
 
@@ -441,6 +446,7 @@ Supported fields:
 - `text` (required): trimmed, non-empty string, max `T2A_MAX_TEXT_LENGTH` Unicode characters.
 - `response_mode` (optional): `binary`/`default` for raw MP3 bytes, or `base64_json` for JSON-wrapped base64 audio.
 - `voice_id`, `speed`, `volume`, `pitch` (optional): voice controls passed through to Minimax.
+- Upstream Minimax requests always use `stream=false`, `audio_setting.channel=1`, `language_boost="Chinese,Yue"`, `voice_modify={ pitch: 0, intensity: 0, timbre: 0 }`, and `output_format="hex"` by default.
 - `sample_rate`, `bitrate`, `format` (optional): audio options validated against the T2A service definition.
 - `stream=true` is rejected with `501 STREAMING_UNSUPPORTED`.
 
