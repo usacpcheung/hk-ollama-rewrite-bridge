@@ -210,6 +210,53 @@ test('t2a routes return base64 JSON when requested', async (t) => {
   assert.equal(body.provider.audioLength, 1234);
 });
 
+
+
+test('t2a routes expose isolated T2A timeout config at startup', async (t) => {
+  const expectedAudio = Buffer.from('isolated timeout audio');
+
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        trace_id: 'trace-timeout-isolation',
+        data: {
+          audio: expectedAudio.toString('hex'),
+          format: 'mp3',
+          audio_length: expectedAudio.length
+        }
+      }));
+    });
+  });
+  t.after(() => mockServer.close());
+
+  const serverProcess = spawnBridge({
+    T2A_MINIMAX_API_URL: `http://127.0.0.1:${port}/t2a`,
+    MINIMAX_API_KEY: 'test-key',
+    T2A_INVOKE_TIMEOUT_MS: '2000',
+    REWRITE_READY_TIMEOUT_MS: '50'
+  });
+  let startupOutput = '';
+  serverProcess.stdout.on('data', (chunk) => {
+    startupOutput += String(chunk);
+  });
+  serverProcess.stderr.on('data', (chunk) => {
+    startupOutput += String(chunk);
+  });
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  assert.match(startupOutput, /"serviceReadyTimeoutMs":50/);
+  assert.match(startupOutput, /"t2aInvokeTimeoutMs":2000/);
+
+});
+
 test('t2a routes reject unsupported stream requests with a stable error', async (t) => {
   const serverProcess = spawnBridge({ MINIMAX_API_KEY: 'test-key' });
   t.after(() => {

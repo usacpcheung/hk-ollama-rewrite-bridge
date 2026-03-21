@@ -109,14 +109,41 @@ function writeRateLimitExceeded(res, { retryAfterSec, policyScope, principalType
   });
 }
 
-function createFixedWindowRateLimiter({ policyScope, getPolicy, resolvePrincipal = resolveRateLimitPrincipal }) {
+function createFixedWindowRateLimiter({
+  policyScope,
+  getPolicy,
+  resolvePrincipal = resolveRateLimitPrincipal,
+  cleanupIntervalMs = 60 * 1000,
+  now = () => Date.now(),
+  includeDiagnostics = false
+}) {
   const counters = new Map();
+  let nextCleanupAtMs = 0;
 
-  return function fixedWindowRateLimiter(req, res, next) {
+  function sweepExpiredCounters(nowMs) {
+    for (const [key, counter] of counters.entries()) {
+      if (counter.resetAtMs <= nowMs) {
+        counters.delete(key);
+      }
+    }
+    nextCleanupAtMs = nowMs + cleanupIntervalMs;
+  }
+
+  function maybeSweepExpiredCounters(nowMs) {
+    if (nowMs < nextCleanupAtMs) {
+      return;
+    }
+
+    sweepExpiredCounters(nowMs);
+  }
+
+  function fixedWindowRateLimiter(req, res, next) {
+    const nowMs = now();
+    maybeSweepExpiredCounters(nowMs);
+
     const principal = resolvePrincipal(req);
     const selectedPolicy = getPolicy(principal, req);
     const windowMs = selectedPolicy.windowSec * 1000;
-    const nowMs = Date.now();
     const counterKey = `${policyScope}:${principal.key}`;
 
     const existing = counters.get(counterKey);
@@ -141,7 +168,16 @@ function createFixedWindowRateLimiter({ policyScope, getPolicy, resolvePrincipal
 
     existing.count += 1;
     return next();
-  };
+  }
+
+  if (includeDiagnostics) {
+    fixedWindowRateLimiter.inspect = () => ({
+      liveBucketCount: counters.size,
+      hasBucket: (principalKey) => counters.has(`${policyScope}:${principalKey}`)
+    });
+  }
+
+  return fixedWindowRateLimiter;
 }
 
 function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
