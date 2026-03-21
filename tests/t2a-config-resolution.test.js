@@ -30,6 +30,7 @@ test('preferred service-scoped T2A keys override legacy minimax smoke envs', () 
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -61,6 +62,7 @@ test('legacy minimax smoke envs work when preferred T2A keys are absent', () => 
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -82,17 +84,22 @@ test('defaults apply when T2A env keys are absent', () => {
   const config = resolveT2AConfig({
     env: {},
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
   assert.equal(config.provider, 'minimax');
   assert.equal(config.maxTextLength, 200);
-  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimaxi.chat/v1/t2a_v2');
-  assert.equal(config.providers.minimax.model, 'speech-02-hd');
-  assert.equal(config.providers.minimax.defaults.voiceId, 'female-tianmei');
+  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/t2a_v2');
+  assert.equal(config.providers.minimax.model, 'speech-2.6-hd');
+  assert.equal(config.providers.minimax.defaults.voiceId, 'Cantonese_ProfessionalHost（F)');
   assert.equal(config.providers.minimax.defaults.speed, 1);
   assert.equal(config.providers.minimax.defaults.volume, 1);
   assert.equal(config.providers.minimax.defaults.pitch, 0);
+  assert.equal(config.providers.minimax.defaults.audioSetting.channel, 1);
+  assert.equal(config.providers.minimax.defaults.languageBoost, 'Chinese,Yue');
+  assert.deepEqual(config.providers.minimax.defaults.voiceModify, { pitch: 0, intensity: 0, timbre: 0 });
+  assert.equal(config.providers.minimax.defaults.outputFormat, 'hex');
   assert.equal(config.sources.maxTextLength.type, 'default');
   assert.equal(config.sources.minimaxApiUrl.type, 'default');
   assert.equal(config.sources.minimaxModel.type, 'default');
@@ -113,6 +120,7 @@ test('malformed preferred T2A env values fall back to legacy values or defaults'
   const config = resolveT2AConfig({
     env,
     parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
     providerCapabilities: { minimax: { streaming: false } }
   });
 
@@ -124,4 +132,30 @@ test('malformed preferred T2A env values fall back to legacy values or defaults'
   assert.equal(config.sources.speed.type, 'legacy');
   assert.equal(config.sources.volume.type, 'legacy');
   assert.equal(config.sources.pitch.type, 'legacy');
+});
+
+
+test('t2a invoke timeout uses service-scoped config with default and preferred override', () => {
+  const defaultConfig = resolveT2AConfig({
+    env: {},
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  const overrideConfig = resolveT2AConfig({
+    env: {
+      T2A_INVOKE_TIMEOUT_MS: '45000',
+      REWRITE_READY_TIMEOUT_MS: '99999'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  assert.equal(defaultConfig.timeouts.invokeMs, 30000);
+  assert.equal(defaultConfig.sources.invokeTimeoutMs.type, 'default');
+  assert.equal(overrideConfig.timeouts.invokeMs, 45000);
+  assert.equal(overrideConfig.sources.invokeTimeoutMs.type, 'preferred');
+  assert.equal(overrideConfig.sources.invokeTimeoutMs.key, 'T2A_INVOKE_TIMEOUT_MS');
 });

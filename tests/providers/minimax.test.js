@@ -467,7 +467,7 @@ test('t2a sends smoke-script-compatible payload and normalizes audio success res
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -475,7 +475,7 @@ test('t2a sends smoke-script-compatible payload and normalizes audio success res
     requestId: 'req-t2a-success',
     text: '你好，歡迎使用',
     voice: {
-      voiceId: 'female-tianmei',
+      voiceId: 'Cantonese_ProfessionalHost（F)',
       speed: 1.2,
       volume: 3,
       pitch: -1
@@ -483,18 +483,23 @@ test('t2a sends smoke-script-compatible payload and normalizes audio success res
     audio: {
       sampleRate: 32000,
       bitrate: 128000,
-      format: 'mp3'
+      format: 'mp3',
+      channel: 1
     },
+    languageBoost: 'Chinese,Yue',
+    voiceModify: { pitch: 0, intensity: 0, timbre: 0 },
+    outputFormat: 'hex',
     timeoutMs: 5_000
   });
 
   assert.equal(result.ok, true);
   assert.equal(capturedHeaders.Authorization, 'Bearer test-key');
   assert.deepEqual(capturedBody, {
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     text: '你好，歡迎使用',
+    stream: false,
     voice_setting: {
-      voice_id: 'female-tianmei',
+      voice_id: 'Cantonese_ProfessionalHost（F)',
       speed: 1.2,
       vol: 3,
       pitch: -1
@@ -502,8 +507,16 @@ test('t2a sends smoke-script-compatible payload and normalizes audio success res
     audio_setting: {
       sample_rate: 32000,
       bitrate: 128000,
-      format: 'mp3'
-    }
+      format: 'mp3',
+      channel: 1
+    },
+    language_boost: 'Chinese,Yue',
+    voice_modify: {
+      pitch: 0,
+      intensity: 0,
+      timbre: 0
+    },
+    output_format: 'hex'
   });
   assert.equal(result.data.response, '');
   assert.equal(result.data.output.text, '');
@@ -543,7 +556,7 @@ test('t2a prefers direct candidate fields before deep fallback when multiple aud
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -576,7 +589,7 @@ test('t2a smoke-script-compatible response variants decode to the same normalize
     try {
       const provider = createMinimaxProvider({
         apiUrl: 'http://minimax.test/v1/t2a_v2',
-        model: 'speech-02-hd',
+        model: 'speech-2.6-hd',
         apiKey: 'test-key'
       });
 
@@ -610,7 +623,7 @@ test('t2a maps auth failures to provider auth error', async (t) => {
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -644,7 +657,7 @@ test('t2a maps invalid JSON responses to provider failure', async (t) => {
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -678,7 +691,7 @@ test('t2a returns provider failure when audio payload is missing', async (t) => 
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -712,7 +725,7 @@ test('t2a maps aborted fetch to timeout failure', async (t) => {
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 
@@ -746,7 +759,7 @@ test('t2a maps unexpected schema drift when provider returns non-object JSON', a
 
   const provider = createMinimaxProvider({
     apiUrl: 'http://minimax.test/v1/t2a_v2',
-    model: 'speech-02-hd',
+    model: 'speech-2.6-hd',
     apiKey: 'test-key'
   });
 

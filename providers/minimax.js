@@ -98,7 +98,7 @@ function createMinimaxProvider({
     });
   }
 
-  async function t2a({ requestId, text, voice, audio, timeoutMs }) {
+  async function t2a({ requestId, text, voice, audio, languageBoost, voiceModify, outputFormat, timeoutMs }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -110,6 +110,7 @@ function createMinimaxProvider({
       const body = {
         model,
         text,
+        stream: false,
         voice_setting: {
           voice_id: voice?.voiceId,
           speed: voice?.speed,
@@ -119,8 +120,16 @@ function createMinimaxProvider({
         audio_setting: {
           sample_rate: audio?.sampleRate,
           bitrate: audio?.bitrate,
-          format: audio?.format || t2aFormat
-        }
+          format: audio?.format || t2aFormat,
+          channel: audio?.channel
+        },
+        language_boost: languageBoost,
+        voice_modify: {
+          pitch: voiceModify?.pitch,
+          intensity: voiceModify?.intensity,
+          timbre: voiceModify?.timbre
+        },
+        output_format: outputFormat || 'hex'
       };
 
       debugLog?.({
