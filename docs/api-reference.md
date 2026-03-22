@@ -191,6 +191,9 @@ curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
 {"response":"","done":true,"done_reason":"stop","usage":{"total_tokens":42}}
 ```
 
+Stream chunks may carry text in either `response` (canonical) or `result` (compatibility) fields.
+Clients should accept both and append whichever field is present.
+
 ### Warming/startup responses
 
 `202 Accepted` + `Retry-After`
