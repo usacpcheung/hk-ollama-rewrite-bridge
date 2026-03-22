@@ -726,6 +726,10 @@
             if (streamResult.errorMessage) {
               throw new Error(streamResult.errorMessage);
             }
+
+            if (!streamResult.receivedAnyContent) {
+              throw new Error("Rewrite returned no content.");
+            }
           } else {
             const data = await res.json();
             if (!data || data.ok !== true || typeof data.result !== "string") {
@@ -813,7 +817,26 @@
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    let fullText = "";
     let errorMessage = "";
+    let receivedAnyContent = false;
+    let parseError = "";
+
+    const handlePayload = (payload) => {
+      if (typeof payload.response === "string" && payload.response.length > 0) {
+        receivedAnyContent = true;
+        onChunk(payload.response);
+      }
+
+      if (typeof payload.result === "string" && payload.result.length > 0) {
+        receivedAnyContent = true;
+        onChunk(payload.result);
+      }
+
+      if (payload.error && typeof payload.error.message === "string" && payload.error.message.length > 0) {
+        errorMessage = payload.error.message;
+      }
+    };
 
     const handleLine = (line) => {
       const trimmed = line.trim();
@@ -823,23 +846,20 @@
       try {
         payload = JSON.parse(trimmed);
       } catch {
+        parseError = "Streaming response was not valid NDJSON.";
         return;
       }
 
-      if (typeof payload.response === "string" && payload.response.length > 0) {
-        onChunk(payload.response);
-      }
-
-      if (payload.error && typeof payload.error.message === "string" && payload.error.message.length > 0) {
-        errorMessage = payload.error.message;
-      }
+      handlePayload(payload);
     };
 
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      const decoded = decoder.decode(value, { stream: true });
+      fullText += decoded;
+      buffer += decoded;
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || "";
       for (const line of lines) {
@@ -847,12 +867,24 @@
       }
     }
 
-    buffer += decoder.decode();
+    const trailing = decoder.decode();
+    fullText += trailing;
+    buffer += trailing;
+
     if (buffer.trim()) {
-      handleLine(buffer);
+      const trimmedBuffer = buffer.trim();
+      try {
+        handlePayload(JSON.parse(trimmedBuffer));
+      } catch {
+        parseError = "Streaming response was truncated or malformed.";
+      }
     }
 
-    return { errorMessage };
+    if (!receivedAnyContent && !errorMessage && !parseError && fullText.trim()) {
+      parseError = "Streaming response contained no rewrite content.";
+    }
+
+    return { errorMessage: errorMessage || parseError, receivedAnyContent };
   }
 
   global.RewriteWidget = { mount };
