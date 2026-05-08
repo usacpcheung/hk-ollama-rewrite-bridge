@@ -1,5 +1,6 @@
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
+const { createProviderLifecycle } = require('./lifecycle');
 
 
 function ensureServiceHandlers(provider) {
@@ -75,4 +76,4 @@ function createProvider({
   throw new Error(`Unsupported provider: ${provider}`);
 }
 
-module.exports = { createProvider, PROVIDER_CAPABILITIES };
+module.exports = { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES };

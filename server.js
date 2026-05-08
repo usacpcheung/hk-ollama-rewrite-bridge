@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
+const { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRuntimes } = require('./lib/service-runtime');
 const { createServiceRegistry } = require('./services');
@@ -241,6 +241,7 @@ const serviceRuntimes = createServiceRuntimes({
   serviceRegistry,
   createProvider,
   createProviderAdapter,
+  createLifecycle: createProviderLifecycle,
   createProviderOptions: () => ({
     ollamaUrl: OLLAMA_URL,
     ollamaPsUrl: OLLAMA_PS_URL,
@@ -249,6 +250,14 @@ const serviceRuntimes = createServiceRuntimes({
     minimaxSystemPrompt: rewriteServiceDefinition?.prompts?.minimaxSystemPrompt,
     minimaxUserTemplate: rewriteServiceDefinition?.prompts?.minimaxUserTemplate,
     debugLog
+  }),
+  createLifecycleOptions: () => ({
+    minimaxApiKey: MINIMAX_API_KEY,
+    minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
+    minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
+    minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
+    minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
+    warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS
   })
 });
 const rewriteRuntime = serviceRuntimes.get('rewrite');
@@ -257,6 +266,7 @@ const rewriteService = rewriteRuntime.service;
 const t2aService = t2aRuntime.service;
 const rewriteProviderAdapter = rewriteRuntime.adapter;
 const t2aProviderAdapter = t2aRuntime.adapter;
+const rewriteLifecycle = rewriteRuntime.lifecycle;
 
 const admissionController = createAdmissionController({
   globalLimits: rewriteService.provider.admission?.global || {},
@@ -268,17 +278,9 @@ let lastProbeAtMs = 0;
 let lastProbeReady = null;
 let lastWarmAt = null;
 let lastError = null;
-let lastWarmupTriggerAtMs = 0;
-let warmupInFlight = false;
-let lastWarmupResult = null;
-let lastWarmupError = null;
 let serviceState = 'starting';
 let startupWarmupAttempts = 0;
 let startupWarmupDeadlineAtMs = null;
-let lastRewriteSuccessAtMs = 0;
-let lastRewriteFailureAtMs = 0;
-let consecutiveRewriteFailures = 0;
-let lastMinimaxRecoveryAttemptAtMs = 0;
 
 
 app.use(express.json({ limit: '16kb' }));
@@ -328,6 +330,10 @@ async function executeWithAdmission({ providerName, requestId, execute }) {
   }
 }
 
+function getRewriteLifecycleDiagnostics() {
+  return rewriteLifecycle?.getDiagnostics?.() || {};
+}
+
 const logRewriteRequest = ({
   req,
   requestId,
@@ -344,6 +350,7 @@ const logRewriteRequest = ({
 }) => {
   const elapsedMs = Date.now() - startedAt;
   const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
+  const lifecycleDiagnostics = getRewriteLifecycleDiagnostics();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const limiterKey = req.clientIdentity?.limiterKey || `ip:${ip}`;
   const limiterSource = req.clientIdentity?.source || 'ip';
@@ -366,10 +373,10 @@ const logRewriteRequest = ({
       probeError,
       warmupTriggeredNow,
       minimaxRecoveryAttempt,
-      warmupInFlight,
-      lastWarmupResult,
-      lastWarmupError,
-      lastWarmupTriggerAtMs,
+      warmupInFlight: lifecycleDiagnostics.warmupInFlight || false,
+      lastWarmupResult: lifecycleDiagnostics.lastWarmupResult || null,
+      lastWarmupError: lifecycleDiagnostics.lastWarmupError || null,
+      lastWarmupTriggerAtMs: lifecycleDiagnostics.lastWarmupTriggerAtMs || 0,
       auth
     })
   );
@@ -433,65 +440,29 @@ function applyProbeState(probeReady, { demoteReadyOnUnknown = false } = {}) {
   }
 }
 
-function warmupWithinColdWindow(nowMs) {
-  return lastWarmupTriggerAtMs > 0 && nowMs - lastWarmupTriggerAtMs < WARMUP_RETRIGGER_WINDOW_MS;
-}
-
 async function probeModelReady() {
-  const timeoutMs = rewriteService.provider.selected === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
-  return rewriteProviderAdapter.checkReadiness({ timeoutMs });
-}
-
-function getMinimaxPassiveReadiness(nowMs = Date.now()) {
-  if (!MINIMAX_API_KEY) {
-    return { ready: false, reason: 'MINIMAX_API_KEY_MISSING' };
-  }
-
-  const lastActivityAtMs = Math.max(lastRewriteSuccessAtMs, lastRewriteFailureAtMs, 0);
-  const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
-  const failuresAreStale =
-    lastRewriteFailureAtMs === 0 || nowMs - lastRewriteFailureAtMs > MINIMAX_PASSIVE_READY_GRACE_MS;
-
-  if (consecutiveRewriteFailures >= MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD) {
-    if (MINIMAX_FAIL_OPEN_ON_IDLE && (failuresAreStale || (idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS))) {
-      return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
-    }
-
-    return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
-  }
-
-  if (MINIMAX_FAIL_OPEN_ON_IDLE && idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS) {
-    return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
-  }
-
-  return {
-    ready: true,
-    reason: null
-  };
+  const timeoutMs = rewriteLifecycle.mode === 'passive_remote' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  return rewriteLifecycle.checkReadiness({ timeoutMs, nowMs: Date.now() });
 }
 
 async function triggerWarmupIfNeeded(nowMs) {
-  if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
-    return false;
-  }
+  const warmupResult = await rewriteLifecycle.maybeWarmup({
+    nowMs,
+    timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS
+  });
+  return warmupResult.triggered === true;
+}
 
-  warmupInFlight = true;
-  lastWarmupTriggerAtMs = nowMs;
+function getRewritePassiveReadiness(nowMs = Date.now()) {
+  return rewriteLifecycle.getPassiveReadiness?.(nowMs) || null;
+}
 
-  try {
-    const warmupResult = await rewriteProviderAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
-    if (!warmupResult.ok) {
-      lastWarmupResult = 'failed';
-      lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
-      return true;
-    }
-
-    lastWarmupResult = 'success';
-    lastWarmupError = null;
-    return true;
-  } finally {
-    warmupInFlight = false;
-  }
+function getWarmupLogFields() {
+  const diagnostics = getRewriteLifecycleDiagnostics();
+  return {
+    lastWarmupResult: diagnostics.lastWarmupResult || null,
+    lastWarmupError: diagnostics.lastWarmupError || null
+  };
 }
 
 async function delay(ms) {
@@ -502,22 +473,22 @@ async function runStartupWarmupLoop() {
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
 
-  if (rewriteService.provider.selected === 'minimax') {
+  if (rewriteLifecycle.mode === 'passive_remote') {
     startupWarmupAttempts += 1;
-    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(Date.now());
+    const passiveReadiness = getRewritePassiveReadiness(Date.now());
 
-    if (minimaxPassiveReadiness.ready) {
+    if (passiveReadiness.ready) {
       promoteServiceReady();
       console.log(
         JSON.stringify({
           level: 'info',
           msg: 'Startup passive readiness evaluated',
-          provider: 'minimax',
+          provider: rewriteLifecycle.providerName,
           serviceState,
           startupWarmupAttempts,
           startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
           passiveReady: true,
-          passiveReason: minimaxPassiveReadiness.reason
+          passiveReason: passiveReadiness.reason
         })
       );
       return;
@@ -529,12 +500,12 @@ async function runStartupWarmupLoop() {
       JSON.stringify({
         level: 'warn',
         msg: 'Startup passive readiness evaluated',
-        provider: 'minimax',
+        provider: rewriteLifecycle.providerName,
         serviceState,
         startupWarmupAttempts,
         startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
         passiveReady: false,
-        passiveReason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY'
+        passiveReason: passiveReadiness.reason || 'MINIMAX_NOT_READY'
       })
     );
     return;
@@ -545,6 +516,7 @@ async function runStartupWarmupLoop() {
     const attemptStartedAtMs = Date.now();
     const triggered = await triggerWarmupIfNeeded(attemptStartedAtMs);
     const probeResult = await probeModelReady();
+    const warmupLogFields = getWarmupLogFields();
 
     lastProbeAtMs = Date.now();
     if (probeResult.ready !== null) {
@@ -563,8 +535,7 @@ async function runStartupWarmupLoop() {
           warmupTriggered: triggered,
           probeReady: probeResult.ready,
           probeError: probeResult.error,
-          lastWarmupResult,
-          lastWarmupError
+          ...warmupLogFields
         })
       );
       return;
@@ -584,8 +555,7 @@ async function runStartupWarmupLoop() {
         warmupTriggered: triggered,
         probeReady: probeResult.ready,
         probeError: probeResult.error,
-        lastWarmupResult,
-        lastWarmupError
+        ...warmupLogFields
       })
     );
 
@@ -593,6 +563,7 @@ async function runStartupWarmupLoop() {
   }
 
   serviceState = 'degraded';
+  const warmupLogFields = getWarmupLogFields();
   console.warn(
     JSON.stringify({
       level: 'warn',
@@ -602,8 +573,7 @@ async function runStartupWarmupLoop() {
       startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
         ? new Date(startupWarmupDeadlineAtMs).toISOString()
         : null,
-      lastWarmupResult,
-      lastWarmupError,
+      ...warmupLogFields,
       lastProbeReady
     })
   );
@@ -612,10 +582,10 @@ async function runStartupWarmupLoop() {
 app.get('/model-status', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = rewriteService.provider.selected === 'minimax';
-  const minimaxPassiveReadiness = isMinimax ? getMinimaxPassiveReadiness(nowMs) : null;
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
+  const minimaxPassiveReadiness = usesPassiveReadiness ? getRewritePassiveReadiness(nowMs) : null;
 
-  if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+  if (!usesPassiveReadiness && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
@@ -624,7 +594,7 @@ app.get('/model-status', async (_req, res) => {
     }
   }
 
-  if (isMinimax) {
+  if (usesPassiveReadiness) {
     if (minimaxPassiveReadiness.ready) {
       promoteServiceReady();
     } else {
@@ -635,6 +605,9 @@ app.get('/model-status', async (_req, res) => {
     applyProbeState(probeReady);
   }
 
+  const lifecycleDiagnostics = getRewriteLifecycleDiagnostics();
+  const lastWarmupTriggerAtMs = lifecycleDiagnostics.lastWarmupTriggerAtMs || 0;
+  const lastRecoveryAttemptAtMs = lifecycleDiagnostics.lastRecoveryAttemptAtMs || 0;
   let status = 'warming';
   if (serviceState === 'degraded') {
     status = 'degraded';
@@ -655,24 +628,24 @@ app.get('/model-status', async (_req, res) => {
       : null,
     lastWarmAt,
     lastError,
-    warmupInFlight,
+    warmupInFlight: lifecycleDiagnostics.warmupInFlight || false,
     lastWarmupTriggerAt: lastWarmupTriggerAtMs ? new Date(lastWarmupTriggerAtMs).toISOString() : null,
-    lastWarmupResult,
-    lastWarmupError,
+    lastWarmupResult: lifecycleDiagnostics.lastWarmupResult || null,
+    lastWarmupError: lifecycleDiagnostics.lastWarmupError || null,
     lastProbeReady,
     probeAgeMs: lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null,
-    minimaxPassiveReadiness: isMinimax
+    minimaxPassiveReadiness: usesPassiveReadiness
       ? {
           ...minimaxPassiveReadiness,
-          lastRewriteSuccessAt: lastRewriteSuccessAtMs
-            ? new Date(lastRewriteSuccessAtMs).toISOString()
+          lastRewriteSuccessAt: lifecycleDiagnostics.lastSuccessAtMs
+            ? new Date(lifecycleDiagnostics.lastSuccessAtMs).toISOString()
             : null,
-          lastRewriteFailureAt: lastRewriteFailureAtMs
-            ? new Date(lastRewriteFailureAtMs).toISOString()
+          lastRewriteFailureAt: lifecycleDiagnostics.lastFailureAtMs
+            ? new Date(lifecycleDiagnostics.lastFailureAtMs).toISOString()
             : null,
-          consecutiveRewriteFailures,
-          lastRecoveryAttemptAt: lastMinimaxRecoveryAttemptAtMs
-            ? new Date(lastMinimaxRecoveryAttemptAtMs).toISOString()
+          consecutiveRewriteFailures: lifecycleDiagnostics.consecutiveFailures || 0,
+          lastRecoveryAttemptAt: lastRecoveryAttemptAtMs
+            ? new Date(lastRecoveryAttemptAtMs).toISOString()
             : null,
           recoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
           passiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
@@ -690,11 +663,11 @@ app.get('/healthz', opsLimiter, (_req, res) => {
 app.get('/readyz', opsLimiter, async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = rewriteService.provider.selected === 'minimax';
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
 
-  if (isMinimax) {
-    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
-    if (minimaxPassiveReadiness.ready) {
+  if (usesPassiveReadiness) {
+    const passiveReadiness = getRewritePassiveReadiness(nowMs);
+    if (passiveReadiness.ready) {
       promoteServiceReady();
       return writeJsonSuccess(res, { serviceState, reason: null });
     }
@@ -703,7 +676,7 @@ app.get('/readyz', opsLimiter, async (_req, res) => {
     serviceState = 'degraded';
     return res
       .status(503)
-      .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
+      .json({ ok: false, serviceState, reason: passiveReadiness.reason || 'MINIMAX_NOT_READY' });
   }
 
   if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
@@ -756,6 +729,7 @@ app.post(
   let minimaxRecoveryAttempt = false;
   let minimaxPassiveReason = null;
   const isMinimax = rewriteService.provider.selected === 'minimax';
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
 
   try {
     email = req.auth?.email || null;
@@ -785,7 +759,7 @@ app.post(
       serviceState === 'ready' &&
       (probeReady === null || probeAgeMs > READY_REWRITE_STRICT_PROBE_MAX_AGE_MS);
 
-    if (!isMinimax && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
+    if (!usesPassiveReadiness && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
       const probeResult = await probeModelReady();
       lastProbeAtMs = Date.now();
       probeReady = probeResult.ready;
@@ -795,25 +769,21 @@ app.post(
       }
     }
 
-    if (isMinimax) {
-      const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
-      probeReady = minimaxPassiveReadiness.ready;
-      minimaxPassiveReason = minimaxPassiveReadiness.reason;
+    if (usesPassiveReadiness) {
+      const passiveReadiness = getRewritePassiveReadiness(nowMs);
+      probeReady = passiveReadiness.ready;
+      minimaxPassiveReason = passiveReadiness.reason;
       probeError = minimaxPassiveReason;
-      if (minimaxPassiveReadiness.ready) {
+      if (passiveReadiness.ready) {
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
         serviceState = 'degraded';
 
-        if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
-          const cooldownRemainingMs =
-            lastMinimaxRecoveryAttemptAtMs > 0
-              ? MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS - (nowMs - lastMinimaxRecoveryAttemptAtMs)
-              : 0;
-
-          if (cooldownRemainingMs > 0) {
-            const retryAfterSec = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
+        if (passiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
+          const recoveryAttempt = rewriteLifecycle.beginRecoveryAttempt({ nowMs });
+          if (!recoveryAttempt.allowed) {
+            const retryAfterSec = recoveryAttempt.retryAfterSec;
             res.set('Retry-After', String(retryAfterSec));
             return errorResponse(
               res,
@@ -825,7 +795,6 @@ app.post(
           }
 
           minimaxRecoveryAttempt = true;
-          lastMinimaxRecoveryAttemptAtMs = nowMs;
         }
       }
     } else {
@@ -990,8 +959,7 @@ app.post(
       }
 
       if (!rewriteResult.ok) {
-        lastRewriteFailureAtMs = Date.now();
-        consecutiveRewriteFailures += 1;
+        rewriteLifecycle.recordFailure({ nowMs: Date.now() });
         const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
         setLastError(mappedError.code, mappedError.message);
         streamWriter.writeError({
@@ -1003,8 +971,7 @@ app.post(
       }
 
       modelPhase = 'ready';
-      lastRewriteSuccessAtMs = Date.now();
-      consecutiveRewriteFailures = 0;
+      rewriteLifecycle.recordSuccess({ nowMs: Date.now() });
       lastWarmAt = new Date().toISOString();
       lastError = null;
 
@@ -1053,8 +1020,7 @@ app.post(
       throw error;
     }
     if (!rewriteResult.ok) {
-      lastRewriteFailureAtMs = Date.now();
-      consecutiveRewriteFailures += 1;
+      rewriteLifecycle.recordFailure({ nowMs: Date.now() });
       const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
@@ -1074,8 +1040,7 @@ app.post(
     }
 
     modelPhase = 'ready';
-    lastRewriteSuccessAtMs = Date.now();
-    consecutiveRewriteFailures = 0;
+    rewriteLifecycle.recordSuccess({ nowMs: Date.now() });
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
