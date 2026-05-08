@@ -2,6 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
+const { createServiceRuntimes } = require('./lib/service-runtime');
 const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
@@ -229,38 +230,38 @@ const serviceRegistry = createServiceRegistry({
     parseRawMilliseconds(rawValue, fallback, bounds, envName),
   providerCapabilities: PROVIDER_CAPABILITIES
 });
-const rewriteService = serviceRegistry.get('rewrite');
-const t2aService = serviceRegistry.get('t2a');
-const runtimeServices = {
-  rewrite: rewriteService,
-  t2a: t2aService
-};
+const rewriteServiceDefinition = serviceRegistry.get('rewrite');
 
 const debugLog = createDebugLogger({
   enabled: REWRITE_DEBUG_RAW_OUTPUT,
-  defaultProvider: rewriteService.provider.selected
+  defaultProvider: rewriteServiceDefinition.provider.selected
 });
 
-function createRuntimeProvider(serviceConfig) {
-  return createProvider({
-    serviceConfig,
+const serviceRuntimes = createServiceRuntimes({
+  serviceRegistry,
+  createProvider,
+  createProviderAdapter,
+  createProviderOptions: () => ({
     ollamaUrl: OLLAMA_URL,
     ollamaPsUrl: OLLAMA_PS_URL,
     ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
     minimaxApiKey: MINIMAX_API_KEY,
-    minimaxSystemPrompt: rewriteService?.prompts?.minimaxSystemPrompt,
-    minimaxUserTemplate: rewriteService?.prompts?.minimaxUserTemplate,
+    minimaxSystemPrompt: rewriteServiceDefinition?.prompts?.minimaxSystemPrompt,
+    minimaxUserTemplate: rewriteServiceDefinition?.prompts?.minimaxUserTemplate,
     debugLog
-  });
-}
+  })
+});
+const rewriteRuntime = serviceRuntimes.get('rewrite');
+const t2aRuntime = serviceRuntimes.get('t2a');
+const rewriteService = rewriteRuntime.service;
+const t2aService = t2aRuntime.service;
+const rewriteProviderAdapter = rewriteRuntime.adapter;
+const t2aProviderAdapter = t2aRuntime.adapter;
 
 const admissionController = createAdmissionController({
   globalLimits: rewriteService.provider.admission?.global || {},
   providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
 });
-
-const rewriteProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.rewrite));
-const t2aProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.t2a));
 
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
