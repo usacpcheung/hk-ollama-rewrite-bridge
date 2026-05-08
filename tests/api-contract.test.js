@@ -157,7 +157,15 @@ test('rewrite and t2a preserve current public HTTP response contracts', async (t
   assert.equal(rewriteBody.result, '正式中文結果');
   assert.deepEqual(rewriteBody.usage, { total_tokens: 6 });
 
-  const rewriteStreamResponse = await postJson('/rewrite', {
+  const apiRewriteResponse = await postJson('/api/rewrite', { text: '我今日想請假。' }, authHeaders);
+  const apiRewriteBody = await apiRewriteResponse.json();
+  assert.equal(apiRewriteResponse.status, 200);
+  assert.deepEqual(Object.keys(apiRewriteBody).sort(), ['ok', 'result', 'usage']);
+  assert.equal(apiRewriteBody.ok, true);
+  assert.equal(apiRewriteBody.result, '正式中文結果');
+  assert.deepEqual(apiRewriteBody.usage, { total_tokens: 6 });
+
+  const rewriteStreamResponse = await postJson('/api/rewrite', {
     text: '我今日想請假。',
     stream: true
   }, authHeaders);
