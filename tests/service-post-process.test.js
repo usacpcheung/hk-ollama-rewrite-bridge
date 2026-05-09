@@ -49,3 +49,15 @@ test('service registry injects identity postProcessOutput for services without a
   assert.equal(typeof service.postProcessOutput, 'function');
   assert.equal(processed.usage.total_tokens, 10);
 });
+
+test('service registry list includes both rewrite and t2a services', () => {
+  const registry = createServiceRegistry({
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: {}
+  });
+
+  const serviceIds = registry.list().map((service) => service.id);
+
+  assert.deepEqual(serviceIds, ['rewrite', 't2a']);
+});

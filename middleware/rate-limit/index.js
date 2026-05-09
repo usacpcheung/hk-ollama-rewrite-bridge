@@ -30,6 +30,16 @@ function buildRateLimitPolicyFromEnv() {
         maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_REWRITE_IP_MAX_REQUESTS', 20, { max: 100000 })
       }
     },
+    t2a: {
+      auth: {
+        windowSec: parsePositiveIntegerEnv('RATE_LIMIT_T2A_AUTH_WINDOW_SEC', 60, { max: 3600 }),
+        maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_T2A_AUTH_MAX_REQUESTS', 30, { max: 100000 })
+      },
+      ip: {
+        windowSec: parsePositiveIntegerEnv('RATE_LIMIT_T2A_IP_WINDOW_SEC', 60, { max: 3600 }),
+        maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_T2A_IP_MAX_REQUESTS', 10, { max: 100000 })
+      }
+    },
     ops: {
       windowSec: parsePositiveIntegerEnv('RATE_LIMIT_OPS_WINDOW_SEC', 60, { max: 3600 }),
       maxRequests: parsePositiveIntegerEnv('RATE_LIMIT_OPS_MAX_REQUESTS', 1000, { max: 100000 })
@@ -99,14 +109,41 @@ function writeRateLimitExceeded(res, { retryAfterSec, policyScope, principalType
   });
 }
 
-function createFixedWindowRateLimiter({ policyScope, getPolicy, resolvePrincipal = resolveRateLimitPrincipal }) {
+function createFixedWindowRateLimiter({
+  policyScope,
+  getPolicy,
+  resolvePrincipal = resolveRateLimitPrincipal,
+  cleanupIntervalMs = 60 * 1000,
+  now = () => Date.now(),
+  includeDiagnostics = false
+}) {
   const counters = new Map();
+  let nextCleanupAtMs = 0;
 
-  return function fixedWindowRateLimiter(req, res, next) {
+  function sweepExpiredCounters(nowMs) {
+    for (const [key, counter] of counters.entries()) {
+      if (counter.resetAtMs <= nowMs) {
+        counters.delete(key);
+      }
+    }
+    nextCleanupAtMs = nowMs + cleanupIntervalMs;
+  }
+
+  function maybeSweepExpiredCounters(nowMs) {
+    if (nowMs < nextCleanupAtMs) {
+      return;
+    }
+
+    sweepExpiredCounters(nowMs);
+  }
+
+  function fixedWindowRateLimiter(req, res, next) {
+    const nowMs = now();
+    maybeSweepExpiredCounters(nowMs);
+
     const principal = resolvePrincipal(req);
     const selectedPolicy = getPolicy(principal, req);
     const windowMs = selectedPolicy.windowSec * 1000;
-    const nowMs = Date.now();
     const counterKey = `${policyScope}:${principal.key}`;
 
     const existing = counters.get(counterKey);
@@ -131,7 +168,16 @@ function createFixedWindowRateLimiter({ policyScope, getPolicy, resolvePrincipal
 
     existing.count += 1;
     return next();
-  };
+  }
+
+  if (includeDiagnostics) {
+    fixedWindowRateLimiter.inspect = () => ({
+      liveBucketCount: counters.size,
+      hasBucket: (principalKey) => counters.has(`${policyScope}:${principalKey}`)
+    });
+  }
+
+  return fixedWindowRateLimiter;
 }
 
 function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
@@ -145,6 +191,11 @@ function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
     getPolicy: (principal) => (principal.principalType === 'user' ? policy.rewrite.auth : policy.rewrite.ip)
   });
 
+  const t2aLimiter = createFixedWindowRateLimiter({
+    policyScope: 't2a',
+    getPolicy: (principal) => (principal.principalType === 'user' ? policy.t2a.auth : policy.t2a.ip)
+  });
+
   const opsLimiter = createFixedWindowRateLimiter({
     policyScope: 'ops',
     getPolicy: () => policy.ops
@@ -154,6 +205,7 @@ function createRateLimitMiddlewares(policy = buildRateLimitPolicyFromEnv()) {
     policy,
     globalLimiter,
     rewriteLimiter,
+    t2aLimiter,
     opsLimiter
   };
 }

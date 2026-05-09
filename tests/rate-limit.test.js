@@ -5,7 +5,8 @@ const {
   parsePositiveIntegerEnv,
   buildRateLimitPolicyFromEnv,
   resolveRateLimitPrincipal,
-  createFixedWindowRateLimiter
+  createFixedWindowRateLimiter,
+  createRateLimitMiddlewares
 } = require('../middleware/rate-limit');
 
 function withEnv(env, fn) {
@@ -30,6 +31,20 @@ function withEnv(env, fn) {
       }
     }
   }
+}
+
+
+function createNowStub(startMs = 0) {
+  let currentMs = startMs;
+  return {
+    now: () => currentMs,
+    set(value) {
+      currentMs = value;
+    },
+    advance(deltaMs) {
+      currentMs += deltaMs;
+    }
+  };
 }
 
 function createRes() {
@@ -72,6 +87,73 @@ test('buildRateLimitPolicyFromEnv resolves defaults and overrides', () => {
   assert.equal(policy.rewrite.auth.maxRequests, 15);
   assert.equal(policy.rewrite.ip.maxRequests, 5);
   assert.equal(policy.ops.maxRequests, 1000);
+});
+
+
+test('buildRateLimitPolicyFromEnv keeps rewrite defaults unchanged and adds conservative t2a defaults', () => {
+  const policy = withEnv(
+    {
+      RATE_LIMIT_GLOBAL_WINDOW_SEC: null,
+      RATE_LIMIT_GLOBAL_MAX_REQUESTS: null,
+      RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC: null,
+      RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS: null,
+      RATE_LIMIT_REWRITE_IP_WINDOW_SEC: null,
+      RATE_LIMIT_REWRITE_IP_MAX_REQUESTS: null,
+      RATE_LIMIT_T2A_AUTH_WINDOW_SEC: null,
+      RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: null,
+      RATE_LIMIT_T2A_IP_WINDOW_SEC: null,
+      RATE_LIMIT_T2A_IP_MAX_REQUESTS: null,
+      RATE_LIMIT_OPS_WINDOW_SEC: null,
+      RATE_LIMIT_OPS_MAX_REQUESTS: null
+    },
+    () => buildRateLimitPolicyFromEnv()
+  );
+
+  assert.deepEqual(policy.rewrite, {
+    auth: { windowSec: 60, maxRequests: 60 },
+    ip: { windowSec: 60, maxRequests: 20 }
+  });
+  assert.deepEqual(policy.t2a, {
+    auth: { windowSec: 60, maxRequests: 30 },
+    ip: { windowSec: 60, maxRequests: 10 }
+  });
+});
+
+test('buildRateLimitPolicyFromEnv resolves t2a values from dedicated env keys only', () => {
+  const policy = withEnv(
+    {
+      RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC: '90',
+      RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS: '19',
+      RATE_LIMIT_REWRITE_IP_WINDOW_SEC: '75',
+      RATE_LIMIT_REWRITE_IP_MAX_REQUESTS: '7',
+      RATE_LIMIT_T2A_AUTH_WINDOW_SEC: '45',
+      RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: '9',
+      RATE_LIMIT_T2A_IP_WINDOW_SEC: '30',
+      RATE_LIMIT_T2A_IP_MAX_REQUESTS: '3'
+    },
+    () => buildRateLimitPolicyFromEnv()
+  );
+
+  assert.deepEqual(policy.rewrite, {
+    auth: { windowSec: 90, maxRequests: 19 },
+    ip: { windowSec: 75, maxRequests: 7 }
+  });
+  assert.deepEqual(policy.t2a, {
+    auth: { windowSec: 45, maxRequests: 9 },
+    ip: { windowSec: 30, maxRequests: 3 }
+  });
+});
+
+test('invalid t2a env values fail with the same parsing contract', () => {
+  assert.throws(
+    () => withEnv({ RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: 'nope' }, () => buildRateLimitPolicyFromEnv()),
+    /Invalid RATE_LIMIT_T2A_AUTH_MAX_REQUESTS/
+  );
+
+  assert.throws(
+    () => withEnv({ RATE_LIMIT_T2A_IP_WINDOW_SEC: '0' }, () => buildRateLimitPolicyFromEnv()),
+    /Invalid RATE_LIMIT_T2A_IP_WINDOW_SEC/
+  );
 });
 
 test('resolveRateLimitPrincipal prefers trusted identity and falls back to ip', () => {
@@ -146,4 +228,155 @@ test('fixed window limiter returns stable 429 contract with retry headers', () =
   assert.equal(secondRes.body.error.reason, 'RATE_LIMIT_EXCEEDED');
   assert.equal(secondRes.body.limit.scope, 'rewrite');
   assert.equal(secondRes.body.limit.principalType, 'user');
+});
+
+
+test('createRateLimitMiddlewares keeps rewrite and t2a limiter buckets isolated', () => {
+  const { rewriteLimiter, t2aLimiter } = createRateLimitMiddlewares({
+    global: { windowSec: 60, maxRequests: 999 },
+    rewrite: {
+      auth: { windowSec: 60, maxRequests: 1 },
+      ip: { windowSec: 60, maxRequests: 1 }
+    },
+    t2a: {
+      auth: { windowSec: 60, maxRequests: 2 },
+      ip: { windowSec: 60, maxRequests: 2 }
+    },
+    ops: { windowSec: 60, maxRequests: 999 }
+  });
+
+  const req = {
+    clientIdentity: {
+      source: 'oidc',
+      value: 'tester@hs.edu.hk',
+      limiterKey: 'user:tester@hs.edu.hk'
+    }
+  };
+
+  const firstRewriteRes = createRes();
+  let firstRewriteNext = false;
+  rewriteLimiter(req, firstRewriteRes, () => {
+    firstRewriteNext = true;
+  });
+  assert.equal(firstRewriteNext, true);
+
+  const secondRewriteRes = createRes();
+  rewriteLimiter(req, secondRewriteRes, () => {});
+  assert.equal(secondRewriteRes.statusCode, 429);
+  assert.equal(secondRewriteRes.body.limit.scope, 'rewrite');
+
+  const firstT2aRes = createRes();
+  let firstT2aNext = false;
+  t2aLimiter(req, firstT2aRes, () => {
+    firstT2aNext = true;
+  });
+  assert.equal(firstT2aNext, true);
+
+  const secondT2aRes = createRes();
+  let secondT2aNext = false;
+  t2aLimiter(req, secondT2aRes, () => {
+    secondT2aNext = true;
+  });
+  assert.equal(secondT2aNext, true);
+
+  const thirdT2aRes = createRes();
+  t2aLimiter(req, thirdT2aRes, () => {});
+  assert.equal(thirdT2aRes.statusCode, 429);
+  assert.equal(thirdT2aRes.body.limit.scope, 't2a');
+});
+
+
+test('fixed window limiter keeps a single live bucket when an expired principal revisits', () => {
+  const clock = createNowStub();
+  const limiter = createFixedWindowRateLimiter({
+    policyScope: 'rewrite',
+    getPolicy: () => ({ windowSec: 1, maxRequests: 2 }),
+    resolvePrincipal: () => ({ key: 'user:revisit@hs.edu.hk', principalType: 'user' }),
+    cleanupIntervalMs: 1,
+    now: clock.now,
+    includeDiagnostics: true
+  });
+
+  limiter({}, createRes(), () => {});
+  assert.equal(limiter.inspect().liveBucketCount, 1);
+
+  clock.advance(1001);
+  limiter({}, createRes(), () => {});
+
+  const diagnostics = limiter.inspect();
+  assert.equal(diagnostics.liveBucketCount, 1);
+  assert.equal(diagnostics.hasBucket('user:revisit@hs.edu.hk'), true);
+});
+
+test('fixed window limiter eventually removes expired buckets for abandoned principals', () => {
+  const clock = createNowStub();
+  let principalCounter = 0;
+  const limiter = createFixedWindowRateLimiter({
+    policyScope: 'rewrite',
+    getPolicy: () => ({ windowSec: 1, maxRequests: 3 }),
+    resolvePrincipal: () => ({ key: `user:principal-${++principalCounter}@hs.edu.hk`, principalType: 'user' }),
+    cleanupIntervalMs: 50,
+    now: clock.now,
+    includeDiagnostics: true
+  });
+
+  limiter({}, createRes(), () => {});
+  limiter({}, createRes(), () => {});
+  assert.equal(limiter.inspect().liveBucketCount, 2);
+
+  clock.advance(1100);
+  limiter({}, createRes(), () => {});
+
+  const diagnostics = limiter.inspect();
+  assert.equal(diagnostics.liveBucketCount, 1);
+  assert.equal(diagnostics.hasBucket('user:principal-1@hs.edu.hk'), false);
+  assert.equal(diagnostics.hasBucket('user:principal-2@hs.edu.hk'), false);
+  assert.equal(diagnostics.hasBucket('user:principal-3@hs.edu.hk'), true);
+});
+
+test('fixed window limiter preserves 429 payload, Retry-After, and scope metadata while sweeping expired buckets', () => {
+  const clock = createNowStub();
+  const principals = [
+    { key: 'user:abandoned@hs.edu.hk', principalType: 'user' },
+    { key: 'ip:198.51.100.8', principalType: 'ip' },
+    { key: 'ip:198.51.100.8', principalType: 'ip' }
+  ];
+  const limiter = createFixedWindowRateLimiter({
+    policyScope: 'rewrite',
+    getPolicy: (principal) => (principal.principalType === 'user'
+      ? { windowSec: 1, maxRequests: 5 }
+      : { windowSec: 5, maxRequests: 1 }),
+    resolvePrincipal: () => principals.shift(),
+    cleanupIntervalMs: 100,
+    now: clock.now,
+    includeDiagnostics: true
+  });
+
+  limiter({}, createRes(), () => {});
+  clock.advance(1100);
+
+  const firstIpRes = createRes();
+  let firstIpNextCalled = false;
+  limiter({}, firstIpRes, () => {
+    firstIpNextCalled = true;
+  });
+  assert.equal(firstIpNextCalled, true);
+  assert.equal(limiter.inspect().liveBucketCount, 1);
+
+  clock.advance(200);
+  const blockedRes = createRes();
+  let blockedNextCalled = false;
+  limiter({}, blockedRes, () => {
+    blockedNextCalled = true;
+  });
+
+  assert.equal(blockedNextCalled, false);
+  assert.equal(blockedRes.statusCode, 429);
+  assert.equal(blockedRes.headers['Retry-After'], '5');
+  assert.equal(blockedRes.body.error.code, 'RATE_LIMITED');
+  assert.equal(blockedRes.body.error.reason, 'RATE_LIMIT_EXCEEDED');
+  assert.equal(blockedRes.body.limit.scope, 'rewrite');
+  assert.equal(blockedRes.body.limit.principalType, 'ip');
+  assert.equal(blockedRes.body.limit.windowSec, 5);
+  assert.equal(blockedRes.body.limit.maxRequests, 1);
 });

@@ -1,5 +1,6 @@
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
+const { createProviderLifecycle } = require('./lifecycle');
 
 
 function ensureServiceHandlers(provider) {
@@ -26,6 +27,21 @@ const PROVIDER_CAPABILITIES = {
   }
 };
 
+function createUnsupportedProvider({ provider }) {
+  return {
+    name: provider,
+    services: {},
+    getInfo: () => ({ provider }),
+    mapError: (error) => ({
+      code: 'UNSUPPORTED_PROVIDER',
+      message: error?.message || `Unsupported provider: ${provider}`,
+      status: 501
+    }),
+    checkReadiness: async () => ({ ok: true }),
+    triggerWarmup: async () => ({ ok: true })
+  };
+}
+
 function createProvider({
   serviceConfig,
   ollamaUrl,
@@ -36,9 +52,18 @@ function createProvider({
   minimaxUserTemplate,
   debugLog
 }) {
+  const serviceId = serviceConfig?.id || 'rewrite';
   const provider = serviceConfig?.provider?.selected || 'ollama';
   const selectedRuntime = serviceConfig?.provider?.runtime || {};
-  const maxCompletionTokens = serviceConfig?.provider?.maxCompletionTokens;
+  const maxCompletionTokens = serviceId === 'rewrite'
+    ? serviceConfig?.provider?.maxCompletionTokens
+    : undefined;
+  const rewritePromptConfig = serviceId === 'rewrite'
+    ? {
+      minimaxSystemPrompt,
+      minimaxUserTemplate
+    }
+    : {};
 
   if (provider === 'ollama') {
     return ensureServiceHandlers(createOllamaProvider({
@@ -56,14 +81,18 @@ function createProvider({
       apiUrl: selectedRuntime.apiUrl,
       model: selectedRuntime.model,
       apiKey: minimaxApiKey,
-      systemPrompt: minimaxSystemPrompt,
-      userTemplate: minimaxUserTemplate,
+      systemPrompt: rewritePromptConfig.minimaxSystemPrompt,
+      userTemplate: rewritePromptConfig.minimaxUserTemplate,
       maxCompletionTokens,
       debugLog
     }));
   }
 
+  if (serviceId === 't2a') {
+    return ensureServiceHandlers(createUnsupportedProvider({ provider }));
+  }
+
   throw new Error(`Unsupported provider: ${provider}`);
 }
 
-module.exports = { createProvider, PROVIDER_CAPABILITIES };
+module.exports = { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES };

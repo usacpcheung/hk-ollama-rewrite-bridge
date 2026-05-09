@@ -101,6 +101,34 @@ test('legacy minimax api url works when preferred keys are absent', () => {
   assert.equal(config.sources.minimaxApiUrl.type, 'legacy');
 });
 
+test('rewrite config is unchanged when t2a env vars are present', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      T2A_MODEL: 'speech-02-hd',
+      T2A_MINIMAX_API_URL: 'https://preferred.example/v1/t2a',
+      T2A_VOICE_ID: 'female-tianmei',
+      T2A_SPEED: '1.5',
+      T2A_VOLUME: '4',
+      T2A_PITCH: '-2'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.provider, 'ollama');
+  assert.equal(config.maxCompletionTokens, 300);
+  assert.equal(config.maxTextLength, 200);
+  assert.equal(config.providers.ollama.generateUrl, 'http://127.0.0.1:11434/api/generate');
+  assert.equal(config.providers.ollama.psUrl, 'http://127.0.0.1:11434/api/ps');
+  assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
+  assert.equal(config.providers.minimax.model, 'M2-her');
+  assert.equal(config.sources.maxCompletionTokens.type, 'default');
+  assert.equal(config.sources.maxTextLength.type, 'default');
+  assert.equal(config.sources.minimaxApiUrl.type, 'default');
+  assert.equal(config.sources.minimaxModel.type, 'default');
+});
+
 
 test('preferred ollama urls override legacy keys', () => {
   const env = {
@@ -144,7 +172,8 @@ test('legacy ollama urls work when preferred keys are absent', () => {
 
 test('malformed preferred ready timeout falls back to legacy timeout', () => {
   const env = {
-    REWRITE_READY_TIMEOUT_MS: 'not-a-number',
+    REWRITE_READY_INVOKE_TIMEOUT_MS: 'not-a-number',
+    REWRITE_READY_TIMEOUT_MS: '45000',
     OLLAMA_TIMEOUT_MS: '45000'
   };
 
@@ -157,12 +186,13 @@ test('malformed preferred ready timeout falls back to legacy timeout', () => {
 
   assert.equal(config.timeouts.readyMs, 45000);
   assert.equal(config.sources.readyTimeoutMs.type, 'legacy');
-  assert.equal(config.sources.readyTimeoutMs.key, 'OLLAMA_TIMEOUT_MS');
+  assert.equal(config.sources.readyTimeoutMs.key, 'REWRITE_READY_TIMEOUT_MS');
 });
 
 test('malformed preferred cold timeout falls back to legacy timeout', () => {
   const env = {
-    REWRITE_COLD_TIMEOUT_MS: 'not-a-number',
+    REWRITE_COLD_INVOKE_TIMEOUT_MS: 'not-a-number',
+    REWRITE_COLD_TIMEOUT_MS: '180000',
     OLLAMA_COLD_TIMEOUT_MS: '180000'
   };
 
@@ -175,7 +205,30 @@ test('malformed preferred cold timeout falls back to legacy timeout', () => {
 
   assert.equal(config.timeouts.coldMs, 180000);
   assert.equal(config.sources.coldTimeoutMs.type, 'legacy');
-  assert.equal(config.sources.coldTimeoutMs.key, 'OLLAMA_COLD_TIMEOUT_MS');
+  assert.equal(config.sources.coldTimeoutMs.key, 'REWRITE_COLD_TIMEOUT_MS');
+});
+
+test('canonical rewrite invoke timeout keys win over deprecated aliases', () => {
+  const env = {
+    REWRITE_READY_INVOKE_TIMEOUT_MS: '60000',
+    REWRITE_READY_TIMEOUT_MS: '45000',
+    REWRITE_COLD_INVOKE_TIMEOUT_MS: '240000',
+    REWRITE_COLD_TIMEOUT_MS: '120000'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.timeouts.readyMs, 60000);
+  assert.equal(config.sources.readyTimeoutMs.type, 'preferred');
+  assert.equal(config.sources.readyTimeoutMs.key, 'REWRITE_READY_INVOKE_TIMEOUT_MS');
+  assert.equal(config.timeouts.coldMs, 240000);
+  assert.equal(config.sources.coldTimeoutMs.type, 'preferred');
+  assert.equal(config.sources.coldTimeoutMs.key, 'REWRITE_COLD_INVOKE_TIMEOUT_MS');
 });
 
 test('malformed bounded integer key falls back to default with default source metadata', () => {

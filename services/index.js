@@ -1,4 +1,5 @@
 const { createRewriteServiceDefinition } = require('./rewrite');
+const { createT2AServiceDefinition } = require('./t2a');
 
 function createServiceRegistry({
   parseEnvBoundedInteger,
@@ -10,8 +11,13 @@ function createServiceRegistry({
     parseEnvMilliseconds,
     providerCapabilities
   });
+  const t2aService = createT2AServiceDefinition({
+    parseEnvBoundedInteger,
+    parseEnvMilliseconds,
+    providerCapabilities
+  });
 
-  const services = [rewriteService].map((service) => ({
+  const services = [rewriteService, t2aService].map((service) => ({
     ...service,
     postProcessOutput: typeof service.postProcessOutput === 'function'
       ? service.postProcessOutput
