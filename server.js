@@ -10,6 +10,10 @@ const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
 const { createAdmissionController, isAdmissionOverloadError } = require('./lib/admission-controller');
 const {
+  invokeServiceSync,
+  invokeServiceStream
+} = require('./lib/service-invoker');
+const {
   writeJsonError,
   writeJsonSuccess,
   setStreamHeaders,
@@ -265,7 +269,6 @@ const t2aRuntime = serviceRuntimes.get('t2a');
 const rewriteService = rewriteRuntime.service;
 const t2aService = t2aRuntime.service;
 const rewriteProviderAdapter = rewriteRuntime.adapter;
-const t2aProviderAdapter = t2aRuntime.adapter;
 const rewriteLifecycle = rewriteRuntime.lifecycle;
 
 const admissionController = createAdmissionController({
@@ -901,47 +904,44 @@ app.post(
 
       let rewriteResult;
       try {
-        rewriteResult = await executeWithAdmission({
-          providerName: rewriteService.provider.selected,
+        rewriteResult = await invokeServiceStream({
+          runtime: rewriteRuntime,
           requestId,
-          execute: () => rewriteProviderAdapter.invokeStream({
-            serviceId: rewriteService.id,
-            requestId,
-            payload: {
-              prompt,
-              systemPrompt,
-              userContent
-            },
-            timeoutMs: selectedTimeoutMs,
-            onChunk: async (event) => {
-              if (!event || typeof event !== 'object') {
-                return;
-              }
-
-              if (event.type === 'error' && event.error && typeof event.error === 'object') {
-                streamWriter.writeError(event.error);
-                return;
-              }
-
-              if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
-                streamedText += event.text;
-                streamedChunkEmitted = true;
-                const processedChunk = rewriteService.postProcessOutput({ payload: { response: event.text } });
-                streamWriter.writeChunk({ response: processedChunk?.response || '', done: false });
-                return;
-              }
-
-              if (event.type === 'done') {
-                if (event.usage) {
-                  finalUsage = event.usage;
-                  streamWriter.setUsage(finalUsage);
-                }
-                streamDoneReason = event.reason || streamDoneReason;
-                streamDoneEmitted = true;
-                streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
-              }
+          payload: {
+            prompt,
+            systemPrompt,
+            userContent
+          },
+          timeoutMs: selectedTimeoutMs,
+          executeWithAdmission,
+          onChunk: async (event) => {
+            if (!event || typeof event !== 'object') {
+              return;
             }
-          })
+
+            if (event.type === 'error' && event.error && typeof event.error === 'object') {
+              streamWriter.writeError(event.error);
+              return;
+            }
+
+            if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
+              streamedText += event.text;
+              streamedChunkEmitted = true;
+              const processedChunk = rewriteService.postProcessOutput({ payload: { response: event.text } });
+              streamWriter.writeChunk({ response: processedChunk?.response || '', done: false });
+              return;
+            }
+
+            if (event.type === 'done') {
+              if (event.usage) {
+                finalUsage = event.usage;
+                streamWriter.setUsage(finalUsage);
+              }
+              streamDoneReason = event.reason || streamDoneReason;
+              streamDoneEmitted = true;
+              streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
+            }
+          }
         });
       } catch (error) {
         if (isAdmissionOverloadError(error)) {
@@ -959,8 +959,7 @@ app.post(
       }
 
       if (!rewriteResult.ok) {
-        rewriteLifecycle.recordFailure({ nowMs: Date.now() });
-        const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
+        const mappedError = rewriteResult.error;
         setLastError(mappedError.code, mappedError.message);
         streamWriter.writeError({
           code: mappedError.code,
@@ -971,7 +970,6 @@ app.post(
       }
 
       modelPhase = 'ready';
-      rewriteLifecycle.recordSuccess({ nowMs: Date.now() });
       lastWarmAt = new Date().toISOString();
       lastError = null;
 
@@ -998,19 +996,16 @@ app.post(
 
     let rewriteResult;
     try {
-      rewriteResult = await executeWithAdmission({
-        providerName: rewriteService.provider.selected,
+      rewriteResult = await invokeServiceSync({
+        runtime: rewriteRuntime,
         requestId,
-        execute: () => rewriteProviderAdapter.invokeSync({
-          serviceId: rewriteService.id,
-          requestId,
-          payload: {
-            prompt,
-            systemPrompt,
-            userContent
-          },
-          timeoutMs: selectedTimeoutMs
-        })
+        payload: {
+          prompt,
+          systemPrompt,
+          userContent
+        },
+        timeoutMs: selectedTimeoutMs,
+        executeWithAdmission
       });
     } catch (error) {
       if (isAdmissionOverloadError(error)) {
@@ -1020,8 +1015,7 @@ app.post(
       throw error;
     }
     if (!rewriteResult.ok) {
-      rewriteLifecycle.recordFailure({ nowMs: Date.now() });
-      const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
+      const mappedError = rewriteResult.error;
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
@@ -1040,7 +1034,6 @@ app.post(
     }
 
     modelPhase = 'ready';
-    rewriteLifecycle.recordSuccess({ nowMs: Date.now() });
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
@@ -1102,22 +1095,19 @@ app.post(
 
       let t2aResult;
       try {
-        t2aResult = await executeWithAdmission({
-          providerName: t2aService.provider.selected,
+        t2aResult = await invokeServiceSync({
+          runtime: t2aRuntime,
           requestId,
-          execute: () => t2aProviderAdapter.invokeSync({
-            serviceId: t2aService.id,
-            requestId,
-            payload: {
-              text: trimmedText,
-              voice,
-              audio,
-              languageBoost: validationResult.value.languageBoost,
-              voiceModify: validationResult.value.voiceModify,
-              outputFormat: validationResult.value.outputFormat
-            },
-            timeoutMs: t2aService.timeouts.invokeMs
-          })
+          payload: {
+            text: trimmedText,
+            voice,
+            audio,
+            languageBoost: validationResult.value.languageBoost,
+            voiceModify: validationResult.value.voiceModify,
+            outputFormat: validationResult.value.outputFormat
+          },
+          timeoutMs: t2aService.timeouts.invokeMs,
+          executeWithAdmission
         });
       } catch (error) {
         if (isAdmissionOverloadError(error)) {
@@ -1128,7 +1118,7 @@ app.post(
       }
 
       if (!t2aResult.ok) {
-        const mappedError = t2aResult.error || t2aProviderAdapter.mapError(new Error('unknown'));
+        const mappedError = t2aResult.error;
         return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
       }
 
