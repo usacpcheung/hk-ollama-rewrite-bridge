@@ -28,7 +28,7 @@ Extra top-level fields may be included for retry or diagnostic purposes, for exa
 
 Protected routes require trusted proxy auth headers:
 
-- `X-Authenticated-Email`: normalized authenticated user email ending with `@hs.edu.hk`
+- `X-Authenticated-Email`: normalized authenticated user email ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN`
 - `X-Bridge-Auth`: shared secret matching backend `BRIDGE_INTERNAL_AUTH_SECRET`
 
 Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
@@ -40,7 +40,7 @@ Reverse proxy must strip these headers from inbound client traffic and set them 
 `req.clientIdentity.limiterKey` resolves as follows:
 
 1. `user:<value>` only when:
-   - source address is in `TRUSTED_PROXY_ADDRESSES`
+   - source address is in `BRIDGE_TRUSTED_PROXY_ADDRESSES`
    - `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`
    - first non-empty trusted identity header exists in this order:
      1. `X-Authenticated-Email`
@@ -48,7 +48,7 @@ Reverse proxy must strip these headers from inbound client traffic and set them 
      3. `X-Authenticated-Subject`
 2. Otherwise, `ip:*` fallback is used.
 
-With `EXPRESS_TRUST_PROXY=loopback` or a numeric hop count, Express-derived client IP is used for the IP fallback path. With `EXPRESS_TRUST_PROXY=false`, socket remote address is used.
+With `BRIDGE_EXPRESS_TRUST_PROXY=loopback` or a numeric hop count, Express-derived client IP is used for the IP fallback path. With `BRIDGE_EXPRESS_TRUST_PROXY=false`, socket remote address is used.
 
 ### Rate-limiting layers
 
@@ -61,59 +61,12 @@ Rate limiting uses fixed-window policies:
 
 T2A shares the same admission-controller execution path as rewrite, so concurrency and queue limits are still driven by the shared admission settings.
 
-| Variable | Default | Meaning |
-|---|---:|---|
-| `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global baseline window length. |
-| `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global baseline request budget. |
-| `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite authenticated principal window. |
-| `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite authenticated principal budget. |
-| `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite IP fallback window. |
-| `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite IP fallback budget. |
-| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A authenticated principal window. |
-| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A authenticated principal budget. |
-| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A IP fallback window. |
-| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A IP fallback budget. |
-| `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Ops route window. |
-| `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Ops route budget. |
+For the canonical env reference and defaults, see `docs/env-reference.md`.
 
-## Service-scoped configuration model
+## Configuration reference
 
-Configuration resolves with this general pattern:
-
-1. service-scoped keys
-2. legacy keys
-3. built-in defaults
-
-Naming conventions:
-
-- `<SERVICE_ID>_PROVIDER`
-- `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
-- `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- rewrite only: `<SERVICE_ID>_MAX_COMPLETION_TOKENS`
-- service-specific timeouts such as `REWRITE_READY_TIMEOUT_MS`, `REWRITE_COLD_TIMEOUT_MS`, `T2A_INVOKE_TIMEOUT_MS`
-
-### Rewrite compatibility mapping
-
-| Legacy | Preferred |
-|---|---|
-| `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` / `REWRITE_PROVIDER_OLLAMA_MODEL` |
-| `OLLAMA_URL` | `REWRITE_OLLAMA_URL` / `REWRITE_PROVIDER_OLLAMA_URL` |
-| `OLLAMA_PS_URL` | `REWRITE_OLLAMA_PS_URL` / `REWRITE_PROVIDER_OLLAMA_PS_URL` |
-| `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` / `REWRITE_PROVIDER_MINIMAX_MODEL` |
-| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` / `REWRITE_PROVIDER_MINIMAX_API_URL` |
-| `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
-| `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
-
-### T2A compatibility mapping
-
-| Legacy | Preferred |
-|---|---|
-| `MINIMAX_T2A_URL` | `T2A_MINIMAX_API_URL` / `T2A_PROVIDER_MINIMAX_API_URL` / `T2A_URL` |
-| `MINIMAX_T2A_MODEL` | `T2A_MINIMAX_MODEL` / `T2A_PROVIDER_MINIMAX_MODEL` / `T2A_MODEL` |
-| `MINIMAX_T2A_VOICE_ID` | `T2A_MINIMAX_VOICE_ID` / `T2A_PROVIDER_MINIMAX_VOICE_ID` / `T2A_VOICE_ID` |
-| `MINIMAX_T2A_SPEED` | `T2A_MINIMAX_SPEED` / `T2A_PROVIDER_MINIMAX_SPEED` / `T2A_SPEED` |
-| `MINIMAX_T2A_VOLUME` | `T2A_MINIMAX_VOLUME` / `T2A_PROVIDER_MINIMAX_VOLUME` / `T2A_VOLUME` |
-| `MINIMAX_T2A_PITCH` | `T2A_MINIMAX_PITCH` / `T2A_PROVIDER_MINIMAX_PITCH` / `T2A_PITCH` |
+Environment variables are documented centrally in `docs/env-reference.md`.
+This API reference only describes request and response contracts.
 
 ## 1) `POST /rewrite`
 

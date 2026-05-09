@@ -160,129 +160,14 @@ Rewrite may include optional `usage` and `artifacts`. T2A JSON mode includes pro
 - Rewrite: `ok`, `result`
 - T2A JSON mode: `ok`, `audio`, `format`, `mime`/`contentType`, `size`
 
-## Service-scoped environment naming
-
-Services resolve runtime config with a service prefix:
-
-- `<SERVICE_ID>_PROVIDER`
-- `<SERVICE_ID>_<PROVIDER>_MODEL` or `<SERVICE_ID>_PROVIDER_<PROVIDER>_MODEL`
-- `<SERVICE_ID>_MAX_COMPLETION_TOKENS`, `<SERVICE_ID>_MAX_TEXT_LENGTH`
-- Optional service-specific timeouts such as `<SERVICE_ID>_READY_TIMEOUT_MS`, `<SERVICE_ID>_COLD_TIMEOUT_MS`, or `T2A_INVOKE_TIMEOUT_MS`
-- Rewrite-only streaming toggles: `<SERVICE_ID>_STREAMING_ENABLED`, `<SERVICE_ID>_PROVIDER_STREAMING_ENABLED`, optional `<SERVICE_ID>_<PROVIDER>_STREAMING_ENABLED`
-
-Resolution order:
-1. New service-scoped keys
-2. Legacy keys
-3. Built-in defaults
-
-Legacy fallback emits a deprecation warning only when a new equivalent exists and only the legacy key is used.
-
-### Compatibility mapping (rewrite)
-
-| Legacy key | New key |
-|---|---|
-| `OLLAMA_MODEL` | `REWRITE_OLLAMA_MODEL` or `REWRITE_PROVIDER_OLLAMA_MODEL` |
-| `OLLAMA_URL` | `REWRITE_OLLAMA_URL` or `REWRITE_PROVIDER_OLLAMA_URL` |
-| `OLLAMA_PS_URL` | `REWRITE_OLLAMA_PS_URL` or `REWRITE_PROVIDER_OLLAMA_PS_URL` |
-| `MINIMAX_MODEL` | `REWRITE_MINIMAX_MODEL` or `REWRITE_PROVIDER_MINIMAX_MODEL` |
-| `MINIMAX_API_URL` | `REWRITE_MINIMAX_API_URL` or `REWRITE_PROVIDER_MINIMAX_API_URL` |
-| `OLLAMA_TIMEOUT_MS` | `REWRITE_READY_TIMEOUT_MS` |
-| `OLLAMA_COLD_TIMEOUT_MS` | `REWRITE_COLD_TIMEOUT_MS` |
-
-### Compatibility mapping (T2A)
-
-| Legacy key | New key |
-|---|---|
-| `MINIMAX_T2A_URL` | `T2A_MINIMAX_API_URL`, `T2A_PROVIDER_MINIMAX_API_URL`, or `T2A_URL` |
-| `MINIMAX_T2A_MODEL` | `T2A_MINIMAX_MODEL`, `T2A_PROVIDER_MINIMAX_MODEL`, or `T2A_MODEL` |
-| `MINIMAX_T2A_VOICE_ID` | `T2A_MINIMAX_VOICE_ID`, `T2A_PROVIDER_MINIMAX_VOICE_ID`, or `T2A_VOICE_ID` |
-| `MINIMAX_T2A_SPEED` | `T2A_MINIMAX_SPEED`, `T2A_PROVIDER_MINIMAX_SPEED`, or `T2A_SPEED` |
-| `MINIMAX_T2A_VOLUME` | `T2A_MINIMAX_VOLUME`, `T2A_PROVIDER_MINIMAX_VOLUME`, or `T2A_VOLUME` |
-| `MINIMAX_T2A_PITCH` | `T2A_MINIMAX_PITCH`, `T2A_PROVIDER_MINIMAX_PITCH`, or `T2A_PITCH` |
-
 ## Environment variables
 
-### Core service selection and limits
+The canonical environment reference is `docs/env-reference.md`.
 
-| Key | Default | Meaning |
-|---|---:|---|
-| `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider (`ollama` or `minimax`). |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /rewrite` in Unicode characters (1-600). |
-| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Rewrite completion-token budget sent upstream. |
-| `T2A_PROVIDER` | `minimax` | T2A provider selector. Current implementation resolves to Minimax-compatible T2A handling. |
-| `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted `text` length for `POST /t2a` in Unicode characters (1-600). |
-| `T2A_INVOKE_TIMEOUT_MS` | `30000` | Provider invoke timeout for T2A requests only. |
-
-### Rewrite provider config
-
-| Key | Default | Meaning |
-|---|---:|---|
-| `REWRITE_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Preferred Ollama model key. |
-| `REWRITE_PROVIDER_OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Alternate preferred Ollama model key. |
-| `REWRITE_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Preferred Ollama generate endpoint. |
-| `REWRITE_PROVIDER_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Alternate preferred Ollama generate endpoint. |
-| `REWRITE_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Preferred Ollama readiness endpoint. |
-| `REWRITE_PROVIDER_OLLAMA_PS_URL` | `http://127.0.0.1:11434/api/ps` | Alternate preferred Ollama readiness endpoint. |
-| `REWRITE_MINIMAX_MODEL` | `M2-her` | Preferred rewrite Minimax model. |
-| `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate preferred rewrite Minimax model. |
-| `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Preferred rewrite Minimax endpoint. |
-| `REWRITE_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Alternate preferred rewrite Minimax endpoint. |
-| `REWRITE_READY_TIMEOUT_MS` | `30000` | Rewrite timeout for ready phase. |
-| `REWRITE_COLD_TIMEOUT_MS` | `120000` | Rewrite timeout during cold/warming phases. |
-| `REWRITE_STREAMING_ENABLED` | `false` | Service-level streaming toggle. |
-| `REWRITE_PROVIDER_STREAMING_ENABLED` | `false` | Alternate service-level streaming toggle. |
-| `REWRITE_<PROVIDER>_STREAMING_ENABLED` | `false` | Optional provider-specific streaming toggle. |
-
-### T2A provider config
-
-| Key | Default | Meaning |
-|---|---:|---|
-| `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Preferred T2A Minimax endpoint. |
-| `T2A_PROVIDER_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Alternate preferred T2A Minimax endpoint. |
-| `T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Short alias for T2A endpoint. |
-| `T2A_MINIMAX_MODEL` | `speech-2.6-hd` | Preferred T2A model. |
-| `T2A_PROVIDER_MINIMAX_MODEL` | `speech-2.6-hd` | Alternate preferred T2A model. |
-| `T2A_MODEL` | `speech-2.6-hd` | Short alias for T2A model. |
-| `T2A_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Default voice ID. |
-| `T2A_PROVIDER_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Alternate default voice ID key. |
-| `T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Short alias for default voice ID. |
-| `T2A_MINIMAX_SPEED` | `1` | Default speech speed. |
-| `T2A_PROVIDER_MINIMAX_SPEED` | `1` | Alternate default speed key. |
-| `T2A_SPEED` | `1` | Short alias for default speed. |
-| `T2A_MINIMAX_VOLUME` | `1` | Default volume. |
-| `T2A_PROVIDER_MINIMAX_VOLUME` | `1` | Alternate default volume key. |
-| `T2A_VOLUME` | `1` | Short alias for default volume. |
-| `T2A_MINIMAX_PITCH` | `0` | Default pitch. |
-| `T2A_PROVIDER_MINIMAX_PITCH` | `0` | Alternate default pitch key. |
-| `T2A_PITCH` | `0` | Short alias for default pitch. |
-| `MINIMAX_T2A_URL` | `https://api.minimax.io/v1/t2a_v2` | Legacy endpoint fallback. |
-| `MINIMAX_T2A_MODEL` | `speech-2.6-hd` | Legacy model fallback. |
-| `MINIMAX_T2A_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Legacy voice fallback. |
-| `MINIMAX_T2A_SPEED` | `1` | Legacy speed fallback. |
-| `MINIMAX_T2A_VOLUME` | `1` | Legacy volume fallback. |
-| `MINIMAX_T2A_PITCH` | `0` | Legacy pitch fallback. |
-
-### Shared infra and auth config
-
-| Key | Default | Meaning |
-|---|---:|---|
-| `MINIMAX_API_KEY` | empty | Required for Minimax rewrite and T2A traffic. |
-| `BRIDGE_INTERNAL_AUTH_SECRET` | empty | Shared secret that trusted proxy must inject on protected routes. |
-| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Addresses allowed to forward trusted identity headers. |
-| `EXPRESS_TRUST_PROXY` | `loopback` | Express trust-proxy mode for client IP derivation. |
-| `RATE_LIMIT_GLOBAL_WINDOW_SEC` | `60` | Global non-ops limiter window. |
-| `RATE_LIMIT_GLOBAL_MAX_REQUESTS` | `300` | Global non-ops limiter budget. |
-| `RATE_LIMIT_REWRITE_AUTH_WINDOW_SEC` | `60` | Rewrite user-scoped limiter window. |
-| `RATE_LIMIT_REWRITE_AUTH_MAX_REQUESTS` | `60` | Rewrite user-scoped limiter budget. |
-| `RATE_LIMIT_REWRITE_IP_WINDOW_SEC` | `60` | Rewrite IP fallback limiter window. |
-| `RATE_LIMIT_REWRITE_IP_MAX_REQUESTS` | `20` | Rewrite IP fallback limiter budget. |
-| `RATE_LIMIT_T2A_AUTH_WINDOW_SEC` | `60` | T2A user-scoped limiter window. |
-| `RATE_LIMIT_T2A_AUTH_MAX_REQUESTS` | `30` | T2A user-scoped limiter budget. |
-| `RATE_LIMIT_T2A_IP_WINDOW_SEC` | `60` | T2A IP fallback limiter window. |
-| `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A IP fallback limiter budget. |
-| `ADMISSION_MAX_CONCURRENCY` | `4` | Shared admission max concurrency. |
-| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Shared admission queue size. |
-| `ADMISSION_MAX_WAIT_MS` | `15000` | Shared admission max queue wait. |
+Use canonical names from that document for new deployments. Deprecated aliases
+remain supported for one compatibility window and emit startup warnings when
+used. The docs intentionally avoid duplicating the full env table here so that
+operators have one source of truth.
 
 ## Reverse-proxy authentication hardening
 
@@ -336,6 +221,7 @@ Internal loopback routes remain:
 
 ## API and deployment docs
 
+- Environment reference: `docs/env-reference.md`
 - Exact endpoint contracts: `docs/api-reference.md`
 - Deployment guide: `docs/deployment-guide.md`
 - Auth validation runbook: `docs/runbooks/auth-matrix-manual-cli-checklist.md`
