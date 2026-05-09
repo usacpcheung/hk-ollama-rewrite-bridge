@@ -120,71 +120,17 @@ T2A_INVOKE_TIMEOUT_MS=30000
 
 MINIMAX_API_KEY=<SECRET>
 BRIDGE_INTERNAL_AUTH_SECRET=<SECRET>
-EXPRESS_TRUST_PROXY=loopback
-TRUSTED_PROXY_ADDRESSES=127.0.0.1,::1
+BRIDGE_EXPRESS_TRUST_PROXY=loopback
+BRIDGE_TRUSTED_PROXY_ADDRESSES=127.0.0.1,::1
 ```
 
 ## 5) Environment reference
 
-### Core service variables
+The canonical environment reference is `docs/env-reference.md`.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `REWRITE_PROVIDER` | `ollama` | Rewrite provider selection. |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Rewrite input-length cap. |
-| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Rewrite upstream token budget. |
-| `T2A_PROVIDER` | `minimax` | T2A provider selection abstraction. |
-| `T2A_MAX_TEXT_LENGTH` | `200` | T2A input-length cap. |
-| `T2A_INVOKE_TIMEOUT_MS` | `30000` | T2A provider timeout. |
-| `MINIMAX_API_KEY` | empty | Required for Minimax-backed traffic. |
-
-### Rewrite / Ollama lifecycle variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `OLLAMA_KEEP_ALIVE` | `30m` | Keep model resident. |
-| `OLLAMA_PS_CACHE_MS` | `2000` | Readiness probe cache TTL. |
-| `OLLAMA_PS_TIMEOUT_MS` | `1000` | Timeout per readiness probe. |
-| `REWRITE_READY_TIMEOUT_MS` | `30000` | Rewrite ready-phase timeout. |
-| `REWRITE_COLD_TIMEOUT_MS` | `120000` | Rewrite cold/warming timeout. |
-| `WARMUP_ON_START` | `true` | Run startup warmup. |
-| `WARMUP_STARTUP_MAX_WAIT_MS` | `180000` | Startup warmup budget. |
-| `WARMUP_STARTUP_RETRY_INTERVAL_MS` | `5000` | Delay between startup warmup attempts. |
-| `WARMUP_TRIGGER_TIMEOUT_MS` | `60000` | Warmup trigger timeout. |
-| `WARMUP_RETRIGGER_WINDOW_MS` | `10000` | Warmup retrigger cooldown. |
-| `WARMUP_RETRY_AFTER_SEC` | auto | `Retry-After` for warming responses. |
-| `READY_REWRITE_STRICT_PROBE_MAX_AGE_MS` | derived | Max age before strict rewrite re-probe. |
-
-### T2A defaults and aliases
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Preferred T2A endpoint. |
-| `T2A_PROVIDER_MINIMAX_API_URL` | same | Alternate preferred T2A endpoint key. |
-| `T2A_URL` | same | Short alias for T2A endpoint. |
-| `T2A_MINIMAX_MODEL` | `speech-2.6-hd` | Preferred T2A model. |
-| `T2A_PROVIDER_MINIMAX_MODEL` | same | Alternate preferred T2A model key. |
-| `T2A_MODEL` | same | Short alias for T2A model. |
-| `T2A_MINIMAX_VOICE_ID` | `Cantonese_ProfessionalHost（F)` | Default voice ID. |
-| `T2A_MINIMAX_SPEED` | `1` | Default speed. |
-| `T2A_MINIMAX_VOLUME` | `1` | Default volume. |
-| `T2A_MINIMAX_PITCH` | `0` | Default pitch. |
-| `MINIMAX_T2A_*` | legacy | Legacy fallback aliases for endpoint/model/voice/speed/volume/pitch. |
-
-### Auth, trust, and rate limiting
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `BRIDGE_INTERNAL_AUTH_SECRET` | empty | Shared proxy-to-backend secret. |
-| `TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Sources allowed to forward identity headers. |
-| `EXPRESS_TRUST_PROXY` | `loopback` | Client-IP derivation mode. |
-| `RATE_LIMIT_GLOBAL_*` | varies | Global non-ops fixed-window limiter. |
-| `RATE_LIMIT_REWRITE_*` | varies | Rewrite fixed-window limiter. |
-| `RATE_LIMIT_T2A_*` | varies | T2A fixed-window limiter. |
-| `RATE_LIMIT_OPS_*` | varies | Health/readiness limiter. |
-| `ADMISSION_MAX_CONCURRENCY` | `4` | Shared admission concurrency cap. |
-| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Shared admission queue cap. |
-| `ADMISSION_MAX_WAIT_MS` | `15000` | Shared admission queue wait cap. |
+Use canonical names from that document for new deployments. Deprecated aliases
+remain supported for one compatibility window and emit startup warnings when
+used.
 
 ## 6) systemd setup
 
