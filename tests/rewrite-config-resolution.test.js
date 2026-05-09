@@ -172,7 +172,8 @@ test('legacy ollama urls work when preferred keys are absent', () => {
 
 test('malformed preferred ready timeout falls back to legacy timeout', () => {
   const env = {
-    REWRITE_READY_TIMEOUT_MS: 'not-a-number',
+    REWRITE_READY_INVOKE_TIMEOUT_MS: 'not-a-number',
+    REWRITE_READY_TIMEOUT_MS: '45000',
     OLLAMA_TIMEOUT_MS: '45000'
   };
 
@@ -185,12 +186,13 @@ test('malformed preferred ready timeout falls back to legacy timeout', () => {
 
   assert.equal(config.timeouts.readyMs, 45000);
   assert.equal(config.sources.readyTimeoutMs.type, 'legacy');
-  assert.equal(config.sources.readyTimeoutMs.key, 'OLLAMA_TIMEOUT_MS');
+  assert.equal(config.sources.readyTimeoutMs.key, 'REWRITE_READY_TIMEOUT_MS');
 });
 
 test('malformed preferred cold timeout falls back to legacy timeout', () => {
   const env = {
-    REWRITE_COLD_TIMEOUT_MS: 'not-a-number',
+    REWRITE_COLD_INVOKE_TIMEOUT_MS: 'not-a-number',
+    REWRITE_COLD_TIMEOUT_MS: '180000',
     OLLAMA_COLD_TIMEOUT_MS: '180000'
   };
 
@@ -203,7 +205,30 @@ test('malformed preferred cold timeout falls back to legacy timeout', () => {
 
   assert.equal(config.timeouts.coldMs, 180000);
   assert.equal(config.sources.coldTimeoutMs.type, 'legacy');
-  assert.equal(config.sources.coldTimeoutMs.key, 'OLLAMA_COLD_TIMEOUT_MS');
+  assert.equal(config.sources.coldTimeoutMs.key, 'REWRITE_COLD_TIMEOUT_MS');
+});
+
+test('canonical rewrite invoke timeout keys win over deprecated aliases', () => {
+  const env = {
+    REWRITE_READY_INVOKE_TIMEOUT_MS: '60000',
+    REWRITE_READY_TIMEOUT_MS: '45000',
+    REWRITE_COLD_INVOKE_TIMEOUT_MS: '240000',
+    REWRITE_COLD_TIMEOUT_MS: '120000'
+  };
+
+  const config = resolveRewriteConfig({
+    env,
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.timeouts.readyMs, 60000);
+  assert.equal(config.sources.readyTimeoutMs.type, 'preferred');
+  assert.equal(config.sources.readyTimeoutMs.key, 'REWRITE_READY_INVOKE_TIMEOUT_MS');
+  assert.equal(config.timeouts.coldMs, 240000);
+  assert.equal(config.sources.coldTimeoutMs.type, 'preferred');
+  assert.equal(config.sources.coldTimeoutMs.key, 'REWRITE_COLD_INVOKE_TIMEOUT_MS');
 });
 
 test('malformed bounded integer key falls back to default with default source metadata', () => {

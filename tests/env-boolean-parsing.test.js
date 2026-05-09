@@ -102,7 +102,7 @@ test('WARMUP_ON_START accepts canonical true/false spellings', async () => {
   }
 });
 
-test('MINIMAX_FAIL_OPEN_ON_IDLE accepts canonical true/false spellings', async () => {
+test('deprecated MINIMAX_FAIL_OPEN_ON_IDLE alias accepts true/false spellings', async () => {
   const falseCases = ['0', 'false', 'no', 'off'];
   for (const value of falseCases) {
     const config = await startServerAndReadEffectiveConfig({
@@ -120,4 +120,23 @@ test('MINIMAX_FAIL_OPEN_ON_IDLE accepts canonical true/false spellings', async (
     });
     assert.equal(config.minimaxFailOpenOnIdle, true, `expected ${value} to parse as true`);
   }
+});
+
+test('canonical provider debug and passive Minimax env names resolve in startup config', async () => {
+  const config = await startServerAndReadEffectiveConfig({
+    WARMUP_ON_START: 'false',
+    BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT: 'true',
+    REWRITE_DEBUG_RAW_OUTPUT: 'false',
+    REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE: 'false',
+    MINIMAX_FAIL_OPEN_ON_IDLE: 'true',
+    REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD: '7',
+    MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD: '3',
+    REWRITE_MINIMAX_PASSIVE_RECOVERY_COOLDOWN_MS: '9000',
+    MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS: '15000'
+  });
+
+  assert.equal(config.providerDebugRawOutput, true);
+  assert.equal(config.minimaxFailOpenOnIdle, false);
+  assert.equal(config.minimaxConsecutiveFailureThreshold, 7);
+  assert.equal(config.minimaxRecoveryAttemptCooldownMs, 9000);
 });

@@ -27,6 +27,21 @@ const PROVIDER_CAPABILITIES = {
   }
 };
 
+function createUnsupportedProvider({ provider }) {
+  return {
+    name: provider,
+    services: {},
+    getInfo: () => ({ provider }),
+    mapError: (error) => ({
+      code: 'UNSUPPORTED_PROVIDER',
+      message: error?.message || `Unsupported provider: ${provider}`,
+      status: 501
+    }),
+    checkReadiness: async () => ({ ok: true }),
+    triggerWarmup: async () => ({ ok: true })
+  };
+}
+
 function createProvider({
   serviceConfig,
   ollamaUrl,
@@ -71,6 +86,10 @@ function createProvider({
       maxCompletionTokens,
       debugLog
     }));
+  }
+
+  if (serviceId === 't2a') {
+    return ensureServiceHandlers(createUnsupportedProvider({ provider }));
   }
 
   throw new Error(`Unsupported provider: ${provider}`);

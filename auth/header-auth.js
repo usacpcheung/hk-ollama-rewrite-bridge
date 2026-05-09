@@ -1,4 +1,17 @@
-function createRewriteHeaderAuth({ bridgeInternalAuthSecret, errorResponse, onAuthFailure }) {
+function createRewriteHeaderAuth({
+  bridgeInternalAuthSecret,
+  errorResponse,
+  onAuthFailure,
+  allowedEmailDomain = '@hs.edu.hk'
+}) {
+  const rawAllowedEmailDomain = String(allowedEmailDomain || '@hs.edu.hk').trim().toLowerCase();
+  const normalizedAllowedEmailDomain = rawAllowedEmailDomain.startsWith('@')
+    ? rawAllowedEmailDomain
+    : `@${rawAllowedEmailDomain}`;
+  const forbiddenDomainMessage = normalizedAllowedEmailDomain === '@hs.edu.hk'
+    ? 'Only hs.edu.hk accounts are allowed'
+    : `Only ${normalizedAllowedEmailDomain.replace(/^@/, '')} accounts are allowed`;
+
   return function rewriteHeaderAuth(req, res, next) {
     const reject = (status, code, message) => {
       if (typeof onAuthFailure === 'function') {
@@ -39,8 +52,8 @@ function createRewriteHeaderAuth({ bridgeInternalAuthSecret, errorResponse, onAu
       return;
     }
 
-    if (!email.endsWith('@hs.edu.hk')) {
-      reject(403, 'FORBIDDEN_DOMAIN', 'Only hs.edu.hk accounts are allowed');
+    if (!email.endsWith(normalizedAllowedEmailDomain)) {
+      reject(403, 'FORBIDDEN_DOMAIN', forbiddenDomainMessage);
       return;
     }
 
