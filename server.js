@@ -19,6 +19,13 @@ const {
   setStreamHeaders,
   createStreamWriter
 } = require('./lib/output-writer');
+const {
+  writeRewriteJsonSuccess,
+  writeRewriteStreamText,
+  writeRewriteStreamDone,
+  writeRewriteStreamError,
+  writeT2AOutput
+} = require('./lib/service-output-writer');
 
 const app = express();
 const HOST = '127.0.0.1';
@@ -920,15 +927,14 @@ app.post(
             }
 
             if (event.type === 'error' && event.error && typeof event.error === 'object') {
-              streamWriter.writeError(event.error);
+              writeRewriteStreamError({ streamWriter, error: event.error });
               return;
             }
 
             if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
               streamedText += event.text;
               streamedChunkEmitted = true;
-              const processedChunk = rewriteService.postProcessOutput({ payload: { response: event.text } });
-              streamWriter.writeChunk({ response: processedChunk?.response || '', done: false });
+              writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text });
               return;
             }
 
@@ -939,7 +945,7 @@ app.post(
               }
               streamDoneReason = event.reason || streamDoneReason;
               streamDoneEmitted = true;
-              streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
+              writeRewriteStreamDone({ streamWriter, doneReason: streamDoneReason });
             }
           }
         });
@@ -961,11 +967,7 @@ app.post(
       if (!rewriteResult.ok) {
         const mappedError = rewriteResult.error;
         setLastError(mappedError.code, mappedError.message);
-        streamWriter.writeError({
-          code: mappedError.code,
-          message: mappedError.message,
-          status: mappedError.status || 502
-        });
+        writeRewriteStreamError({ streamWriter, error: mappedError, defaultStatus: 502 });
         return res.end();
       }
 
@@ -984,12 +986,14 @@ app.post(
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
-        const processedStreamResponse = rewriteService.postProcessOutput({ payload: { response: streamResponse } });
-        streamWriter.writeChunk({ response: processedStreamResponse?.response || '', done: false });
+        writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse });
       }
 
       if (!streamDoneEmitted) {
-        streamWriter.writeDone({ done_reason: rewriteResult.data?.doneReason || streamDoneReason || 'stop' });
+        writeRewriteStreamDone({
+          streamWriter,
+          doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'
+        });
       }
       return res.end();
     }
@@ -1045,8 +1049,7 @@ app.post(
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
-    const processedOutput = rewriteService.postProcessOutput({ payload: { result: modelText } });
-    return writeJsonSuccess(res, { result: processedOutput?.result || '', ...(usage ? { usage } : {}) });
+    return writeRewriteJsonSuccess({ res, service: rewriteService, response: modelText, usage });
   } finally {
     logRewriteRequest({
       req,
@@ -1122,32 +1125,16 @@ app.post(
         return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
       }
 
-      const output = t2aResult.data?.output || {};
-      const audioBuffer = output?.meta?.audio || output?.artifacts?.find((artifact) => artifact?.kind === 'audio')?.data;
-      const format = output?.meta?.format || output?.artifacts?.[0]?.format || 'mp3';
-      const contentType = output?.meta?.contentType || output?.meta?.mime || output?.artifacts?.[0]?.contentType || 'audio/mpeg';
-      const providerMeta = output?.meta?.provider || null;
-
-      if (!Buffer.isBuffer(audioBuffer) || audioBuffer.length === 0) {
-        return errorResponse(res, 502, 'PROVIDER_ERROR', 'Provider response did not include audio data');
+      const t2aWriteResult = writeT2AOutput({
+        res,
+        output: t2aResult.data?.output || {},
+        responseMode
+      });
+      if (!t2aWriteResult.ok) {
+        const mappedError = t2aWriteResult.error;
+        return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
       }
-
-      if (responseMode === 'base64_json') {
-        return writeJsonSuccess(res, {
-          audio: audioBuffer.toString('base64'),
-          format,
-          mime: contentType,
-          contentType,
-          size: audioBuffer.length,
-          provider: providerMeta
-        });
-      }
-
-      res.status(200);
-      res.set('Content-Type', contentType);
-      res.set('Content-Length', String(audioBuffer.length));
-      res.set('Content-Disposition', `inline; filename="speech.${format}"`);
-      return res.end(audioBuffer);
+      return t2aWriteResult;
     } catch (error) {
       if (error?.code === 'STREAMING_UNSUPPORTED') {
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
