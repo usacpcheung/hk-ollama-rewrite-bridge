@@ -117,7 +117,11 @@ test('rewrite stream error helper preserves pass-through and mapped error status
 
   writeRewriteStreamError({
     streamWriter,
-    error: { code: 'PROVIDER_STREAM_ERROR', message: 'provider failed' }
+    error: {
+      code: 'PROVIDER_STREAM_ERROR',
+      message: 'provider failed',
+      detail: 'provider_detail'
+    }
   });
   writeRewriteStreamError({
     streamWriter,
@@ -126,7 +130,7 @@ test('rewrite stream error helper preserves pass-through and mapped error status
   });
 
   assert.deepEqual(errors, [
-    { code: 'PROVIDER_STREAM_ERROR', message: 'provider failed' },
+    { code: 'PROVIDER_STREAM_ERROR', message: 'provider failed', detail: 'provider_detail' },
     { code: 'PROVIDER_ERROR', message: 'mapped failed', status: 502 }
   ]);
 });
