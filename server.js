@@ -1,24 +1,46 @@
 const express = require('express');
 const crypto = require('crypto');
-const { createProvider, PROVIDER_CAPABILITIES } = require('./providers');
+const { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
+const { createServiceRuntimes } = require('./lib/service-runtime');
 const { createServiceRegistry } = require('./services');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
 const { createAdmissionController, isAdmissionOverloadError } = require('./lib/admission-controller');
+const { readEnvWithDeprecatedAliases } = require('./lib/env-config');
+const {
+  invokeServiceSync,
+  invokeServiceStream
+} = require('./lib/service-invoker');
 const {
   writeJsonError,
   writeJsonSuccess,
   setStreamHeaders,
   createStreamWriter
 } = require('./lib/output-writer');
+const {
+  writeRewriteJsonSuccess,
+  writeRewriteStreamText,
+  writeRewriteStreamDone,
+  writeRewriteStreamError,
+  writeT2AOutput
+} = require('./lib/service-output-writer');
 
 const app = express();
 const HOST = '127.0.0.1';
 const PORT = 3001;
 const BRIDGE_INTERNAL_AUTH_SECRET = (process.env.BRIDGE_INTERNAL_AUTH_SECRET || '').trim();
+
+function readStringEnv(name, defaultValue, deprecatedNames = []) {
+  return readEnvWithDeprecatedAliases({
+    name,
+    deprecatedNames,
+    defaultValue,
+    parse: (rawValue) => String(rawValue)
+  }).value;
+}
 
 function parseExpressTrustProxy(rawValue, fallback = 'loopback') {
   if (rawValue == null || String(rawValue).trim() === '') {
@@ -42,7 +64,7 @@ function parseExpressTrustProxy(rawValue, fallback = 'loopback') {
   console.warn(
     JSON.stringify({
       level: 'warn',
-      msg: 'Invalid EXPRESS_TRUST_PROXY; using default',
+      msg: 'Invalid BRIDGE_EXPRESS_TRUST_PROXY; using default',
       provided: rawValue,
       fallback
     })
@@ -50,7 +72,12 @@ function parseExpressTrustProxy(rawValue, fallback = 'loopback') {
   return fallback;
 }
 
-const EXPRESS_TRUST_PROXY = parseExpressTrustProxy(process.env.EXPRESS_TRUST_PROXY, 'loopback');
+// Deprecated env alias kept for one compatibility window.
+// Prefer BRIDGE_EXPRESS_TRUST_PROXY. Remove after production env files have migrated.
+const EXPRESS_TRUST_PROXY = parseExpressTrustProxy(
+  readStringEnv('BRIDGE_EXPRESS_TRUST_PROXY', 'loopback', ['EXPRESS_TRUST_PROXY']),
+  'loopback'
+);
 app.set('trust proxy', EXPRESS_TRUST_PROXY);
 
 function parseBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -84,6 +111,30 @@ function parseEnvBoundedInteger(name, fallback, bounds = {}) {
   return parsed;
 }
 
+function parseDeprecatedEnvBoundedInteger(name, deprecatedNames, fallback, bounds = {}) {
+  return readEnvWithDeprecatedAliases({
+    name,
+    deprecatedNames,
+    defaultValue: fallback,
+    parse: (rawValue, sourceName) => {
+      const parsed = parseBoundedInteger(rawValue, bounds);
+      if (parsed == null) {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            msg: `Invalid ${sourceName}; using default`,
+            provided: rawValue,
+            fallback
+          })
+        );
+        return fallback;
+      }
+
+      return parsed;
+    }
+  }).value;
+}
+
 function parseEnvMilliseconds(name, fallback, bounds = {}) {
   const rawValue = process.env[name];
   if (rawValue == null || rawValue.trim() === '') {
@@ -104,6 +155,10 @@ function parseEnvMilliseconds(name, fallback, bounds = {}) {
   }
 
   return parsed;
+}
+
+function parseDeprecatedEnvMilliseconds(name, deprecatedNames, fallback, bounds = {}) {
+  return parseDeprecatedEnvBoundedInteger(name, deprecatedNames, fallback, { min: 0, ...bounds });
 }
 
 function parseEnvBoolean(name, fallback = false) {
@@ -132,17 +187,51 @@ function parseEnvBoolean(name, fallback = false) {
   return fallback;
 }
 
+function parseDeprecatedEnvBoolean(name, deprecatedNames, fallback = false) {
+  return readEnvWithDeprecatedAliases({
+    name,
+    deprecatedNames,
+    defaultValue: fallback,
+    parse: (rawValue, sourceName) => {
+      const normalized = String(rawValue).trim().toLowerCase();
+      if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+      }
+
+      if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+      }
+
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: `Invalid ${sourceName}; using default`,
+          provided: rawValue,
+          fallback
+        })
+      );
+      return fallback;
+    }
+  }).value;
+}
+
 const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
 const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
-const OLLAMA_PS_CACHE_MS = parseEnvMilliseconds(
-  'OLLAMA_PS_CACHE_MS',
-  parseEnvMilliseconds('WARMUP_PS_CACHE_MS', 2_000, { max: 30_000 }),
+// Deprecated env aliases kept for one compatibility window.
+// Prefer REWRITE_OLLAMA_READINESS_CACHE_MS. Remove after production env files have migrated.
+const OLLAMA_PS_CACHE_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_OLLAMA_READINESS_CACHE_MS',
+  ['OLLAMA_PS_CACHE_MS', 'WARMUP_PS_CACHE_MS'],
+  2_000,
   { max: 30_000 }
 );
-const OLLAMA_PS_TIMEOUT_MS = parseEnvMilliseconds(
-  'OLLAMA_PS_TIMEOUT_MS',
-  parseEnvMilliseconds('WARMUP_PS_TIMEOUT_MS', 1_000, { max: 10_000 }),
+// Deprecated env aliases kept for one compatibility window.
+// Prefer REWRITE_OLLAMA_READINESS_TIMEOUT_MS. Remove after production env files have migrated.
+const OLLAMA_PS_TIMEOUT_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_OLLAMA_READINESS_TIMEOUT_MS',
+  ['OLLAMA_PS_TIMEOUT_MS', 'WARMUP_PS_TIMEOUT_MS'],
+  1_000,
   { max: 10_000 }
 );
 const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
@@ -152,19 +241,35 @@ const T2A_INVOKE_TIMEOUT_MS = parseEnvMilliseconds('T2A_INVOKE_TIMEOUT_MS', 30_0
   min: 1_000,
   max: 300_000
 });
-const MINIMAX_PASSIVE_READY_GRACE_MS = parseEnvMilliseconds(
-  'MINIMAX_PASSIVE_READY_GRACE_MS',
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_MINIMAX_PASSIVE_READY_GRACE_MS. Remove after production env files have migrated.
+const MINIMAX_PASSIVE_READY_GRACE_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_MINIMAX_PASSIVE_READY_GRACE_MS',
+  ['MINIMAX_PASSIVE_READY_GRACE_MS'],
   10 * 60_000,
   { max: 24 * 60 * 60_000 }
 );
-const MINIMAX_FAIL_OPEN_ON_IDLE = parseEnvBoolean('MINIMAX_FAIL_OPEN_ON_IDLE', true);
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE. Remove after production env files have migrated.
+const MINIMAX_FAIL_OPEN_ON_IDLE = parseDeprecatedEnvBoolean(
+  'REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE',
+  ['MINIMAX_FAIL_OPEN_ON_IDLE'],
+  true
+);
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD. Remove after production env files have migrated.
 const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
-  parseBoundedInteger(process.env.MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD, {
+  parseDeprecatedEnvBoundedInteger('REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD', [
+    'MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD'
+  ], null, {
     min: 1,
     max: 100
   }) || 3;
-const MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS = parseEnvMilliseconds(
-  'MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS',
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_MINIMAX_PASSIVE_RECOVERY_COOLDOWN_MS. Remove after production env files have migrated.
+const MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_MINIMAX_PASSIVE_RECOVERY_COOLDOWN_MS',
+  ['MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS'],
   15_000,
   { max: 10 * 60_000 }
 );
@@ -173,12 +278,22 @@ const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
   Math.min(1_000, OLLAMA_PS_CACHE_MS),
   { max: 30_000 }
 );
-const WARMUP_TRIGGER_TIMEOUT_MS = parseEnvMilliseconds('WARMUP_TRIGGER_TIMEOUT_MS', 60_000, {
-  max: 300_000
-});
-const WARMUP_RETRIGGER_WINDOW_MS = parseEnvMilliseconds('WARMUP_RETRIGGER_WINDOW_MS', 10_000, {
-  max: 120_000
-});
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_OLLAMA_WARMUP_TRIGGER_TIMEOUT_MS. Remove after production env files have migrated.
+const WARMUP_TRIGGER_TIMEOUT_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_OLLAMA_WARMUP_TRIGGER_TIMEOUT_MS',
+  ['WARMUP_TRIGGER_TIMEOUT_MS'],
+  60_000,
+  { max: 300_000 }
+);
+// Deprecated env alias kept for one compatibility window.
+// Prefer REWRITE_OLLAMA_WARMUP_RETRIGGER_WINDOW_MS. Remove after production env files have migrated.
+const WARMUP_RETRIGGER_WINDOW_MS = parseDeprecatedEnvMilliseconds(
+  'REWRITE_OLLAMA_WARMUP_RETRIGGER_WINDOW_MS',
+  ['WARMUP_RETRIGGER_WINDOW_MS'],
+  10_000,
+  { max: 120_000 }
+);
 const WARMUP_ON_START = parseEnvBoolean('WARMUP_ON_START', true);
 const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
   max: 900_000
@@ -192,7 +307,13 @@ const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RET
   min: 1,
   max: 30
 }) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
-const REWRITE_DEBUG_RAW_OUTPUT = parseEnvBoolean('REWRITE_DEBUG_RAW_OUTPUT', false);
+// Deprecated env alias kept for one compatibility window.
+// Prefer BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT. Remove after production env files have migrated.
+const PROVIDER_DEBUG_RAW_OUTPUT = parseDeprecatedEnvBoolean(
+  'BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT',
+  ['REWRITE_DEBUG_RAW_OUTPUT'],
+  false
+);
 
 
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
@@ -229,61 +350,65 @@ const serviceRegistry = createServiceRegistry({
     parseRawMilliseconds(rawValue, fallback, bounds, envName),
   providerCapabilities: PROVIDER_CAPABILITIES
 });
-const rewriteService = serviceRegistry.get('rewrite');
-const t2aService = serviceRegistry.get('t2a');
-const runtimeServices = {
-  rewrite: rewriteService,
-  t2a: t2aService
-};
+const rewriteServiceDefinition = serviceRegistry.get('rewrite');
 
 const debugLog = createDebugLogger({
-  enabled: REWRITE_DEBUG_RAW_OUTPUT,
-  defaultProvider: rewriteService.provider.selected
+  enabled: PROVIDER_DEBUG_RAW_OUTPUT,
+  defaultProvider: rewriteServiceDefinition.provider.selected
 });
 
-function createRuntimeProvider(serviceConfig) {
-  return createProvider({
-    serviceConfig,
+const serviceRuntimes = createServiceRuntimes({
+  serviceRegistry,
+  createProvider,
+  createProviderAdapter,
+  createLifecycle: createProviderLifecycle,
+  createProviderOptions: () => ({
     ollamaUrl: OLLAMA_URL,
     ollamaPsUrl: OLLAMA_PS_URL,
     ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
     minimaxApiKey: MINIMAX_API_KEY,
-    minimaxSystemPrompt: rewriteService?.prompts?.minimaxSystemPrompt,
-    minimaxUserTemplate: rewriteService?.prompts?.minimaxUserTemplate,
+    minimaxSystemPrompt: rewriteServiceDefinition?.prompts?.minimaxSystemPrompt,
+    minimaxUserTemplate: rewriteServiceDefinition?.prompts?.minimaxUserTemplate,
     debugLog
-  });
-}
+  }),
+  createLifecycleOptions: () => ({
+    minimaxApiKey: MINIMAX_API_KEY,
+    minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
+    minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
+    minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
+    minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
+    warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS
+  })
+});
+const rewriteRuntime = serviceRuntimes.get('rewrite');
+const t2aRuntime = serviceRuntimes.get('t2a');
+const rewriteService = rewriteRuntime.service;
+const t2aService = t2aRuntime.service;
+const rewriteProviderAdapter = rewriteRuntime.adapter;
+const rewriteLifecycle = rewriteRuntime.lifecycle;
 
 const admissionController = createAdmissionController({
   globalLimits: rewriteService.provider.admission?.global || {},
   providerOverridesByName: rewriteService.provider.admission?.byProvider || {}
 });
 
-const rewriteProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.rewrite));
-const t2aProviderAdapter = createProviderAdapter(createRuntimeProvider(runtimeServices.t2a));
-
 let modelPhase = 'unknown';
 let lastProbeAtMs = 0;
 let lastProbeReady = null;
 let lastWarmAt = null;
 let lastError = null;
-let lastWarmupTriggerAtMs = 0;
-let warmupInFlight = false;
-let lastWarmupResult = null;
-let lastWarmupError = null;
 let serviceState = 'starting';
 let startupWarmupAttempts = 0;
 let startupWarmupDeadlineAtMs = null;
-let lastRewriteSuccessAtMs = 0;
-let lastRewriteFailureAtMs = 0;
-let consecutiveRewriteFailures = 0;
-let lastMinimaxRecoveryAttemptAtMs = 0;
 
 
 app.use(express.json({ limit: '16kb' }));
 
 const resolveClientIdentity = createClientIdentityResolver({
   bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
+  // Deprecated env alias kept for one compatibility window.
+  // Prefer BRIDGE_TRUSTED_PROXY_ADDRESSES. Remove after production env files have migrated.
+  trustedProxyAddresses: readStringEnv('BRIDGE_TRUSTED_PROXY_ADDRESSES', undefined, ['TRUSTED_PROXY_ADDRESSES']),
   preferExpressIp: EXPRESS_TRUST_PROXY !== false
 });
 
@@ -327,6 +452,10 @@ async function executeWithAdmission({ providerName, requestId, execute }) {
   }
 }
 
+function getRewriteLifecycleDiagnostics() {
+  return rewriteLifecycle?.getDiagnostics?.() || {};
+}
+
 const logRewriteRequest = ({
   req,
   requestId,
@@ -343,6 +472,7 @@ const logRewriteRequest = ({
 }) => {
   const elapsedMs = Date.now() - startedAt;
   const probeAgeMs = lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null;
+  const lifecycleDiagnostics = getRewriteLifecycleDiagnostics();
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
   const limiterKey = req.clientIdentity?.limiterKey || `ip:${ip}`;
   const limiterSource = req.clientIdentity?.source || 'ip';
@@ -365,10 +495,10 @@ const logRewriteRequest = ({
       probeError,
       warmupTriggeredNow,
       minimaxRecoveryAttempt,
-      warmupInFlight,
-      lastWarmupResult,
-      lastWarmupError,
-      lastWarmupTriggerAtMs,
+      warmupInFlight: lifecycleDiagnostics.warmupInFlight || false,
+      lastWarmupResult: lifecycleDiagnostics.lastWarmupResult || null,
+      lastWarmupError: lifecycleDiagnostics.lastWarmupError || null,
+      lastWarmupTriggerAtMs: lifecycleDiagnostics.lastWarmupTriggerAtMs || 0,
       auth
     })
   );
@@ -388,6 +518,9 @@ function logProviderResponseMeta({ requestId, stream, usage, doneReason }) {
 
 const rewriteHeaderAuth = createRewriteHeaderAuth({
   bridgeInternalAuthSecret: BRIDGE_INTERNAL_AUTH_SECRET,
+  // Deprecated env alias kept for one compatibility window.
+  // Prefer BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN. Remove after production env files have migrated.
+  allowedEmailDomain: readStringEnv('BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN', '@hs.edu.hk', ['AUTH_ALLOWED_EMAIL_DOMAIN']),
   errorResponse,
   onAuthFailure: (req, authFailure) => {
     logRewriteRequest({
@@ -432,65 +565,29 @@ function applyProbeState(probeReady, { demoteReadyOnUnknown = false } = {}) {
   }
 }
 
-function warmupWithinColdWindow(nowMs) {
-  return lastWarmupTriggerAtMs > 0 && nowMs - lastWarmupTriggerAtMs < WARMUP_RETRIGGER_WINDOW_MS;
-}
-
 async function probeModelReady() {
-  const timeoutMs = rewriteService.provider.selected === 'minimax' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
-  return rewriteProviderAdapter.checkReadiness({ timeoutMs });
-}
-
-function getMinimaxPassiveReadiness(nowMs = Date.now()) {
-  if (!MINIMAX_API_KEY) {
-    return { ready: false, reason: 'MINIMAX_API_KEY_MISSING' };
-  }
-
-  const lastActivityAtMs = Math.max(lastRewriteSuccessAtMs, lastRewriteFailureAtMs, 0);
-  const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
-  const failuresAreStale =
-    lastRewriteFailureAtMs === 0 || nowMs - lastRewriteFailureAtMs > MINIMAX_PASSIVE_READY_GRACE_MS;
-
-  if (consecutiveRewriteFailures >= MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD) {
-    if (MINIMAX_FAIL_OPEN_ON_IDLE && (failuresAreStale || (idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS))) {
-      return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
-    }
-
-    return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
-  }
-
-  if (MINIMAX_FAIL_OPEN_ON_IDLE && idleMs !== null && idleMs > MINIMAX_PASSIVE_READY_GRACE_MS) {
-    return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
-  }
-
-  return {
-    ready: true,
-    reason: null
-  };
+  const timeoutMs = rewriteLifecycle.mode === 'passive_remote' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  return rewriteLifecycle.checkReadiness({ timeoutMs, nowMs: Date.now() });
 }
 
 async function triggerWarmupIfNeeded(nowMs) {
-  if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
-    return false;
-  }
+  const warmupResult = await rewriteLifecycle.maybeWarmup({
+    nowMs,
+    timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS
+  });
+  return warmupResult.triggered === true;
+}
 
-  warmupInFlight = true;
-  lastWarmupTriggerAtMs = nowMs;
+function getRewritePassiveReadiness(nowMs = Date.now()) {
+  return rewriteLifecycle.getPassiveReadiness?.(nowMs) || null;
+}
 
-  try {
-    const warmupResult = await rewriteProviderAdapter.triggerWarmup({ timeoutMs: WARMUP_TRIGGER_TIMEOUT_MS });
-    if (!warmupResult.ok) {
-      lastWarmupResult = 'failed';
-      lastWarmupError = warmupResult.error.detail || 'warmup_fetch_failed';
-      return true;
-    }
-
-    lastWarmupResult = 'success';
-    lastWarmupError = null;
-    return true;
-  } finally {
-    warmupInFlight = false;
-  }
+function getWarmupLogFields() {
+  const diagnostics = getRewriteLifecycleDiagnostics();
+  return {
+    lastWarmupResult: diagnostics.lastWarmupResult || null,
+    lastWarmupError: diagnostics.lastWarmupError || null
+  };
 }
 
 async function delay(ms) {
@@ -501,22 +598,22 @@ async function runStartupWarmupLoop() {
   startupWarmupAttempts = 0;
   startupWarmupDeadlineAtMs = Date.now() + WARMUP_STARTUP_MAX_WAIT_MS;
 
-  if (rewriteService.provider.selected === 'minimax') {
+  if (rewriteLifecycle.mode === 'passive_remote') {
     startupWarmupAttempts += 1;
-    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(Date.now());
+    const passiveReadiness = getRewritePassiveReadiness(Date.now());
 
-    if (minimaxPassiveReadiness.ready) {
+    if (passiveReadiness.ready) {
       promoteServiceReady();
       console.log(
         JSON.stringify({
           level: 'info',
           msg: 'Startup passive readiness evaluated',
-          provider: 'minimax',
+          provider: rewriteLifecycle.providerName,
           serviceState,
           startupWarmupAttempts,
           startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
           passiveReady: true,
-          passiveReason: minimaxPassiveReadiness.reason
+          passiveReason: passiveReadiness.reason
         })
       );
       return;
@@ -528,12 +625,12 @@ async function runStartupWarmupLoop() {
       JSON.stringify({
         level: 'warn',
         msg: 'Startup passive readiness evaluated',
-        provider: 'minimax',
+        provider: rewriteLifecycle.providerName,
         serviceState,
         startupWarmupAttempts,
         startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
         passiveReady: false,
-        passiveReason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY'
+        passiveReason: passiveReadiness.reason || 'MINIMAX_NOT_READY'
       })
     );
     return;
@@ -544,6 +641,7 @@ async function runStartupWarmupLoop() {
     const attemptStartedAtMs = Date.now();
     const triggered = await triggerWarmupIfNeeded(attemptStartedAtMs);
     const probeResult = await probeModelReady();
+    const warmupLogFields = getWarmupLogFields();
 
     lastProbeAtMs = Date.now();
     if (probeResult.ready !== null) {
@@ -562,8 +660,7 @@ async function runStartupWarmupLoop() {
           warmupTriggered: triggered,
           probeReady: probeResult.ready,
           probeError: probeResult.error,
-          lastWarmupResult,
-          lastWarmupError
+          ...warmupLogFields
         })
       );
       return;
@@ -583,8 +680,7 @@ async function runStartupWarmupLoop() {
         warmupTriggered: triggered,
         probeReady: probeResult.ready,
         probeError: probeResult.error,
-        lastWarmupResult,
-        lastWarmupError
+        ...warmupLogFields
       })
     );
 
@@ -592,6 +688,7 @@ async function runStartupWarmupLoop() {
   }
 
   serviceState = 'degraded';
+  const warmupLogFields = getWarmupLogFields();
   console.warn(
     JSON.stringify({
       level: 'warn',
@@ -601,8 +698,7 @@ async function runStartupWarmupLoop() {
       startupWarmupDeadlineAt: startupWarmupDeadlineAtMs
         ? new Date(startupWarmupDeadlineAtMs).toISOString()
         : null,
-      lastWarmupResult,
-      lastWarmupError,
+      ...warmupLogFields,
       lastProbeReady
     })
   );
@@ -611,10 +707,10 @@ async function runStartupWarmupLoop() {
 app.get('/model-status', async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = rewriteService.provider.selected === 'minimax';
-  const minimaxPassiveReadiness = isMinimax ? getMinimaxPassiveReadiness(nowMs) : null;
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
+  const minimaxPassiveReadiness = usesPassiveReadiness ? getRewritePassiveReadiness(nowMs) : null;
 
-  if (!isMinimax && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+  if (!usesPassiveReadiness && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
@@ -623,7 +719,7 @@ app.get('/model-status', async (_req, res) => {
     }
   }
 
-  if (isMinimax) {
+  if (usesPassiveReadiness) {
     if (minimaxPassiveReadiness.ready) {
       promoteServiceReady();
     } else {
@@ -634,6 +730,9 @@ app.get('/model-status', async (_req, res) => {
     applyProbeState(probeReady);
   }
 
+  const lifecycleDiagnostics = getRewriteLifecycleDiagnostics();
+  const lastWarmupTriggerAtMs = lifecycleDiagnostics.lastWarmupTriggerAtMs || 0;
+  const lastRecoveryAttemptAtMs = lifecycleDiagnostics.lastRecoveryAttemptAtMs || 0;
   let status = 'warming';
   if (serviceState === 'degraded') {
     status = 'degraded';
@@ -654,24 +753,24 @@ app.get('/model-status', async (_req, res) => {
       : null,
     lastWarmAt,
     lastError,
-    warmupInFlight,
+    warmupInFlight: lifecycleDiagnostics.warmupInFlight || false,
     lastWarmupTriggerAt: lastWarmupTriggerAtMs ? new Date(lastWarmupTriggerAtMs).toISOString() : null,
-    lastWarmupResult,
-    lastWarmupError,
+    lastWarmupResult: lifecycleDiagnostics.lastWarmupResult || null,
+    lastWarmupError: lifecycleDiagnostics.lastWarmupError || null,
     lastProbeReady,
     probeAgeMs: lastProbeAtMs ? Math.max(0, Date.now() - lastProbeAtMs) : null,
-    minimaxPassiveReadiness: isMinimax
+    minimaxPassiveReadiness: usesPassiveReadiness
       ? {
           ...minimaxPassiveReadiness,
-          lastRewriteSuccessAt: lastRewriteSuccessAtMs
-            ? new Date(lastRewriteSuccessAtMs).toISOString()
+          lastRewriteSuccessAt: lifecycleDiagnostics.lastSuccessAtMs
+            ? new Date(lifecycleDiagnostics.lastSuccessAtMs).toISOString()
             : null,
-          lastRewriteFailureAt: lastRewriteFailureAtMs
-            ? new Date(lastRewriteFailureAtMs).toISOString()
+          lastRewriteFailureAt: lifecycleDiagnostics.lastFailureAtMs
+            ? new Date(lifecycleDiagnostics.lastFailureAtMs).toISOString()
             : null,
-          consecutiveRewriteFailures,
-          lastRecoveryAttemptAt: lastMinimaxRecoveryAttemptAtMs
-            ? new Date(lastMinimaxRecoveryAttemptAtMs).toISOString()
+          consecutiveRewriteFailures: lifecycleDiagnostics.consecutiveFailures || 0,
+          lastRecoveryAttemptAt: lastRecoveryAttemptAtMs
+            ? new Date(lastRecoveryAttemptAtMs).toISOString()
             : null,
           recoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
           passiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
@@ -689,11 +788,11 @@ app.get('/healthz', opsLimiter, (_req, res) => {
 app.get('/readyz', opsLimiter, async (_req, res) => {
   const nowMs = Date.now();
   let probeReady = lastProbeReady;
-  const isMinimax = rewriteService.provider.selected === 'minimax';
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
 
-  if (isMinimax) {
-    const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
-    if (minimaxPassiveReadiness.ready) {
+  if (usesPassiveReadiness) {
+    const passiveReadiness = getRewritePassiveReadiness(nowMs);
+    if (passiveReadiness.ready) {
       promoteServiceReady();
       return writeJsonSuccess(res, { serviceState, reason: null });
     }
@@ -702,7 +801,7 @@ app.get('/readyz', opsLimiter, async (_req, res) => {
     serviceState = 'degraded';
     return res
       .status(503)
-      .json({ ok: false, serviceState, reason: minimaxPassiveReadiness.reason || 'MINIMAX_NOT_READY' });
+      .json({ ok: false, serviceState, reason: passiveReadiness.reason || 'MINIMAX_NOT_READY' });
   }
 
   if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
@@ -755,6 +854,7 @@ app.post(
   let minimaxRecoveryAttempt = false;
   let minimaxPassiveReason = null;
   const isMinimax = rewriteService.provider.selected === 'minimax';
+  const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
 
   try {
     email = req.auth?.email || null;
@@ -784,7 +884,7 @@ app.post(
       serviceState === 'ready' &&
       (probeReady === null || probeAgeMs > READY_REWRITE_STRICT_PROBE_MAX_AGE_MS);
 
-    if (!isMinimax && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
+    if (!usesPassiveReadiness && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
       const probeResult = await probeModelReady();
       lastProbeAtMs = Date.now();
       probeReady = probeResult.ready;
@@ -794,25 +894,21 @@ app.post(
       }
     }
 
-    if (isMinimax) {
-      const minimaxPassiveReadiness = getMinimaxPassiveReadiness(nowMs);
-      probeReady = minimaxPassiveReadiness.ready;
-      minimaxPassiveReason = minimaxPassiveReadiness.reason;
+    if (usesPassiveReadiness) {
+      const passiveReadiness = getRewritePassiveReadiness(nowMs);
+      probeReady = passiveReadiness.ready;
+      minimaxPassiveReason = passiveReadiness.reason;
       probeError = minimaxPassiveReason;
-      if (minimaxPassiveReadiness.ready) {
+      if (passiveReadiness.ready) {
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
         serviceState = 'degraded';
 
-        if (minimaxPassiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
-          const cooldownRemainingMs =
-            lastMinimaxRecoveryAttemptAtMs > 0
-              ? MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS - (nowMs - lastMinimaxRecoveryAttemptAtMs)
-              : 0;
-
-          if (cooldownRemainingMs > 0) {
-            const retryAfterSec = Math.max(1, Math.ceil(cooldownRemainingMs / 1000));
+        if (passiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
+          const recoveryAttempt = rewriteLifecycle.beginRecoveryAttempt({ nowMs });
+          if (!recoveryAttempt.allowed) {
+            const retryAfterSec = recoveryAttempt.retryAfterSec;
             res.set('Retry-After', String(retryAfterSec));
             return errorResponse(
               res,
@@ -824,7 +920,6 @@ app.post(
           }
 
           minimaxRecoveryAttempt = true;
-          lastMinimaxRecoveryAttemptAtMs = nowMs;
         }
       }
     } else {
@@ -931,47 +1026,43 @@ app.post(
 
       let rewriteResult;
       try {
-        rewriteResult = await executeWithAdmission({
-          providerName: rewriteService.provider.selected,
+        rewriteResult = await invokeServiceStream({
+          runtime: rewriteRuntime,
           requestId,
-          execute: () => rewriteProviderAdapter.invokeStream({
-            serviceId: rewriteService.id,
-            requestId,
-            payload: {
-              prompt,
-              systemPrompt,
-              userContent
-            },
-            timeoutMs: selectedTimeoutMs,
-            onChunk: async (event) => {
-              if (!event || typeof event !== 'object') {
-                return;
-              }
-
-              if (event.type === 'error' && event.error && typeof event.error === 'object') {
-                streamWriter.writeError(event.error);
-                return;
-              }
-
-              if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
-                streamedText += event.text;
-                streamedChunkEmitted = true;
-                const processedChunk = rewriteService.postProcessOutput({ payload: { response: event.text } });
-                streamWriter.writeChunk({ response: processedChunk?.response || '', done: false });
-                return;
-              }
-
-              if (event.type === 'done') {
-                if (event.usage) {
-                  finalUsage = event.usage;
-                  streamWriter.setUsage(finalUsage);
-                }
-                streamDoneReason = event.reason || streamDoneReason;
-                streamDoneEmitted = true;
-                streamWriter.writeDone(streamDoneReason ? { done_reason: streamDoneReason } : {});
-              }
+          payload: {
+            prompt,
+            systemPrompt,
+            userContent
+          },
+          timeoutMs: selectedTimeoutMs,
+          executeWithAdmission,
+          onChunk: async (event) => {
+            if (!event || typeof event !== 'object') {
+              return;
             }
-          })
+
+            if (event.type === 'error' && event.error && typeof event.error === 'object') {
+              writeRewriteStreamError({ streamWriter, error: event.error });
+              return;
+            }
+
+            if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
+              streamedText += event.text;
+              streamedChunkEmitted = true;
+              writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text });
+              return;
+            }
+
+            if (event.type === 'done') {
+              if (event.usage) {
+                finalUsage = event.usage;
+                streamWriter.setUsage(finalUsage);
+              }
+              streamDoneReason = event.reason || streamDoneReason;
+              streamDoneEmitted = true;
+              writeRewriteStreamDone({ streamWriter, doneReason: streamDoneReason });
+            }
+          }
         });
       } catch (error) {
         if (isAdmissionOverloadError(error)) {
@@ -989,21 +1080,13 @@ app.post(
       }
 
       if (!rewriteResult.ok) {
-        lastRewriteFailureAtMs = Date.now();
-        consecutiveRewriteFailures += 1;
-        const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
+        const mappedError = rewriteResult.error;
         setLastError(mappedError.code, mappedError.message);
-        streamWriter.writeError({
-          code: mappedError.code,
-          message: mappedError.message,
-          status: mappedError.status || 502
-        });
+        writeRewriteStreamError({ streamWriter, error: mappedError, defaultStatus: 502 });
         return res.end();
       }
 
       modelPhase = 'ready';
-      lastRewriteSuccessAtMs = Date.now();
-      consecutiveRewriteFailures = 0;
       lastWarmAt = new Date().toISOString();
       lastError = null;
 
@@ -1018,31 +1101,30 @@ app.post(
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
-        const processedStreamResponse = rewriteService.postProcessOutput({ payload: { response: streamResponse } });
-        streamWriter.writeChunk({ response: processedStreamResponse?.response || '', done: false });
+        writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse });
       }
 
       if (!streamDoneEmitted) {
-        streamWriter.writeDone({ done_reason: rewriteResult.data?.doneReason || streamDoneReason || 'stop' });
+        writeRewriteStreamDone({
+          streamWriter,
+          doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'
+        });
       }
       return res.end();
     }
 
     let rewriteResult;
     try {
-      rewriteResult = await executeWithAdmission({
-        providerName: rewriteService.provider.selected,
+      rewriteResult = await invokeServiceSync({
+        runtime: rewriteRuntime,
         requestId,
-        execute: () => rewriteProviderAdapter.invokeSync({
-          serviceId: rewriteService.id,
-          requestId,
-          payload: {
-            prompt,
-            systemPrompt,
-            userContent
-          },
-          timeoutMs: selectedTimeoutMs
-        })
+        payload: {
+          prompt,
+          systemPrompt,
+          userContent
+        },
+        timeoutMs: selectedTimeoutMs,
+        executeWithAdmission
       });
     } catch (error) {
       if (isAdmissionOverloadError(error)) {
@@ -1052,9 +1134,7 @@ app.post(
       throw error;
     }
     if (!rewriteResult.ok) {
-      lastRewriteFailureAtMs = Date.now();
-      consecutiveRewriteFailures += 1;
-      const mappedError = rewriteResult.error || rewriteProviderAdapter.mapError(new Error('unknown'));
+      const mappedError = rewriteResult.error;
       if (mappedError.code === 'MODEL_TIMEOUT' && requestPhase !== 'ready') {
         setLastError(
           'MODEL_COLD_START_TIMEOUT',
@@ -1073,8 +1153,6 @@ app.post(
     }
 
     modelPhase = 'ready';
-    lastRewriteSuccessAtMs = Date.now();
-    consecutiveRewriteFailures = 0;
     lastWarmAt = new Date().toISOString();
     lastError = null;
 
@@ -1086,8 +1164,7 @@ app.post(
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
-    const processedOutput = rewriteService.postProcessOutput({ payload: { result: modelText } });
-    return writeJsonSuccess(res, { result: processedOutput?.result || '', ...(usage ? { usage } : {}) });
+    return writeRewriteJsonSuccess({ res, service: rewriteService, response: modelText, usage });
   } finally {
     logRewriteRequest({
       req,
@@ -1125,6 +1202,15 @@ app.post(
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
       }
 
+      if (t2aService.provider.supported === false) {
+        const unsupportedError = t2aService.provider.unsupportedError || {
+          status: 501,
+          code: 'UNSUPPORTED_PROVIDER',
+          message: `Provider "${t2aService.provider.selected}" is not supported for t2a`
+        };
+        return errorResponse(res, unsupportedError.status, unsupportedError.code, unsupportedError.message);
+      }
+
       if (t2aService.provider.selected === 'minimax' && !MINIMAX_API_KEY) {
         return errorResponse(
           res,
@@ -1136,22 +1222,19 @@ app.post(
 
       let t2aResult;
       try {
-        t2aResult = await executeWithAdmission({
-          providerName: t2aService.provider.selected,
+        t2aResult = await invokeServiceSync({
+          runtime: t2aRuntime,
           requestId,
-          execute: () => t2aProviderAdapter.invokeSync({
-            serviceId: t2aService.id,
-            requestId,
-            payload: {
-              text: trimmedText,
-              voice,
-              audio,
-              languageBoost: validationResult.value.languageBoost,
-              voiceModify: validationResult.value.voiceModify,
-              outputFormat: validationResult.value.outputFormat
-            },
-            timeoutMs: t2aService.timeouts.invokeMs
-          })
+          payload: {
+            text: trimmedText,
+            voice,
+            audio,
+            languageBoost: validationResult.value.languageBoost,
+            voiceModify: validationResult.value.voiceModify,
+            outputFormat: validationResult.value.outputFormat
+          },
+          timeoutMs: t2aService.timeouts.invokeMs,
+          executeWithAdmission
         });
       } catch (error) {
         if (isAdmissionOverloadError(error)) {
@@ -1162,36 +1245,20 @@ app.post(
       }
 
       if (!t2aResult.ok) {
-        const mappedError = t2aResult.error || t2aProviderAdapter.mapError(new Error('unknown'));
+        const mappedError = t2aResult.error;
         return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
       }
 
-      const output = t2aResult.data?.output || {};
-      const audioBuffer = output?.meta?.audio || output?.artifacts?.find((artifact) => artifact?.kind === 'audio')?.data;
-      const format = output?.meta?.format || output?.artifacts?.[0]?.format || 'mp3';
-      const contentType = output?.meta?.contentType || output?.meta?.mime || output?.artifacts?.[0]?.contentType || 'audio/mpeg';
-      const providerMeta = output?.meta?.provider || null;
-
-      if (!Buffer.isBuffer(audioBuffer) || audioBuffer.length === 0) {
-        return errorResponse(res, 502, 'PROVIDER_ERROR', 'Provider response did not include audio data');
+      const t2aWriteResult = writeT2AOutput({
+        res,
+        output: t2aResult.data?.output || {},
+        responseMode
+      });
+      if (!t2aWriteResult.ok) {
+        const mappedError = t2aWriteResult.error;
+        return errorResponse(res, mappedError.status || 502, mappedError.code, mappedError.message);
       }
-
-      if (responseMode === 'base64_json') {
-        return writeJsonSuccess(res, {
-          audio: audioBuffer.toString('base64'),
-          format,
-          mime: contentType,
-          contentType,
-          size: audioBuffer.length,
-          provider: providerMeta
-        });
-      }
-
-      res.status(200);
-      res.set('Content-Type', contentType);
-      res.set('Content-Length', String(audioBuffer.length));
-      res.set('Content-Disposition', `inline; filename="speech.${format}"`);
-      return res.end(audioBuffer);
+      return t2aWriteResult;
     } catch (error) {
       if (error?.code === 'STREAMING_UNSUPPORTED') {
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
@@ -1228,7 +1295,7 @@ app.listen(PORT, HOST, () => {
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
       warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS,
       rateLimitPolicy,
-      rewriteDebugRawOutput: REWRITE_DEBUG_RAW_OUTPUT,
+      providerDebugRawOutput: PROVIDER_DEBUG_RAW_OUTPUT,
       warmupOnStart: WARMUP_ON_START,
       warmupStartupMaxWaitMs: WARMUP_STARTUP_MAX_WAIT_MS,
       warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,

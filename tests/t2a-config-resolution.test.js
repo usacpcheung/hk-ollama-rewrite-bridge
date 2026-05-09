@@ -106,6 +106,34 @@ test('defaults apply when T2A env keys are absent', () => {
   assert.equal(config.sources.voiceId.type, 'default');
 });
 
+test('T2A_PROVIDER explicitly selects minimax when configured', () => {
+  const config = resolveT2AConfig({
+    env: { T2A_PROVIDER: 'minimax' },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  assert.equal(config.provider, 'minimax');
+  assert.equal(config.providerSupported, true);
+  assert.equal(config.sources.provider.type, 'preferred');
+  assert.equal(config.sources.provider.key, 'T2A_PROVIDER');
+});
+
+test('unsupported T2A_PROVIDER stays selected instead of falling back to minimax', () => {
+  const config = resolveT2AConfig({
+    env: { T2A_PROVIDER: 'unknown-provider' },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: { minimax: { streaming: false } }
+  });
+
+  assert.equal(config.provider, 'unknown-provider');
+  assert.equal(config.providerSupported, false);
+  assert.equal(config.sources.provider.type, 'preferred');
+  assert.equal(config.providers.minimax.model, 'speech-2.6-hd');
+});
+
 test('malformed preferred T2A env values fall back to legacy values or defaults', () => {
   const env = {
     T2A_MAX_TEXT_LENGTH: 'bad',
