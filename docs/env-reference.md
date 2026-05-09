@@ -77,12 +77,13 @@ readiness or warmup requests to Minimax.
 ## T2A Service And Minimax Provider
 
 T2A is structured as a service runtime, but only Minimax-compatible T2A is
-implemented today. `T2A_PROVIDER` is reserved for future provider selection and
-currently resolves to Minimax-compatible handling.
+implemented today. `T2A_PROVIDER` is an official selector with `minimax` as the
+only supported value. Unknown explicit values fail with controlled
+`UNSUPPORTED_PROVIDER` responses and do not call Minimax.
 
 | Variable | Default | Meaning |
 |---|---:|---|
-| `T2A_PROVIDER` | `minimax` | Reserved provider selector; Minimax-only today. |
+| `T2A_PROVIDER` | `minimax` | T2A provider selector. Supported today: `minimax`. |
 | `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted T2A input length in Unicode characters. |
 | `T2A_INVOKE_TIMEOUT_MS` | `30000` | T2A provider invocation timeout. |
 | `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Minimax T2A endpoint. |
