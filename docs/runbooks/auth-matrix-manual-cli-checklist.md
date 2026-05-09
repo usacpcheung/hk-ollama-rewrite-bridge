@@ -28,8 +28,8 @@ The same auth envelope applies to both `/rewrite` and `/t2a`.
 | Wrong `X-Bridge-Auth` | wrong secret + valid email | 401 | `AUTH_REQUIRED` |
 | Missing `X-Authenticated-Email` | valid secret only | 401 | `AUTH_REQUIRED` |
 | Malformed multi-value email | valid secret + comma-separated values | 401 | `AUTH_HEADER_INVALID` |
-| Non-allowed email domain | valid secret + non-`hs.edu.hk` email | 403 | `FORBIDDEN_DOMAIN` |
-| Valid auth headers | valid secret + `@hs.edu.hk` email | not blocked by auth layer | N/A |
+| Non-allowed email domain | valid secret + email outside `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` | 403 | `FORBIDDEN_DOMAIN` |
+| Valid auth headers | valid secret + email inside `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` | not blocked by auth layer | N/A |
 
 ## 3) One-time environment setup
 

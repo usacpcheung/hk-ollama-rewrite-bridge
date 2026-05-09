@@ -17,6 +17,7 @@ const DEFAULT_VOICE_MODIFY = Object.freeze({
   timbre: 0
 });
 const DEFAULT_OUTPUT_FORMAT = 'hex';
+const SUPPORTED_T2A_PROVIDERS = new Set(['minimax']);
 
 function countUnicodeCharacters(value) {
   return [...value].length;
@@ -180,7 +181,7 @@ function resolveT2AConfig({
     env,
     preferredKeys: [`${serviceId}_PROVIDER`],
     legacyKeys: [],
-    parse: (raw, fallback) => raw || fallback,
+    parse: (raw, fallback) => String(raw || '').trim().toLowerCase() || fallback,
     defaultValue: 'minimax',
     warnLegacyUsage,
     warningLabel: 'provider'
@@ -215,6 +216,8 @@ function resolveT2AConfig({
   const minimaxApiUrlResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_API_URL`, `${serviceId}_PROVIDER_MINIMAX_API_URL`, `${serviceId}_URL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_API_URL. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_URL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: DEFAULT_MINIMAX_API_URL,
@@ -225,6 +228,8 @@ function resolveT2AConfig({
   const minimaxModelResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_MODEL`, `${serviceId}_PROVIDER_MINIMAX_MODEL`, `${serviceId}_MODEL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_MODEL. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_MODEL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: DEFAULT_MINIMAX_MODEL,
@@ -235,6 +240,8 @@ function resolveT2AConfig({
   const voiceIdResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_VOICE_ID`, `${serviceId}_PROVIDER_MINIMAX_VOICE_ID`, `${serviceId}_VOICE_ID`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_VOICE_ID. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_VOICE_ID'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: DEFAULT_MINIMAX_VOICE_ID,
@@ -245,6 +252,8 @@ function resolveT2AConfig({
   const speedResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_SPEED`, `${serviceId}_PROVIDER_MINIMAX_SPEED`, `${serviceId}_SPEED`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_SPEED. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_SPEED'],
     parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: 0.5, max: 2 }),
     defaultValue: DEFAULT_MINIMAX_SPEED,
@@ -255,6 +264,8 @@ function resolveT2AConfig({
   const volumeResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_VOLUME`, `${serviceId}_PROVIDER_MINIMAX_VOLUME`, `${serviceId}_VOLUME`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_VOLUME. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_VOLUME'],
     parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: 0, max: 10 }),
     defaultValue: DEFAULT_MINIMAX_VOLUME,
@@ -265,6 +276,8 @@ function resolveT2AConfig({
   const pitchResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_PITCH`, `${serviceId}_PROVIDER_MINIMAX_PITCH`, `${serviceId}_PITCH`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer T2A_MINIMAX_PITCH. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_T2A_PITCH'],
     parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: -12, max: 12 }),
     defaultValue: DEFAULT_MINIMAX_PITCH,
@@ -272,11 +285,13 @@ function resolveT2AConfig({
     warningLabel: 'pitch'
   });
 
-  const provider = providerResolution.value === 'minimax' ? 'minimax' : 'minimax';
+  const provider = providerResolution.value;
+  const providerSupported = SUPPORTED_T2A_PROVIDERS.has(provider);
   const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
 
   return {
     provider,
+    providerSupported,
     maxTextLength: maxTextLengthResolution.value,
     timeouts: {
       invokeMs: invokeTimeoutResolution.value
@@ -350,6 +365,14 @@ function createT2AServiceDefinition({
     },
     provider: {
       selected: resolvedConfig.provider,
+      supported: resolvedConfig.providerSupported,
+      unsupportedError: resolvedConfig.providerSupported
+        ? null
+        : {
+          status: 501,
+          code: 'UNSUPPORTED_PROVIDER',
+          message: `Provider "${resolvedConfig.provider}" is not supported for t2a`
+        },
       runtime: resolvedConfig.providers[resolvedConfig.provider] || {},
       runtimeByProvider: resolvedConfig.providers,
       sources: resolvedConfig.sources
