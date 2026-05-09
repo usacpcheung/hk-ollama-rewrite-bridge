@@ -14,13 +14,13 @@ All request/response contracts below are based on the current server and service
 Both Rewrite and T2A routes are protected by the same header-based gate:
 
 - `X-Bridge-Auth`: must exactly match server env `BRIDGE_INTERNAL_AUTH_SECRET`
-- `X-Authenticated-Email`: must be a single email ending with `@hs.edu.hk`
+- `X-Authenticated-Email`: must be a single email ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` (default `@hs.edu.hk`)
 
 If authentication fails, responses are:
 
 - `401 AUTH_REQUIRED` (missing/invalid auth)
 - `401 AUTH_HEADER_INVALID` (invalid email header format, e.g. comma-separated)
-- `403 FORBIDDEN_DOMAIN` (email domain is not `hs.edu.hk`)
+- `403 FORBIDDEN_DOMAIN` (email domain does not match `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN`)
 
 ### Deployment expectation (Apache + OIDC)
 

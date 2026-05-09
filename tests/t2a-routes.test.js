@@ -324,6 +324,44 @@ test('t2a routes reject requests when Minimax API key is missing', async (t) => 
   assert.equal(body.error.code, 'MINIMAX_API_KEY_MISSING');
 });
 
+test('t2a routes reject unsupported providers without calling Minimax', async (t) => {
+  let minimaxCalls = 0;
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    minimaxCalls += 1;
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'should not be called' }));
+    });
+  });
+  t.after(() => mockServer.close());
+
+  const serverProcess = spawnBridge({
+    T2A_PROVIDER: 'unknown-provider',
+    T2A_MINIMAX_API_URL: `http://127.0.0.1:${port}/t2a`,
+    MINIMAX_API_KEY: 'test-key'
+  });
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  for (const pathname of ['/t2a', '/api/t2a']) {
+    const response = await postJson(pathname, { text: '你好' }, authHeaders);
+    const body = await response.json();
+
+    assert.equal(response.status, 501);
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, 'UNSUPPORTED_PROVIDER');
+    assert.equal(body.error.message, 'Provider "unknown-provider" is not supported for t2a');
+  }
+
+  assert.equal(minimaxCalls, 0);
+});
+
 test('t2a routes preserve validation errors for invalid, missing, and overlong text', async (t) => {
   const serverProcess = spawnBridge({
     MINIMAX_API_KEY: 'test-key',
