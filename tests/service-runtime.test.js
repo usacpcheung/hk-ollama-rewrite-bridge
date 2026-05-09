@@ -43,6 +43,10 @@ test('creates service runtimes with provider names, adapters, capabilities, and 
   const runtimes = createServiceRuntimes({
     serviceRegistry: createRegistry([rewriteService, t2aService]),
     createProviderAdapter,
+    createLifecycle: ({ serviceId, providerName }) => ({
+      mode: `${providerName}:${serviceId}`,
+      getDiagnostics: () => ({})
+    }),
     createProviderOptions: ({ service }) => {
       seenProviderOptions.push(service.id);
       return { optionMarker: service.id };
@@ -70,12 +74,14 @@ test('creates service runtimes with provider names, adapters, capabilities, and 
   assert.equal(rewriteRuntime.providerName, 'provider-a');
   assert.deepEqual(rewriteRuntime.capabilities, { streaming: true });
   assert.deepEqual(rewriteRuntime.timeouts, { readyMs: 100, coldMs: 200 });
+  assert.equal(rewriteRuntime.lifecycle.mode, 'provider-a:rewrite');
   assert.equal(typeof rewriteRuntime.adapter.invokeSync, 'function');
 
   assert.equal(t2aRuntime.service, t2aService);
   assert.equal(t2aRuntime.providerName, 'provider-b');
   assert.deepEqual(t2aRuntime.capabilities, { streaming: false });
   assert.deepEqual(t2aRuntime.timeouts, { invokeMs: 300 });
+  assert.equal(t2aRuntime.lifecycle.mode, 'provider-b:t2a');
 
   assert.deepEqual(seenProviderOptions, ['rewrite', 't2a']);
   assert.deepEqual(runtimes.list().map((runtime) => runtime.service.id), ['rewrite', 't2a']);

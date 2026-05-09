@@ -180,3 +180,41 @@ test('POST /rewrite auth baseline parity matrix', async (t) => {
   assert.notEqual(validHeadersResult.body?.error?.code, 'AUTH_HEADER_INVALID');
   assert.notEqual(validHeadersResult.body?.error?.code, 'FORBIDDEN_DOMAIN');
 });
+
+test('POST /rewrite auth allowed domain is configurable through canonical env', async (t) => {
+  const serverProcess = spawn(process.execPath, ['server.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      REWRITE_PROVIDER: 'minimax',
+      WARMUP_ON_START: 'false',
+      BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+      BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN: '@example.edu',
+      AUTH_ALLOWED_EMAIL_DOMAIN: '@hs.edu.hk'
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const canonicalDomainResult = await postRewrite({
+    'X-Bridge-Auth': AUTH_SECRET,
+    'X-Authenticated-Email': 'tester@example.edu'
+  });
+  assert.notEqual(canonicalDomainResult.status, 401);
+  assert.notEqual(canonicalDomainResult.status, 403);
+  assert.notEqual(canonicalDomainResult.body?.error?.code, 'FORBIDDEN_DOMAIN');
+
+  const deprecatedAliasDomainResult = await postRewrite({
+    'X-Bridge-Auth': AUTH_SECRET,
+    'X-Authenticated-Email': 'tester@hs.edu.hk'
+  });
+  assert.equal(deprecatedAliasDomainResult.status, 403);
+  assert.equal(deprecatedAliasDomainResult.body?.error?.code, 'FORBIDDEN_DOMAIN');
+});

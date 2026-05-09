@@ -158,7 +158,7 @@ function resolveRewriteConfig({
   const providerResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_PROVIDER`],
-    legacyKeys: ['REWRITE_PROVIDER'],
+    legacyKeys: [],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'ollama',
     warnLegacyUsage,
@@ -168,7 +168,7 @@ function resolveRewriteConfig({
   const maxCompletionTokensResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MAX_COMPLETION_TOKENS`],
-    legacyKeys: ['REWRITE_MAX_COMPLETION_TOKENS'],
+    legacyKeys: [],
     parse: (raw, fallback) => {
       const parsed = parseEnvBoundedInteger(raw, fallback, {
         min: 1,
@@ -184,7 +184,7 @@ function resolveRewriteConfig({
   const maxTextLengthResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MAX_TEXT_LENGTH`],
-    legacyKeys: ['REWRITE_MAX_TEXT_LENGTH'],
+    legacyKeys: [],
     parse: (raw, fallback) => {
       const parsed = parseEnvBoundedInteger(raw, fallback, {
         min: 1,
@@ -199,8 +199,10 @@ function resolveRewriteConfig({
 
   const readyTimeoutResolution = readWithLegacyFallback({
     env,
-    preferredKeys: [`${serviceId}_READY_TIMEOUT_MS`],
-    legacyKeys: ['OLLAMA_TIMEOUT_MS'],
+    preferredKeys: [`${serviceId}_READY_INVOKE_TIMEOUT_MS`],
+    // Deprecated env aliases kept for one compatibility window.
+    // Prefer REWRITE_READY_INVOKE_TIMEOUT_MS. Remove after production env files have migrated.
+    legacyKeys: [`${serviceId}_READY_TIMEOUT_MS`, 'OLLAMA_TIMEOUT_MS'],
     parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, { max: 300_000 }),
     defaultValue: 30_000,
     warnLegacyUsage,
@@ -209,8 +211,10 @@ function resolveRewriteConfig({
 
   const coldTimeoutResolution = readWithLegacyFallback({
     env,
-    preferredKeys: [`${serviceId}_COLD_TIMEOUT_MS`],
-    legacyKeys: ['OLLAMA_COLD_TIMEOUT_MS'],
+    preferredKeys: [`${serviceId}_COLD_INVOKE_TIMEOUT_MS`],
+    // Deprecated env aliases kept for one compatibility window.
+    // Prefer REWRITE_COLD_INVOKE_TIMEOUT_MS. Remove after production env files have migrated.
+    legacyKeys: [`${serviceId}_COLD_TIMEOUT_MS`, 'OLLAMA_COLD_TIMEOUT_MS'],
     parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, { max: 600_000 }),
     defaultValue: 120_000,
     warnLegacyUsage,
@@ -221,6 +225,8 @@ function resolveRewriteConfig({
   const ollamaUrlResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_OLLAMA_URL`, `${serviceId}_PROVIDER_OLLAMA_URL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer REWRITE_OLLAMA_URL. Remove after production env files have migrated.
     legacyKeys: ['OLLAMA_URL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'http://127.0.0.1:11434/api/generate',
@@ -231,6 +237,8 @@ function resolveRewriteConfig({
   const ollamaPsUrlResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_OLLAMA_PS_URL`, `${serviceId}_PROVIDER_OLLAMA_PS_URL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer REWRITE_OLLAMA_PS_URL. Remove after production env files have migrated.
     legacyKeys: ['OLLAMA_PS_URL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'http://127.0.0.1:11434/api/ps',
@@ -241,6 +249,8 @@ function resolveRewriteConfig({
   const ollamaModelResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_OLLAMA_MODEL`, `${serviceId}_PROVIDER_OLLAMA_MODEL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer REWRITE_OLLAMA_MODEL. Remove after production env files have migrated.
     legacyKeys: ['OLLAMA_MODEL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'qwen2.5:3b-instruct',
@@ -251,6 +261,8 @@ function resolveRewriteConfig({
   const minimaxModelResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_MODEL`, `${serviceId}_PROVIDER_MINIMAX_MODEL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer REWRITE_MINIMAX_MODEL. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_MODEL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'M2-her',
@@ -261,6 +273,8 @@ function resolveRewriteConfig({
   const minimaxApiUrlResolution = readWithLegacyFallback({
     env,
     preferredKeys: [`${serviceId}_MINIMAX_API_URL`, `${serviceId}_PROVIDER_MINIMAX_API_URL`],
+    // Deprecated env alias kept for one compatibility window.
+    // Prefer REWRITE_MINIMAX_API_URL. Remove after production env files have migrated.
     legacyKeys: ['MINIMAX_API_URL'],
     parse: (raw, fallback) => raw || fallback,
     defaultValue: 'https://api.minimax.io/v1/text/chatcompletion_v2',

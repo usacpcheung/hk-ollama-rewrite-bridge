@@ -1,5 +1,6 @@
 const DEFAULT_TRUSTED_PROXY_ADDRESSES = new Set(['127.0.0.1', '::1']);
 const OIDC_LIMITER_HEADERS = ['X-Authenticated-Email', 'X-Authenticated-User', 'X-Authenticated-Subject'];
+const { readEnvWithDeprecatedAliases } = require('../lib/env-config');
 
 function normalizeRemoteAddress(value) {
   if (!value) {
@@ -50,10 +51,18 @@ function createClientIdentityResolver({
   trustedProxyAddresses,
   preferExpressIp = false
 } = {}) {
+  // Deprecated env alias kept for one compatibility window.
+  // Prefer BRIDGE_TRUSTED_PROXY_ADDRESSES. Remove after production env files have migrated.
+  const resolvedTrustedProxyAddresses = readEnvWithDeprecatedAliases({
+    name: 'BRIDGE_TRUSTED_PROXY_ADDRESSES',
+    deprecatedNames: ['TRUSTED_PROXY_ADDRESSES'],
+    defaultValue: undefined,
+    parse: (rawValue) => rawValue
+  }).value;
   const trustedProxyAddressSet =
     trustedProxyAddresses instanceof Set
       ? trustedProxyAddresses
-      : parseTrustedProxyAddresses(trustedProxyAddresses || process.env.TRUSTED_PROXY_ADDRESSES);
+      : parseTrustedProxyAddresses(trustedProxyAddresses || resolvedTrustedProxyAddresses);
 
   return function resolveClientIdentity(req, _res, next) {
     const socketRemoteAddress = normalizeRemoteAddress(req.socket?.remoteAddress || '');
