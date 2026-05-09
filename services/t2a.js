@@ -17,6 +17,7 @@ const DEFAULT_VOICE_MODIFY = Object.freeze({
   timbre: 0
 });
 const DEFAULT_OUTPUT_FORMAT = 'hex';
+const SUPPORTED_T2A_PROVIDERS = new Set(['minimax']);
 
 function countUnicodeCharacters(value) {
   return [...value].length;
@@ -180,7 +181,7 @@ function resolveT2AConfig({
     env,
     preferredKeys: [`${serviceId}_PROVIDER`],
     legacyKeys: [],
-    parse: (raw, fallback) => raw || fallback,
+    parse: (raw, fallback) => String(raw || '').trim().toLowerCase() || fallback,
     defaultValue: 'minimax',
     warnLegacyUsage,
     warningLabel: 'provider'
@@ -284,11 +285,13 @@ function resolveT2AConfig({
     warningLabel: 'pitch'
   });
 
-  const provider = providerResolution.value === 'minimax' ? 'minimax' : 'minimax';
+  const provider = providerResolution.value;
+  const providerSupported = SUPPORTED_T2A_PROVIDERS.has(provider);
   const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
 
   return {
     provider,
+    providerSupported,
     maxTextLength: maxTextLengthResolution.value,
     timeouts: {
       invokeMs: invokeTimeoutResolution.value
@@ -362,6 +365,14 @@ function createT2AServiceDefinition({
     },
     provider: {
       selected: resolvedConfig.provider,
+      supported: resolvedConfig.providerSupported,
+      unsupportedError: resolvedConfig.providerSupported
+        ? null
+        : {
+          status: 501,
+          code: 'UNSUPPORTED_PROVIDER',
+          message: `Provider "${resolvedConfig.provider}" is not supported for t2a`
+        },
       runtime: resolvedConfig.providers[resolvedConfig.provider] || {},
       runtimeByProvider: resolvedConfig.providers,
       sources: resolvedConfig.sources

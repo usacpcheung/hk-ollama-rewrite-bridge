@@ -1202,6 +1202,15 @@ app.post(
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
       }
 
+      if (t2aService.provider.supported === false) {
+        const unsupportedError = t2aService.provider.unsupportedError || {
+          status: 501,
+          code: 'UNSUPPORTED_PROVIDER',
+          message: `Provider "${t2aService.provider.selected}" is not supported for t2a`
+        };
+        return errorResponse(res, unsupportedError.status, unsupportedError.code, unsupportedError.message);
+      }
+
       if (t2aService.provider.selected === 'minimax' && !MINIMAX_API_KEY) {
         return errorResponse(
           res,
