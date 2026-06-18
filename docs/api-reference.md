@@ -185,6 +185,8 @@ A similar `202` contract may also use `MODEL_WARMUP_STARTED`.
 - Use non-streaming JSON if your app only needs final text.
 - Use streaming only when you explicitly need progressive rendering and your environment enables it.
 - Always handle `202` and `503` gracefully; do not assume the model is immediately ready after process start.
+- Provider model and protocol changes, including opt-in MiniMax M3, are internal to the bridge and do not change this request or response contract.
+- MiniMax thinking/reasoning fields are not exposed to callers.
 
 ## 2) `POST /t2a`
 

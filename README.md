@@ -169,6 +169,24 @@ remain supported for one compatibility window and emit startup warnings when
 used. The docs intentionally avoid duplicating the full env table here so that
 operators have one source of truth.
 
+### Opt-in MiniMax M3 rewrite
+
+MiniMax M3 is supported through MiniMax's recommended Anthropic-compatible
+Messages interface without changing the public rewrite API:
+
+```env
+REWRITE_PROVIDER=minimax
+REWRITE_MINIMAX_API_FORMAT=anthropic
+REWRITE_MINIMAX_ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+REWRITE_MINIMAX_MODEL=MiniMax-M3
+```
+
+The default remains `M2-her` with `legacy-chat`. Existing callers continue to
+send the same `/rewrite` request and receive the same JSON or NDJSON response.
+The SDK appends `/v1/messages` to the configured Anthropic base URL. Rollback
+only requires restoring the legacy format and model values and restarting the
+bridge.
+
 ## Reverse-proxy authentication hardening
 
 Protected routes require **two trusted signals**:

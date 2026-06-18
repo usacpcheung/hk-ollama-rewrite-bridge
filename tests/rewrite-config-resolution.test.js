@@ -65,7 +65,47 @@ test('defaults apply when both new and legacy keys are absent', () => {
   assert.equal(config.sources.ollamaUrl.type, 'default');
   assert.equal(config.sources.ollamaPsUrl.type, 'default');
   assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
+  assert.equal(config.providers.minimax.apiFormat, 'legacy-chat');
+  assert.equal(config.providers.minimax.anthropicBaseUrl, 'https://api.minimax.io/anthropic');
   assert.equal(config.sources.minimaxApiUrl.type, 'default');
+  assert.equal(config.sources.minimaxApiFormat.type, 'default');
+  assert.equal(config.sources.minimaxAnthropicBaseUrl.type, 'default');
+});
+
+test('resolves opt-in Minimax Anthropic format and base URL', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_MINIMAX_API_FORMAT: 'anthropic',
+      REWRITE_MINIMAX_ANTHROPIC_BASE_URL: 'https://minimax.example/anthropic'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.minimax.apiFormat, 'anthropic');
+  assert.equal(config.providers.minimax.anthropicBaseUrl, 'https://minimax.example/anthropic');
+  assert.equal(config.sources.minimaxApiFormat.key, 'REWRITE_MINIMAX_API_FORMAT');
+  assert.equal(
+    config.sources.minimaxAnthropicBaseUrl.key,
+    'REWRITE_MINIMAX_ANTHROPIC_BASE_URL'
+  );
+});
+
+test('invalid Minimax API format falls back to legacy while base URL stays configurable', () => {
+  const config = resolveRewriteConfig({
+    env: {
+      REWRITE_MINIMAX_API_FORMAT: 'openai-chat',
+      REWRITE_MINIMAX_ANTHROPIC_BASE_URL: 'https://minimax.example/anthropic'
+    },
+    parseEnvBoundedInteger: parseBounded,
+    parseEnvMilliseconds: parseBounded,
+    providerCapabilities: PROVIDER_CAPABILITIES
+  });
+
+  assert.equal(config.providers.minimax.apiFormat, 'legacy-chat');
+  assert.equal(config.providers.minimax.anthropicBaseUrl, 'https://minimax.example/anthropic');
+  assert.equal(config.sources.minimaxApiFormat.type, 'default');
 });
 
 test('preferred minimax api url overrides legacy key', () => {
@@ -123,6 +163,8 @@ test('rewrite config is unchanged when t2a env vars are present', () => {
   assert.equal(config.providers.ollama.psUrl, 'http://127.0.0.1:11434/api/ps');
   assert.equal(config.providers.minimax.apiUrl, 'https://api.minimax.io/v1/text/chatcompletion_v2');
   assert.equal(config.providers.minimax.model, 'M2-her');
+  assert.equal(config.providers.minimax.apiFormat, 'legacy-chat');
+  assert.equal(config.providers.minimax.anthropicBaseUrl, 'https://api.minimax.io/anthropic');
   assert.equal(config.sources.maxCompletionTokens.type, 'default');
   assert.equal(config.sources.maxTextLength.type, 'default');
   assert.equal(config.sources.minimaxApiUrl.type, 'default');

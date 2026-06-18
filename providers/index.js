@@ -80,6 +80,8 @@ function createProvider({
     return ensureServiceHandlers(createMinimaxProvider({
       apiUrl: selectedRuntime.apiUrl,
       model: selectedRuntime.model,
+      apiFormat: selectedRuntime.apiFormat,
+      anthropicBaseUrl: selectedRuntime.anthropicBaseUrl,
       apiKey: minimaxApiKey,
       systemPrompt: rewritePromptConfig.minimaxSystemPrompt,
       userTemplate: rewritePromptConfig.minimaxUserTemplate,

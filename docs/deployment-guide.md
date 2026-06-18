@@ -74,10 +74,26 @@ OLLAMA_KEEP_ALIVE=30m
 
 ```env
 REWRITE_PROVIDER=minimax
+REWRITE_MINIMAX_API_FORMAT=legacy-chat
 REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2
 REWRITE_MINIMAX_MODEL=M2-her
 MINIMAX_API_KEY=<SECRET>
 ```
+
+#### Opt-in rewrite with MiniMax M3
+
+```env
+REWRITE_PROVIDER=minimax
+REWRITE_MINIMAX_API_FORMAT=anthropic
+REWRITE_MINIMAX_ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+REWRITE_MINIMAX_MODEL=MiniMax-M3
+MINIMAX_API_KEY=<SECRET>
+```
+
+Deploy M3 support first while retaining the legacy production values. Test M3
+on staging or a separate instance before switching traffic. No caller API
+change is required. The Anthropic SDK appends `/v1/messages`, so do not include
+that suffix in `REWRITE_MINIMAX_ANTHROPIC_BASE_URL`.
 
 ### T2A service
 
@@ -98,6 +114,16 @@ MINIMAX_API_KEY=<SECRET>
 ```
 
 If `MINIMAX_API_KEY` is missing, Minimax-backed traffic cannot succeed and readiness can report `MINIMAX_API_KEY_MISSING` on Minimax rewrite paths.
+
+To roll rewrite back from M3, restore:
+
+```env
+REWRITE_MINIMAX_API_FORMAT=legacy-chat
+REWRITE_MINIMAX_API_URL=https://api.minimax.io/v1/text/chatcompletion_v2
+REWRITE_MINIMAX_MODEL=M2-her
+```
+
+Then restart the bridge. Downstream applications do not need to be redeployed.
 
 ## 4) Example production env file
 

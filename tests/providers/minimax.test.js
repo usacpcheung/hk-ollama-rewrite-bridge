@@ -16,6 +16,21 @@ function createSseStream(frames) {
   });
 }
 
+function createAnthropicSseStream(events) {
+  const encoder = new TextEncoder();
+
+  return new ReadableStream({
+    start(controller) {
+      for (const entry of events) {
+        controller.enqueue(encoder.encode(
+          `event: ${entry.event}\ndata: ${JSON.stringify(entry.data)}\n\n`
+        ));
+      }
+      controller.close();
+    }
+  });
+}
+
 test('parses normal delta chunk into canonical response chunk', () => {
   const payload = JSON.stringify({
     object: 'chat.completion.chunk',
@@ -243,6 +258,414 @@ test('rewriteStream uses configured max_completion_tokens', async (t) => {
 
   assert.equal(result.ok, true);
   assert.equal(capturedBody.max_completion_tokens, 640);
+});
+
+test('legacy rewrite request remains on the existing HTTP payload', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedBody = null;
+  global.fetch = async (_url, options) => {
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({ reply: '正式內容' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'M2-her',
+    apiFormat: 'legacy-chat',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, true);
+  assert.equal(Object.hasOwn(capturedBody, 'thinking'), false);
+});
+
+test('legacy rewrite treats non-zero base_resp status as a controlled provider failure', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(JSON.stringify({
+    base_resp: { status_code: 1004, status_msg: 'invalid request' }
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://minimax.test/v1/text/chatcompletion_v2',
+    model: 'M2-her',
+    apiFormat: 'legacy-chat',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROVIDER_ERROR');
+  assert.equal(result.error.status, 502);
+});
+
+test('anthropic rewrite uses the SDK base URL, disables thinking, and returns text blocks only', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedUrl = null;
+  let capturedBody = null;
+  global.fetch = async (url, options) => {
+    capturedUrl = String(url);
+    capturedBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      id: 'msg-1',
+      type: 'message',
+      role: 'assistant',
+      model: 'MiniMax-M3',
+      content: [
+        { type: 'thinking', thinking: 'hidden reasoning', signature: 'sig' },
+        { type: 'text', text: '正式書面語' }
+      ],
+      stop_reason: 'end_turn',
+      stop_sequence: null,
+      usage: { input_tokens: 8, output_tokens: 7 }
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key',
+    systemPrompt: '你是改寫助手'
+  });
+
+  const result = await provider.rewrite({
+    prompt: 'legacy',
+    userContent: '原文',
+    timeoutMs: 5_000
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '正式書面語');
+  assert.deepEqual(result.data.usage, { input_tokens: 8, output_tokens: 7 });
+  assert.equal(result.data.doneReason, 'end_turn');
+  assert.equal(capturedUrl, 'http://minimax.test/anthropic/v1/messages');
+  assert.deepEqual(capturedBody.thinking, { type: 'disabled' });
+  assert.equal(capturedBody.stream, false);
+  assert.equal(capturedBody.max_tokens, 300);
+  assert.equal(capturedBody.system, '你是改寫助手');
+  assert.deepEqual(capturedBody.messages, [
+    { role: 'user', content: [{ type: 'text', text: '原文' }] }
+  ]);
+  assert.equal(provider.getInfo().minimaxApiFormat, 'anthropic');
+  assert.equal(provider.getInfo().minimaxAnthropicBaseUrl, 'http://minimax.test/anthropic');
+});
+
+test('anthropic streaming emits text deltas, ignores thinking, and preserves usage', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  let capturedUrl = null;
+  let capturedBody = null;
+  const debugEvents = [];
+  global.fetch = async (url, options) => {
+    capturedUrl = String(url);
+    capturedBody = JSON.parse(options.body);
+    return new Response(createAnthropicSseStream([
+      {
+        event: 'message_start',
+        data: {
+          type: 'message_start',
+          message: {
+            id: 'msg-stream',
+            type: 'message',
+            role: 'assistant',
+            model: 'MiniMax-M3',
+            content: [],
+            stop_reason: null,
+            stop_sequence: null,
+            usage: { input_tokens: 9, output_tokens: 0 }
+          }
+        }
+      },
+      {
+        event: 'content_block_delta',
+        data: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'thinking_delta', thinking: 'hidden reasoning' }
+        }
+      },
+      {
+        event: 'content_block_delta',
+        data: {
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: '正式' }
+        }
+      },
+      {
+        event: 'content_block_delta',
+        data: {
+          type: 'content_block_delta',
+          index: 1,
+          delta: { type: 'text_delta', text: '書面語' }
+        }
+      },
+      {
+        event: 'message_delta',
+        data: {
+          type: 'message_delta',
+          delta: { stop_reason: 'end_turn', stop_sequence: null },
+          usage: { output_tokens: 6 }
+        }
+      },
+      { event: 'message_stop', data: { type: 'message_stop' } }
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream', 'x-request-id': 'req-stream' }
+    });
+  };
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key',
+    debugLog: (event) => debugEvents.push(event)
+  });
+
+  const events = [];
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async (event) => events.push(event)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(capturedUrl, 'http://minimax.test/anthropic/v1/messages');
+  assert.deepEqual(capturedBody.thinking, { type: 'disabled' });
+  assert.equal(capturedBody.stream, true);
+  assert.deepEqual(
+    events.filter((event) => event.type === 'text').map((event) => event.text),
+    ['正式', '書面語']
+  );
+  assert.equal(events.some((event) => JSON.stringify(event).includes('hidden reasoning')), false);
+  assert.deepEqual(events.find((event) => event.type === 'done')?.usage, {
+    input_tokens: 9,
+    output_tokens: 6
+  });
+  assert.equal(events.find((event) => event.type === 'done')?.reason, 'end_turn');
+  assert.equal(result.data.response, '正式書面語');
+  assert.equal(debugEvents.some((event) => event.eventType === 'provider_reasoning_ignored'), true);
+});
+
+test('anthropic rewrite maps authentication failures to the existing provider auth error', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(JSON.stringify({
+    type: 'error',
+    error: { type: 'authentication_error', message: 'invalid API key' }
+  }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROVIDER_AUTH_ERROR');
+  assert.equal(result.error.message, 'Provider authentication failed');
+  assert.equal(result.error.status, 502);
+});
+
+test('anthropic rewrite maps empty text blocks to controlled provider error', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(JSON.stringify({
+    id: 'msg-empty',
+    type: 'message',
+    role: 'assistant',
+    model: 'MiniMax-M3',
+    content: [{ type: 'thinking', thinking: 'hidden', signature: 'sig' }],
+    stop_reason: 'end_turn',
+    stop_sequence: null,
+    usage: { input_tokens: 3, output_tokens: 2 }
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5_000 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROVIDER_ERROR');
+  assert.equal(result.error.message, 'Provider response did not include rewrite content');
+  assert.equal(result.error.status, 502);
+});
+
+test('anthropic rewrite maps an aborted SDK request to model timeout', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => {
+      reject(options.signal.reason || new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key'
+  });
+
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 10 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'MODEL_TIMEOUT');
+  assert.equal(result.error.status, 504);
+});
+
+test('anthropic malformed stream maps to invalid provider response', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  const encoder = new TextEncoder();
+  global.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(
+        'event: content_block_delta\ndata: {invalid-json}\n\n'
+      ));
+      controller.close();
+    }
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key'
+  });
+
+  const events = [];
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async (event) => events.push(event)
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROVIDER_ERROR');
+  assert.equal(result.error.message, 'Invalid provider response');
+  assert.equal(events.filter((event) => event.type === 'error').length, 1);
+});
+
+test('anthropic stream ending without message_stop fails instead of returning partial text', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  global.fetch = async () => new Response(createAnthropicSseStream([
+    {
+      event: 'message_start',
+      data: {
+        type: 'message_start',
+        message: {
+          id: 'msg-truncated',
+          type: 'message',
+          role: 'assistant',
+          model: 'MiniMax-M3',
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 2, output_tokens: 0 }
+        }
+      }
+    },
+    {
+      event: 'content_block_delta',
+      data: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: '部分內容' }
+      }
+    }
+  ]), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' }
+  });
+
+  const provider = createMinimaxProvider({
+    apiUrl: 'http://legacy-minimax.test/v1/text/chatcompletion_v2',
+    anthropicBaseUrl: 'http://minimax.test/anthropic',
+    model: 'MiniMax-M3',
+    apiFormat: 'anthropic',
+    apiKey: 'test-key'
+  });
+
+  const events = [];
+  const result = await provider.rewriteStream({
+    prompt: 'test',
+    timeoutMs: 5_000,
+    onChunk: async (event) => events.push(event)
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'PROVIDER_ERROR');
+  assert.equal(events.filter((event) => event.type === 'text').length, 1);
+  assert.equal(events.filter((event) => event.type === 'error').length, 1);
+  assert.equal(events.filter((event) => event.type === 'done').length, 0);
 });
 
 test('rewrite returns usage metadata when provider includes usage', async (t) => {
