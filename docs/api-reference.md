@@ -212,6 +212,7 @@ Generate speech audio from validated text input using the T2A service definition
   "text": "你好，歡迎使用",
   "response_mode": "binary",
   "voice_id": "Cantonese_ProfessionalHost（F)",
+  "language_boost": "Chinese,Yue",
   "speed": 1,
   "volume": 1,
   "pitch": 0,
@@ -228,6 +229,7 @@ Generate speech audio from validated text input using the T2A service definition
 | `text` | string | Yes | Trimmed, non-empty, max `T2A_MAX_TEXT_LENGTH` Unicode characters. |
 | `response_mode` | string | No | `binary`, `default`, `base64_json`, `base64-json`. Omitted defaults to `binary`. |
 | `voice_id` | string | No | Non-empty string. Defaults from T2A env config. |
+| `language_boost` | string | No | Non-empty string forwarded to the selected provider. Omitted defaults to `Chinese,Yue`. |
 | `speed` | number | No | `0.5` to `2`. Defaults from T2A env config. |
 | `volume` | number | No | `0` to `10`. Defaults from T2A env config. |
 | `pitch` | number | No | `-12` to `12`. Defaults from T2A env config. |
@@ -256,11 +258,11 @@ In addition, upstream Minimax requests are sent with:
 
 - `stream=false`
 - `audio_setting.channel=1`
-- `language_boost="Chinese,Yue"`
+- `language_boost="Chinese,Yue"` when the caller omits `language_boost`
 - `voice_modify={"pitch":0,"intensity":0,"timbre":0}`
 - `output_format="hex"`
 
-These are implementation defaults, not caller-supplied request fields in the current public API.
+The caller may override `language_boost`; the other values above are implementation defaults, not caller-supplied request fields.
 
 ### Calling examples
 
@@ -282,7 +284,7 @@ curl -i -sS http://127.0.0.1:3001/t2a \
   -H 'Content-Type: application/json' \
   -H 'X-Bridge-Auth: <shared-secret>' \
   -H 'X-Authenticated-Email: user@hs.edu.hk' \
-  --data '{"text":"你好，歡迎使用","response_mode":"base64_json","voice_id":"Cantonese_ProfessionalHost（F)","speed":1.1,"sample_rate":32000,"bitrate":128000,"format":"mp3"}'
+  --data '{"text":"Hello, welcome","response_mode":"base64_json","voice_id":"English_expressive_narrator","language_boost":"English","speed":1.1,"sample_rate":32000,"bitrate":128000,"format":"mp3"}'
 ```
 
 ### Binary success (`response_mode=binary` or omitted)

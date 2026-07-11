@@ -56,6 +56,14 @@ test('t2a validation rejects invalid voice controls and audio options', () => {
   assert.equal(invalidVoiceId.ok, false);
   assert.equal(invalidVoiceId.message, 'voice_id must be a non-empty string');
 
+  const invalidLanguageBoost = service.validateRequest({ body: { text: '你好', language_boost: '   ' } });
+  assert.equal(invalidLanguageBoost.ok, false);
+  assert.equal(invalidLanguageBoost.message, 'language_boost must be a non-empty string');
+
+  const nonStringLanguageBoost = service.validateRequest({ body: { text: '你好', language_boost: ['Chinese,Yue'] } });
+  assert.equal(nonStringLanguageBoost.ok, false);
+  assert.equal(nonStringLanguageBoost.message, 'language_boost must be a non-empty string');
+
   const invalidSpeed = service.validateRequest({ body: { text: '你好', speed: '4' } });
   assert.equal(invalidSpeed.ok, false);
   assert.equal(invalidSpeed.message, 'speed must be a number between 0.5 and 2');
@@ -71,6 +79,18 @@ test('t2a validation rejects invalid voice controls and audio options', () => {
   const invalidSampleRate = service.validateRequest({ body: { text: '你好', sample_rate: '1234' } });
   assert.equal(invalidSampleRate.ok, false);
   assert.equal(invalidSampleRate.message, 'sample_rate must be an integer between 8000 and 48000');
+});
+
+test('t2a validation resolves language_boost from the request or current default', () => {
+  const service = createService();
+
+  const defaultResult = service.validateRequest({ body: { text: '你好' } });
+  assert.equal(defaultResult.ok, true);
+  assert.equal(defaultResult.value.languageBoost, 'Chinese,Yue');
+
+  const overrideResult = service.validateRequest({ body: { text: 'Hello', language_boost: ' English ' } });
+  assert.equal(overrideResult.ok, true);
+  assert.equal(overrideResult.value.languageBoost, 'English');
 });
 
 test('t2a validation rejects invalid response mode', () => {

@@ -394,6 +394,7 @@ function createT2AServiceDefinition({
         text,
         stream,
         voice_id: voiceId,
+        language_boost: languageBoost,
         speed,
         volume,
         pitch,
@@ -429,6 +430,10 @@ function createT2AServiceDefinition({
 
       if (voiceId != null && (typeof voiceId !== 'string' || voiceId.trim() === '')) {
         return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'voice_id must be a non-empty string' };
+      }
+
+      if (languageBoost != null && (typeof languageBoost !== 'string' || languageBoost.trim() === '')) {
+        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'language_boost must be a non-empty string' };
       }
 
       const parsedSpeed = parseOptionalFiniteNumber(speed, { min: 0.5, max: 2 });
@@ -485,7 +490,7 @@ function createT2AServiceDefinition({
             format: parsedFormat === undefined ? providerDefaults.audioSetting.format : parsedFormat,
             channel: providerDefaults.audioSetting.channel
           },
-          languageBoost: providerDefaults.languageBoost,
+          languageBoost: typeof languageBoost === 'string' ? languageBoost.trim() : providerDefaults.languageBoost,
           voiceModify: {
             ...providerDefaults.voiceModify
           },

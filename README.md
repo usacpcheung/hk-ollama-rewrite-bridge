@@ -105,7 +105,7 @@ curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
 curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <gateway-token-if-applicable>' \
-  -d '{"text":"你好，歡迎使用","response_mode":"base64_json","voice_id":"Cantonese_ProfessionalHost（F)","speed":1.1,"format":"mp3"}'
+  -d '{"text":"Hello, welcome","response_mode":"base64_json","voice_id":"English_expressive_narrator","language_boost":"English","speed":1.1,"format":"mp3"}'
 ```
 
 Example success body:
