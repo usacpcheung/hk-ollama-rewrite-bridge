@@ -66,6 +66,10 @@ not silently fall back to another provider.
 | `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate Minimax rewrite model key. |
 | `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax rewrite endpoint. |
 | `REWRITE_PROVIDER_MINIMAX_API_URL` | same | Alternate Minimax rewrite endpoint key. |
+| `REWRITE_MINIMAX_API_FORMAT` | `legacy-chat` | Minimax rewrite protocol. Supported: `legacy-chat`, `anthropic`. |
+| `REWRITE_PROVIDER_MINIMAX_API_FORMAT` | `legacy-chat` | Alternate Minimax rewrite protocol key. |
+| `REWRITE_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimax.io/anthropic` | Base URL for the Anthropic SDK; the SDK appends `/v1/messages`. |
+| `REWRITE_PROVIDER_MINIMAX_ANTHROPIC_BASE_URL` | same | Alternate Anthropic base URL key. |
 | `REWRITE_MINIMAX_PASSIVE_READY_GRACE_MS` | `600000` | Grace window used by passive Minimax rewrite readiness state. |
 | `REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE` | `true` | Allows passive readiness to recover after stale failures without paid probes. |
 | `REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD` | `3` | Consecutive rewrite failures before passive readiness reports recent failures. |
@@ -73,6 +77,19 @@ not silently fall back to another provider.
 
 Minimax rewrite readiness is passive. The bridge does not send synthetic paid
 readiness or warmup requests to Minimax.
+
+For opt-in MiniMax M3 rewrite:
+
+```env
+REWRITE_PROVIDER=minimax
+REWRITE_MINIMAX_API_FORMAT=anthropic
+REWRITE_MINIMAX_ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+REWRITE_MINIMAX_MODEL=MiniMax-M3
+```
+
+The legacy model, endpoint, and protocol remain the defaults. API format is
+never inferred from the model name. M3 thinking is explicitly disabled by the
+rewrite transport and is not configurable.
 
 ## T2A Service And Minimax Provider
 

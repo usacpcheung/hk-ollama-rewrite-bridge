@@ -5,6 +5,9 @@ const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
 const DEFAULT_ADMISSION_MAX_CONCURRENCY = 4;
 const DEFAULT_ADMISSION_MAX_QUEUE_SIZE = 100;
 const DEFAULT_ADMISSION_MAX_WAIT_MS = 15000;
+const DEFAULT_MINIMAX_API_FORMAT = 'legacy-chat';
+const DEFAULT_MINIMAX_ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
+const SUPPORTED_MINIMAX_API_FORMATS = new Set(['legacy-chat', 'anthropic']);
 
 const REWRITE_SYSTEM_PROMPT =
   '你是忠實改寫助手。請將以下香港口語廣東話改寫成正式書面繁體中文（zh-Hant）。\n'
@@ -76,6 +79,15 @@ function parseBooleanFlag(raw, fallback) {
   }
 
   return fallback;
+}
+
+function parseEnumValue(raw, fallback, supportedValues) {
+  if (typeof raw !== 'string') {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  return supportedValues.has(normalized) ? normalized : fallback;
 }
 
 function readWithLegacyFallback({
@@ -282,6 +294,29 @@ function resolveRewriteConfig({
     warningLabel: 'minimaxApiUrl'
   });
 
+  const minimaxApiFormatResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [`${serviceId}_MINIMAX_API_FORMAT`, `${serviceId}_PROVIDER_MINIMAX_API_FORMAT`],
+    legacyKeys: [],
+    parse: (raw, fallback) => parseEnumValue(raw, fallback, SUPPORTED_MINIMAX_API_FORMATS),
+    defaultValue: DEFAULT_MINIMAX_API_FORMAT,
+    warnLegacyUsage,
+    warningLabel: 'minimaxApiFormat'
+  });
+
+  const minimaxAnthropicBaseUrlResolution = readWithLegacyFallback({
+    env,
+    preferredKeys: [
+      `${serviceId}_MINIMAX_ANTHROPIC_BASE_URL`,
+      `${serviceId}_PROVIDER_MINIMAX_ANTHROPIC_BASE_URL`
+    ],
+    legacyKeys: [],
+    parse: (raw, fallback) => raw || fallback,
+    defaultValue: DEFAULT_MINIMAX_ANTHROPIC_BASE_URL,
+    warnLegacyUsage,
+    warningLabel: 'minimaxAnthropicBaseUrl'
+  });
+
   const provider = providerResolution.value;
 
   const admissionGlobalLimits = {
@@ -375,6 +410,8 @@ function resolveRewriteConfig({
       minimax: {
         model: minimaxModelResolution.value,
         apiUrl: minimaxApiUrlResolution.value,
+        apiFormat: minimaxApiFormatResolution.value,
+        anthropicBaseUrl: minimaxAnthropicBaseUrlResolution.value,
         capabilities: providerCapabilities.minimax || { streaming: false }
       }
     },
@@ -391,6 +428,8 @@ function resolveRewriteConfig({
       ollamaPsUrl: ollamaPsUrlResolution.source,
       minimaxModel: minimaxModelResolution.source,
       minimaxApiUrl: minimaxApiUrlResolution.source,
+      minimaxApiFormat: minimaxApiFormatResolution.source,
+      minimaxAnthropicBaseUrl: minimaxAnthropicBaseUrlResolution.source,
       streamingEnabled: providerStreamingEnvResolution.source
     }
   };

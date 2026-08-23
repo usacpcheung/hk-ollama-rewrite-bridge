@@ -54,6 +54,54 @@ function startMockProviderServer({ rewriteText, rewriteStreamText, audioBuffer }
       req.on('end', () => {
         const payload = raw ? JSON.parse(raw) : {};
 
+        if (req.url === '/anthropic/v1/messages') {
+          if (payload.stream === true) {
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'x-request-id': 'contract-m3-stream'
+            });
+            res.write(`event: message_start\ndata: ${JSON.stringify({
+              type: 'message_start',
+              message: {
+                id: 'msg-contract-stream',
+                type: 'message',
+                role: 'assistant',
+                model: 'MiniMax-M3',
+                content: [],
+                stop_reason: null,
+                stop_sequence: null,
+                usage: { input_tokens: 5, output_tokens: 0 }
+              }
+            })}\n\n`);
+            res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+              type: 'content_block_delta',
+              index: 0,
+              delta: { type: 'text_delta', text: rewriteStreamText }
+            })}\n\n`);
+            res.write(`event: message_delta\ndata: ${JSON.stringify({
+              type: 'message_delta',
+              delta: { stop_reason: 'end_turn', stop_sequence: null },
+              usage: { output_tokens: 3 }
+            })}\n\n`);
+            res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+            res.end();
+            return;
+          }
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            id: 'msg-contract-sync',
+            type: 'message',
+            role: 'assistant',
+            model: 'MiniMax-M3',
+            content: [{ type: 'text', text: rewriteText }],
+            stop_reason: 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 4, output_tokens: 2 }
+          }));
+          return;
+        }
+
         if (req.url === '/rewrite') {
           if (payload.stream === true) {
             res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -213,4 +261,52 @@ test('rewrite and t2a preserve current public HTTP response contracts', async (t
   assert.equal(t2aJsonBody.size, audioBuffer.length);
   assert.equal(t2aJsonBody.provider.traceId, 'trace-contract-t2a');
   assert.equal(t2aJsonBody.provider.audioLength, audioBuffer.length);
+});
+
+test('M3 Anthropic-compatible rewrite preserves public sync and streaming contracts', async (t) => {
+  const { server: mockServer, port } = await startMockProviderServer({
+    rewriteText: 'M3正式中文結果',
+    rewriteStreamText: 'M3串流正式中文',
+    audioBuffer: Buffer.from('unused audio payload '.repeat(4))
+  });
+  t.after(() => mockServer.close());
+
+  const serverProcess = spawnBridge({
+    REWRITE_MINIMAX_API_FORMAT: 'anthropic',
+    REWRITE_MINIMAX_ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}/anthropic`,
+    REWRITE_MINIMAX_MODEL: 'MiniMax-M3'
+  });
+  t.after(() => {
+    if (!serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+    }
+  });
+
+  await waitForServerReady(serverProcess);
+
+  const syncResponse = await postJson('/api/rewrite', { text: '我今日想請假。' }, authHeaders);
+  const syncBody = await syncResponse.json();
+  assert.equal(syncResponse.status, 200);
+  assert.deepEqual(syncBody, {
+    ok: true,
+    result: 'M3正式中文結果',
+    usage: { input_tokens: 4, output_tokens: 2 }
+  });
+
+  const streamResponse = await postJson('/api/rewrite', {
+    text: '我今日想請假。',
+    stream: true
+  }, authHeaders);
+  const chunks = (await streamResponse.text()).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(streamResponse.status, 200);
+  assert.match(streamResponse.headers.get('content-type') || '', /^application\/x-ndjson/);
+  assert.deepEqual(chunks, [
+    { response: 'M3串流正式中文', done: false },
+    {
+      response: '',
+      done: true,
+      usage: { input_tokens: 5, output_tokens: 3 },
+      done_reason: 'end_turn'
+    }
+  ]);
 });

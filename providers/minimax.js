@@ -1,4 +1,5 @@
 const { randomUUID } = require('crypto');
+const Anthropic = require('@anthropic-ai/sdk');
 
 const {
   successResult,
@@ -15,6 +16,8 @@ const {
 function createMinimaxProvider({
   apiUrl,
   model,
+  apiFormat = 'legacy-chat',
+  anthropicBaseUrl = 'https://api.minimax.io/anthropic',
   apiKey,
   systemPrompt,
   userTemplate,
@@ -23,16 +26,21 @@ function createMinimaxProvider({
 }) {
   const t2aFormat = 'mp3';
   const t2aMimeType = 'audio/mpeg';
-  const probeBody = {
+  const probeBody = buildMinimaxRewriteBody({
     model,
     messages: buildProbeMessages(),
-    max_completion_tokens: 1,
-    stream: false
-  };
+    maxTokens: 1,
+    stream: false,
+    includeTemperature: false
+  });
 
   async function checkReadiness({ timeoutMs }) {
     if (!apiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
+    }
+
+    if (apiFormat === 'anthropic') {
+      return { ready: true, error: null };
     }
 
     const controller = new AbortController();
@@ -76,6 +84,17 @@ function createMinimaxProvider({
   }
 
   async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
+    if (apiFormat === 'anthropic') {
+      return generateAnthropic({
+        requestId,
+        prompt,
+        systemPrompt: runtimeSystemPrompt,
+        userContent,
+        timeoutMs,
+        maxTokens: maxCompletionTokens
+      });
+    }
+
     return generate({
       requestId,
       prompt,
@@ -87,6 +106,18 @@ function createMinimaxProvider({
   }
 
   async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk }) {
+    if (apiFormat === 'anthropic') {
+      return generateAnthropicStream({
+        requestId,
+        prompt,
+        systemPrompt: runtimeSystemPrompt,
+        userContent,
+        timeoutMs,
+        maxTokens: maxCompletionTokens,
+        onChunk
+      });
+    }
+
     return generateStream({
       requestId,
       prompt,
@@ -215,7 +246,7 @@ function createMinimaxProvider({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       };
-      const body = {
+      const body = buildMinimaxRewriteBody({
         model,
         messages: buildMessages({
           prompt,
@@ -223,9 +254,8 @@ function createMinimaxProvider({
           userContent
         }),
         stream: false,
-        max_completion_tokens: maxTokens,
-        temperature: 0.15
-      };
+        maxTokens
+      });
 
       debugLog?.({
         requestId,
@@ -263,7 +293,18 @@ function createMinimaxProvider({
         }
       });
 
-      const normalized = normalizeProviderSyncResponse({ provider: 'minimax', payload: data });
+      const providerFailure = getMinimaxProviderFailure(data);
+      if (providerFailure) {
+        return failureResult(mapError(new Error('provider_error'), {
+          kind: 'provider',
+          providerCode: providerFailure.code
+        }));
+      }
+
+      const normalized = extractMinimaxRewriteResponse(data);
+      if (!normalized.text) {
+        return failureResult(mapError(new Error('empty_content'), { kind: 'empty_content' }));
+      }
 
       return successResult({
         response: normalized.text,
@@ -300,7 +341,7 @@ function createMinimaxProvider({
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       };
-      const body = {
+      const body = buildMinimaxRewriteBody({
         model,
         messages: buildMessages({
           prompt,
@@ -308,9 +349,8 @@ function createMinimaxProvider({
           userContent
         }),
         stream: true,
-        max_completion_tokens: maxTokens,
-        temperature: 0.15
-      };
+        maxTokens
+      });
 
       debugLog?.({
         requestId,
@@ -404,6 +444,18 @@ function createMinimaxProvider({
         const parsedFrame = parseMinimaxSseFrame(payload);
         if (!parsedFrame) {
           return;
+        }
+
+        if (parsedFrame.providerFailure) {
+          const error = mapError(new Error('provider_error'), {
+            kind: 'provider',
+            providerCode: parsedFrame.providerFailure.code
+          });
+          await emit(streamErrorEvent({ error }));
+          throw Object.assign(new Error('provider_error'), {
+            code: 'MINIMAX_PROVIDER_ERROR',
+            mappedError: error
+          });
         }
 
         if (parsedFrame.completion) {
@@ -509,12 +561,285 @@ function createMinimaxProvider({
         doneReason: doneReason || finalTerminal.doneReason
       });
     } catch (err) {
-      const mappedError = mapError(err, { kind: err?.code === 'INVALID_JSON_CHUNK' ? 'invalid_json' : 'fetch' });
+      const mappedError = err?.mappedError
+        || mapError(err, { kind: err?.code === 'INVALID_JSON_CHUNK' ? 'invalid_json' : 'fetch' });
+      if (!err?.mappedError) {
+        await emit(streamErrorEvent({ error: mappedError }));
+      }
+      return failureResult(mappedError);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function createAnthropicClient() {
+    return new Anthropic({
+      apiKey,
+      baseURL: anthropicBaseUrl,
+      maxRetries: 0,
+      logLevel: 'off'
+    });
+  }
+
+  function buildAnthropicRequest({
+    prompt,
+    systemPrompt: runtimeSystemPrompt,
+    userContent,
+    maxTokens,
+    stream
+  }) {
+    const content = typeof userContent === 'string' ? userContent : prompt;
+    const request = {
+      model,
+      max_tokens: maxTokens,
+      temperature: 0.15,
+      thinking: { type: 'disabled' },
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: content }]
+        }
+      ],
+      stream
+    };
+    const resolvedSystemPrompt =
+      runtimeSystemPrompt !== undefined ? runtimeSystemPrompt : systemPrompt;
+    if (typeof resolvedSystemPrompt === 'string' && resolvedSystemPrompt.trim()) {
+      request.system = resolvedSystemPrompt.trim();
+    }
+    return request;
+  }
+
+  async function generateAnthropic({
+    requestId,
+    prompt,
+    systemPrompt: runtimeSystemPrompt,
+    userContent,
+    timeoutMs,
+    maxTokens
+  }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const body = buildAnthropicRequest({
+      prompt,
+      systemPrompt: runtimeSystemPrompt,
+      userContent,
+      maxTokens,
+      stream: false
+    });
+
+    try {
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_request',
+        payload: {
+          service: 'rewrite',
+          apiFormat: 'anthropic',
+          baseUrl: anthropicBaseUrl,
+          body
+        }
+      });
+
+      const message = await createAnthropicClient().messages.create(body, {
+        signal: controller.signal
+      });
+
+      debugLog?.({
+        requestId,
+        stream: false,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: false,
+          response: message
+        }
+      });
+
+      const text = extractAnthropicText(message);
+      if (!text.trim()) {
+        return failureResult(mapError(new Error('empty_content'), { kind: 'empty_content' }));
+      }
+
+      return successResult({
+        response: text,
+        usage: message?.usage || null,
+        ...(message?.stop_reason ? { doneReason: message.stop_reason } : {})
+      });
+    } catch (err) {
+      return failureResult(mapAnthropicError(err));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function generateAnthropicStream({
+    requestId,
+    prompt,
+    systemPrompt: runtimeSystemPrompt,
+    userContent,
+    timeoutMs,
+    maxTokens,
+    onChunk
+  }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const body = buildAnthropicRequest({
+      prompt,
+      systemPrompt: runtimeSystemPrompt,
+      userContent,
+      maxTokens,
+      stream: true
+    });
+    const emit = async (event) => {
+      if (typeof onChunk === 'function') {
+        await onChunk(event);
+      }
+    };
+
+    let text = '';
+    let usage = null;
+    let doneReason = 'end_turn';
+    let sawValidEvent = false;
+    let sawMessageStop = false;
+
+    try {
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_request',
+        payload: {
+          service: 'rewrite',
+          apiFormat: 'anthropic',
+          baseUrl: anthropicBaseUrl,
+          body
+        }
+      });
+
+      const stream = await createAnthropicClient().messages.create(body, {
+        signal: controller.signal
+      });
+
+      for await (const event of stream) {
+        if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+          continue;
+        }
+        sawValidEvent = true;
+
+        if (event.type === 'message_start') {
+          usage = mergeAnthropicUsage(usage, event.message?.usage);
+          continue;
+        }
+
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          const chunk = event.delta.text || '';
+          if (chunk) {
+            text += chunk;
+            await emit(streamTextEvent({ text: chunk, raw: event }));
+          }
+          continue;
+        }
+
+        if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+          debugLog?.({
+            requestId,
+            stream: true,
+            eventType: 'provider_reasoning_ignored',
+            payload: {
+              requestId: requestId || null,
+              stream: true,
+              provider: 'minimax'
+            }
+          });
+          continue;
+        }
+
+        if (event.type === 'message_delta') {
+          usage = mergeAnthropicUsage(usage, event.usage);
+          doneReason = event.delta?.stop_reason || doneReason;
+          continue;
+        }
+
+        if (event.type === 'message_stop') {
+          sawMessageStop = true;
+        }
+      }
+
+      if (!sawValidEvent || !sawMessageStop) {
+        const error = mapError(new Error('incomplete_stream'), { kind: 'invalid_json' });
+        await emit(streamErrorEvent({ error }));
+        return failureResult(error);
+      }
+
+      if (!text.trim()) {
+        const error = mapError(new Error('empty_content'), { kind: 'empty_content' });
+        await emit(streamErrorEvent({ error }));
+        return failureResult(error);
+      }
+
+      await emit(streamDoneEvent({ reason: doneReason, usage }));
+      debugLog?.({
+        requestId,
+        stream: true,
+        eventType: 'provider_response_raw',
+        payload: {
+          requestId: requestId || null,
+          stream: true,
+          completion: {
+            type: 'message',
+            stop_reason: doneReason,
+            usage
+          }
+        }
+      });
+
+      return successResult({
+        response: text,
+        usage,
+        doneReason
+      });
+    } catch (err) {
+      const mappedError = mapAnthropicError(err);
       await emit(streamErrorEvent({ error: mappedError }));
       return failureResult(mappedError);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  function mapAnthropicError(err) {
+    if (
+      err?.name === 'AbortError'
+      || err?.name === 'APIUserAbortError'
+      || err?.name === 'APIConnectionTimeoutError'
+      || err?.constructor?.name === 'APIUserAbortError'
+      || err?.constructor?.name === 'APIConnectionTimeoutError'
+      || err?.code === 'ABORT_ERR'
+    ) {
+      return {
+        code: 'MODEL_TIMEOUT',
+        message: 'Model response timed out. Please retry.',
+        status: 504,
+        detail: 'minimax_timeout'
+      };
+    }
+
+    if (err?.status === 401 || err?.status === 403) {
+      return mapError(err, { kind: 'http', status: err.status });
+    }
+
+    if (typeof err?.status === 'number') {
+      return mapError(err, { kind: 'http', status: err.status });
+    }
+
+    if (
+      err instanceof SyntaxError
+      || String(err?.message || '').includes('Could not parse message into JSON')
+    ) {
+      return mapError(err, { kind: 'invalid_json' });
+    }
+
+    return mapError(err, { kind: 'fetch' });
   }
 
   function mapError(err, context = {}) {
@@ -538,6 +863,24 @@ function createMinimaxProvider({
 
     if (context.kind === 'invalid_json') {
       return { code: 'PROVIDER_ERROR', message: 'Invalid provider response', status: 502, detail: 'minimax_invalid_json' };
+    }
+
+    if (context.kind === 'provider') {
+      return {
+        code: 'PROVIDER_ERROR',
+        message: 'Provider request failed',
+        status: 502,
+        detail: `minimax_provider_${context.providerCode ?? 'unknown'}`
+      };
+    }
+
+    if (context.kind === 'empty_content') {
+      return {
+        code: 'PROVIDER_ERROR',
+        message: 'Provider response did not include rewrite content',
+        status: 502,
+        detail: 'minimax_empty_content'
+      };
     }
 
     if (context.kind === 'missing_audio') {
@@ -585,6 +928,8 @@ function createMinimaxProvider({
       provider: 'minimax',
       minimaxApiUrl: apiUrl,
       minimaxModel: model,
+      minimaxApiFormat: apiFormat,
+      minimaxAnthropicBaseUrl: anthropicBaseUrl,
       minimaxApiKeySet: Boolean(apiKey),
       minimaxSystemPrompt: systemPrompt || null,
       minimaxUserTemplate: userTemplate || null
@@ -613,17 +958,28 @@ function parseMinimaxSseFrame(payload) {
     return null;
   }
 
+  const providerFailure = getMinimaxProviderFailure(eventData);
   const completion = eventData?.object === 'chat.completion' ? eventData : null;
   const choice = eventData?.choices?.[0] || {};
   const deltaText = choice?.delta?.content;
   const finishReason = choice?.finish_reason;
   const finalMessageContent = choice?.message?.content;
 
+  if (providerFailure) {
+    return {
+      completion,
+      finalMessageContent: '',
+      chunk: null,
+      providerFailure
+    };
+  }
+
   if (typeof deltaText === 'string' && deltaText.length > 0) {
     return {
       completion,
       finalMessageContent,
-      chunk: buildMappedChunk({ response: deltaText, done: false })
+      chunk: buildMappedChunk({ response: deltaText, done: false }),
+      providerFailure: null
     };
   }
 
@@ -631,7 +987,8 @@ function parseMinimaxSseFrame(payload) {
     return {
       completion,
       finalMessageContent,
-      chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason, usage: completion?.usage || null })
+      chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason, usage: eventData?.usage || null }),
+      providerFailure: null
     };
   }
 
@@ -639,14 +996,76 @@ function parseMinimaxSseFrame(payload) {
     return {
       completion,
       finalMessageContent,
-      chunk: null
+      chunk: null,
+      providerFailure: null
     };
   }
 
   return {
     completion,
     finalMessageContent: '',
-    chunk: null
+    chunk: null,
+    providerFailure: null
+  };
+}
+
+function buildMinimaxRewriteBody({
+  model,
+  messages,
+  maxTokens,
+  stream,
+  includeTemperature = true
+}) {
+  return {
+    model,
+    messages,
+    stream,
+    max_completion_tokens: maxTokens,
+    ...(includeTemperature ? { temperature: 0.15 } : {})
+  };
+}
+
+function extractMinimaxRewriteResponse(payload) {
+  const normalized = normalizeProviderSyncResponse({ provider: 'minimax', payload });
+  return {
+    text: normalized.text,
+    usage: normalized.usage,
+    doneReason: normalized.doneReason
+  };
+}
+
+function getMinimaxProviderFailure(payload) {
+  const statusCode = payload?.base_resp?.status_code;
+  if (typeof statusCode === 'number' && statusCode !== 0) {
+    return {
+      code: statusCode,
+      message: payload?.base_resp?.status_msg || null
+    };
+  }
+  return null;
+}
+
+function extractAnthropicText(message) {
+  if (!Array.isArray(message?.content)) {
+    return '';
+  }
+
+  return message.content
+    .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('');
+}
+
+function mergeAnthropicUsage(current, next) {
+  if (!next || typeof next !== 'object') {
+    return current;
+  }
+
+  return {
+    ...(current || {}),
+    ...Object.fromEntries(
+      Object.entries(next).filter(([, value]) => typeof value === 'number')
+    )
   };
 }
 
@@ -792,6 +1211,11 @@ module.exports = {
   parseMinimaxSseFrame,
   buildMappedChunk,
   buildMessages,
+  buildMinimaxRewriteBody,
+  extractMinimaxRewriteResponse,
+  getMinimaxProviderFailure,
+  extractAnthropicText,
+  mergeAnthropicUsage,
   renderUserContent,
   buildProbeMessages,
   extractMinimaxT2AAudio,

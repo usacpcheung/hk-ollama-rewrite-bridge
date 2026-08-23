@@ -101,6 +101,7 @@ test('t2a routes return binary audio by default and preserve rewrite regression 
 
       if (req.url === '/t2a') {
         t2aCalls += 1;
+        assert.equal(payload.language_boost, 'Chinese,Yue');
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           trace_id: 'trace-route-binary',
@@ -160,10 +161,10 @@ test('t2a routes return base64 JSON when requested', async (t) => {
     req.on('end', () => {
       const payload = JSON.parse(raw || '{}');
       assert.equal(payload.stream, false);
-      assert.equal(payload.voice_setting.voice_id, 'Cantonese_ProfessionalHost（F)');
+      assert.equal(payload.voice_setting.voice_id, 'English_expressive_narrator');
       assert.equal(payload.audio_setting.format, 'mp3');
       assert.equal(payload.audio_setting.channel, 1);
-      assert.equal(payload.language_boost, 'Chinese,Yue');
+      assert.equal(payload.language_boost, 'English');
       assert.deepEqual(payload.voice_modify, { pitch: 0, intensity: 0, timbre: 0 });
       assert.equal(payload.output_format, 'hex');
 
@@ -195,7 +196,9 @@ test('t2a routes return base64 JSON when requested', async (t) => {
 
   const response = await postJson('/api/t2a', {
     text: '你好，世界',
-    response_mode: 'base64_json'
+    response_mode: 'base64_json',
+    voice_id: 'English_expressive_narrator',
+    language_boost: ' English '
   }, authHeaders);
   const body = await response.json();
 
