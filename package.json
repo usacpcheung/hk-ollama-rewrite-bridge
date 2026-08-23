@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "express": "^4.21.2",
+    "express": "^4.22.2",
     "opencc-js": "^1.0.5"
   }
 }
