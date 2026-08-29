@@ -8,7 +8,8 @@ Production-ready Node.js Express bridge that exposes two API services behind a s
 The repository also contains the source and deployment guide for a private Faster
 Whisper transcription companion daemon under `services/whisper-asr/`. It is not yet
 exposed by the Node bridge or public Apache routes. See
-[`services/whisper-asr/README.md`](services/whisper-asr/README.md).
+[`services/whisper-asr/README.md`](services/whisper-asr/README.md). Its private job
+routes require a server-only 64-character lowercase hexadecimal bearer token.
 
 This README is the top-level operator and integrator guide. For exact endpoint contracts, see `docs/api-reference.md`.
 

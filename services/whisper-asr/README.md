@@ -14,6 +14,7 @@ job ownership and public responses.
 | CPU threads | 4 |
 | Model and application workers | 1 each |
 | Waiting queue | 10 jobs |
+| Concurrent duration probes | 2 |
 | Upload / duration limits | 20 MiB / 60 decoded seconds |
 | Terminal-result lifetime | 30 minutes |
 | Recognition | `task=transcribe`, automatic language detection, VAD enabled |
@@ -27,6 +28,9 @@ model and create a separate in-memory job store.
 `GET /health` is token-free for local monitoring. `POST /jobs`, `GET /jobs/{jobId}`
 and `DELETE /jobs/{jobId}` require `Authorization: Bearer <WHISPER_INTERNAL_TOKEN>`.
 Create requests use multipart field `audio` and return `202` with a UUID.
+The token must be exactly 64 lowercase hexadecimal characters. Request bodies are
+limited before multipart parsing to the audio limit plus 64 KiB of framing overhead;
+the audio file itself is still checked against the exact configured limit.
 
 Statuses are `queued`, `running`, `cancelling`, `completed`, `failed`, and
 `cancelled`. Completed jobs contain the combined text, detected language, durations
@@ -36,6 +40,10 @@ Cancellation is best-effort and asynchronous. A queued job is cancelled and clea
 immediately. A running job becomes `cancelling`; native inference finishes privately,
 its output is discarded, audio is deleted, then the job becomes `cancelled`. A
 terminal job is deleted immediately.
+
+Admission is reserved before upload validation. At most one running job plus the
+configured number of waiting jobs may be admitted, and no more than two audio
+duration probes run concurrently.
 
 ## Privacy and cleanup
 

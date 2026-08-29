@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from io import BytesIO
 import importlib.util
 import os
 from pathlib import Path
@@ -13,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-os.environ.setdefault("WHISPER_INTERNAL_TOKEN", "import-only-test-token")
+os.environ.setdefault("WHISPER_INTERNAL_TOKEN", "b" * 64)
 MODULE_PATH = Path(__file__).resolve().parents[1] / "app.py"
 SPEC = importlib.util.spec_from_file_location("whisper_asr_app", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -22,7 +24,7 @@ sys.modules[SPEC.name] = whisper_asr
 SPEC.loader.exec_module(whisper_asr)
 
 
-TOKEN = "test-internal-token"
+TOKEN = "a" * 64
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
@@ -153,9 +155,39 @@ def test_job_completes_with_structured_transcript_and_audio_is_deleted(tmp_path)
         assert list(app.state.manager.settings.job_directory.iterdir()) == []
 
 
+def test_transcript_concatenation_preserves_model_spacing(tmp_path):
+    class ChineseBoundaryModel(FakeModel):
+        def transcribe(self, path, **kwargs):
+            self.calls.append((path, kwargs))
+            info = SimpleNamespace(
+                language="zh",
+                language_probability=1.0,
+                duration=2.0,
+                duration_after_vad=2.0,
+            )
+            return iter(
+                [
+                    FakeSegment(0, 0.5, "今日天氣"),
+                    FakeSegment(0.5, 1.0, "非常好"),
+                    FakeSegment(1.0, 1.5, "，適合測試"),
+                    FakeSegment(1.5, 2.0, " English words"),
+                ]
+            ), info
+
+    client, _app = make_client(tmp_path, model_factory=ChineseBoundaryModel)
+    with client:
+        created = submit(client)
+        completed = wait_for_status(client, created.json()["jobId"], "completed")
+        assert completed["result"]["text"] == "今日天氣非常好，適合測試 English words"
+
+
 def test_upload_and_duration_limits_cleanup_rejected_files(tmp_path):
     client, app = make_client(tmp_path, max_upload_bytes=4)
     with client:
+        exact_limit = submit(client, b"1234")
+        assert exact_limit.status_code == 202
+        wait_for_status(client, exact_limit.json()["jobId"], "completed")
+
         too_large = submit(client, b"12345")
         assert too_large.status_code == 413
         assert too_large.json()["error"]["code"] == "UPLOAD_TOO_LARGE"
@@ -171,7 +203,52 @@ def test_upload_and_duration_limits_cleanup_rejected_files(tmp_path):
         response = submit(client)
         assert response.status_code == 413
         assert response.json()["error"]["code"] == "AUDIO_TOO_LONG"
+        assert app.state.manager.admitted_jobs == 0
         assert list(app.state.manager.settings.job_directory.iterdir()) == []
+
+
+def test_request_body_limit_rejects_before_multipart_parsing(tmp_path):
+    probe_calls = 0
+
+    def counting_probe(_path, _maximum):
+        nonlocal probe_calls
+        probe_calls += 1
+        return 1.0
+
+    client, _app = make_client(tmp_path, probe=counting_probe, max_upload_bytes=4)
+    maximum_body = 4 + whisper_asr.MULTIPART_OVERHEAD_BYTES
+    with client:
+        declared_too_large = client.post(
+            "/jobs",
+            headers={
+                **AUTH,
+                "Content-Type": "multipart/form-data; boundary=test",
+                "Content-Length": str(maximum_body + 1),
+            },
+            content=b"ignored",
+        )
+        assert declared_too_large.status_code == 413
+        assert declared_too_large.json()["error"]["code"] == "UPLOAD_TOO_LARGE"
+
+        boundary = "chunked-test"
+        prefix = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="audio"; filename="large.webm"\r\n'
+            "Content-Type: audio/webm\r\n\r\n"
+        ).encode()
+        suffix = f"\r\n--{boundary}--\r\n".encode()
+        chunked_too_large = client.post(
+            "/jobs",
+            headers={
+                **AUTH,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Transfer-Encoding": "chunked",
+            },
+            content=iter([prefix, b"x" * maximum_body, suffix]),
+        )
+        assert chunked_too_large.status_code == 413
+        assert chunked_too_large.json()["error"]["code"] == "UPLOAD_TOO_LARGE"
+        assert probe_calls == 0
 
 
 def test_queue_capacity_is_bounded(tmp_path):
@@ -193,6 +270,69 @@ def test_queue_capacity_is_bounded(tmp_path):
         model.release.set()
         wait_for_status(client, first.json()["jobId"], "completed")
         wait_for_status(client, second.json()["jobId"], "completed")
+
+
+def test_admission_is_reserved_before_bounded_duration_validation(tmp_path):
+    active_probes = 0
+    maximum_active_probes = 0
+    probe_started = threading.Event()
+    release_probes = threading.Event()
+    probe_lock = threading.Lock()
+
+    def blocking_probe(_path, _maximum):
+        nonlocal active_probes, maximum_active_probes
+        with probe_lock:
+            active_probes += 1
+            maximum_active_probes = max(maximum_active_probes, active_probes)
+            if active_probes == 2:
+                probe_started.set()
+        if not release_probes.wait(timeout=5):
+            raise RuntimeError("test probe release timed out")
+        with probe_lock:
+            active_probes -= 1
+        return 1.0
+
+    async def scenario():
+        configured = settings(tmp_path, queue_capacity=3)
+        model = BlockingModel()
+        manager = whisper_asr.JobManager(configured, model, blocking_probe)
+        await manager.start()
+        uploads = [
+            whisper_asr.UploadFile(file=BytesIO(b"audio"), filename=f"recording-{index}.webm")
+            for index in range(5)
+        ]
+        admitted = [asyncio.create_task(manager.submit(upload)) for upload in uploads[:4]]
+        for _attempt in range(100):
+            if probe_started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert probe_started.is_set()
+
+        with pytest.raises(whisper_asr.ServiceError) as rejected:
+            await manager.submit(uploads[4])
+        assert rejected.value.code == "QUEUE_FULL"
+        assert manager.admitted_jobs == 4
+        assert maximum_active_probes == 2
+
+        release_probes.set()
+        jobs = await asyncio.gather(*admitted)
+        for _attempt in range(100):
+            if model.started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert model.started.is_set()
+        assert len(manager.pending) <= configured.queue_capacity
+
+        model.release.set()
+        for _attempt in range(200):
+            if manager.admitted_jobs == 0:
+                break
+            await asyncio.sleep(0.01)
+        assert manager.admitted_jobs == 0
+        assert all(manager.jobs[job.job_id].status == "completed" for job in jobs)
+        await manager.stop()
+
+    asyncio.run(scenario())
 
 
 def test_running_job_moves_through_cancelling_and_discards_result(tmp_path):
@@ -275,8 +415,17 @@ def test_settings_require_token_and_validate_bounds():
         whisper_asr.Settings.from_env({})
     with pytest.raises(RuntimeError, match="WHISPER_QUEUE_CAPACITY"):
         whisper_asr.Settings.from_env(
-            {"WHISPER_INTERNAL_TOKEN": "token", "WHISPER_QUEUE_CAPACITY": "0"}
+            {"WHISPER_INTERNAL_TOKEN": TOKEN, "WHISPER_QUEUE_CAPACITY": "0"}
         )
+    for invalid_token in (
+        "x",
+        "A" * 64,
+        "g" * 64,
+        "<GENERATE_A_RANDOM_64_HEX_CHARACTER_TOKEN>",
+    ):
+        with pytest.raises(RuntimeError, match="64 lowercase hexadecimal"):
+            whisper_asr.Settings.from_env({"WHISPER_INTERNAL_TOKEN": invalid_token})
+    assert whisper_asr.Settings.from_env({"WHISPER_INTERNAL_TOKEN": TOKEN}).internal_token == TOKEN
 
 
 def test_real_audio_probe_decodes_duration_and_rejects_invalid_audio(tmp_path):

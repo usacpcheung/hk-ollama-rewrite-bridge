@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hmac
+import json
 import logging
 import os
 from pathlib import Path
+import re
 import tempfile
 import time
 from typing import Any, Callable
@@ -27,6 +29,9 @@ LOGGER = logging.getLogger("whisper-asr")
 SERVICE_VERSION = "0.2.0"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_STATUSES = {"queued", "running", "cancelling"}
+INTERNAL_TOKEN_PATTERN = re.compile(r"[0-9a-f]{64}")
+MULTIPART_OVERHEAD_BYTES = 64 * 1024
+MAX_CONCURRENT_DURATION_PROBES = 2
 
 
 class ServiceError(Exception):
@@ -35,6 +40,88 @@ class ServiceError(Exception):
         self.status = status
         self.code = code
         self.message = message
+
+
+class RequestBodyLimitMiddleware:
+    def __init__(self, app: Any, maximum_bytes: int):
+        self.app = app
+        self.maximum_bytes = maximum_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            scope.get("type") != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") != "/jobs"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        raw_content_length = headers.get(b"content-length")
+        if raw_content_length is not None:
+            try:
+                content_length = int(raw_content_length)
+            except ValueError:
+                content_length = None
+            if content_length is not None and content_length > self.maximum_bytes:
+                await self._reject(send)
+                return
+
+        received_bytes = 0
+        spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+        try:
+            while True:
+                message = await receive()
+                if message.get("type") == "http.disconnect":
+                    return
+                if message.get("type") != "http.request":
+                    continue
+                body = message.get("body", b"")
+                received_bytes += len(body)
+                if received_bytes > self.maximum_bytes:
+                    await self._reject(send)
+                    return
+                spool.write(body)
+                if not message.get("more_body", False):
+                    break
+
+            spool.seek(0)
+
+            async def replay_receive() -> dict[str, Any]:
+                body = spool.read(1024 * 1024)
+                return {
+                    "type": "http.request",
+                    "body": body,
+                    "more_body": spool.tell() < received_bytes,
+                }
+
+            await self.app(scope, replay_receive, send)
+        finally:
+            spool.close()
+
+    @staticmethod
+    async def _reject(send: Any) -> None:
+        body = json.dumps(
+            {
+                "ok": False,
+                "error": {
+                    "code": "UPLOAD_TOO_LARGE",
+                    "message": "The upload request is too large.",
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
 
 def _read_int(env: dict[str, str], name: str, default: int, minimum: int, maximum: int) -> int:
@@ -72,6 +159,10 @@ class Settings:
         token = source.get("WHISPER_INTERNAL_TOKEN", "").strip()
         if not token:
             raise RuntimeError("WHISPER_INTERNAL_TOKEN is required")
+        if INTERNAL_TOKEN_PATTERN.fullmatch(token) is None:
+            raise RuntimeError(
+                "WHISPER_INTERNAL_TOKEN must be exactly 64 lowercase hexadecimal characters"
+            )
         return cls(
             internal_token=token,
             model_name=source.get("WHISPER_MODEL", "medium").strip() or "medium",
@@ -100,6 +191,7 @@ class Job:
     result: dict[str, Any] | None = None
     error: dict[str, str] | None = None
     cancel_requested: bool = False
+    admission_reserved: bool = True
 
 
 def _iso(timestamp: float) -> str:
@@ -156,6 +248,8 @@ class JobManager:
         self.pending: deque[str] = deque()
         self.pending_event = asyncio.Event()
         self.lock = asyncio.Lock()
+        self.duration_probe_slots = asyncio.Semaphore(MAX_CONCURRENT_DURATION_PROBES)
+        self.admitted_jobs = 0
         self.worker_task: asyncio.Task[None] | None = None
         self.cleanup_task: asyncio.Task[None] | None = None
 
@@ -179,6 +273,8 @@ class JobManager:
         async with self.lock:
             paths = [job.path for job in self.jobs.values()]
             self.jobs.clear()
+            self.pending.clear()
+            self.admitted_jobs = 0
         for path in paths:
             path.unlink(missing_ok=True)
         for path in self.settings.job_directory.iterdir():
@@ -186,20 +282,27 @@ class JobManager:
                 path.unlink(missing_ok=True)
 
     async def submit(self, upload: UploadFile) -> Job:
+        reservation_held = False
         async with self.lock:
-            if len(self.pending) >= self.settings.queue_capacity:
-                await upload.close()
-                raise ServiceError(503, "QUEUE_FULL", "The transcription queue is full. Please try again later.")
+            maximum_admitted = self.settings.queue_capacity + 1
+            if self.admitted_jobs < maximum_admitted:
+                self.admitted_jobs += 1
+                reservation_held = True
 
-        descriptor, raw_path = tempfile.mkstemp(
-            prefix="job-",
-            suffix=_safe_suffix(upload.filename),
-            dir=self.settings.job_directory,
-        )
-        os.close(descriptor)
-        path = Path(raw_path)
+        if not reservation_held:
+            await upload.close()
+            raise ServiceError(503, "QUEUE_FULL", "The transcription queue is full. Please try again later.")
+
+        path: Path | None = None
         size = 0
         try:
+            descriptor, raw_path = tempfile.mkstemp(
+                prefix="job-",
+                suffix=_safe_suffix(upload.filename),
+                dir=self.settings.job_directory,
+            )
+            os.close(descriptor)
+            path = Path(raw_path)
             with path.open("wb") as destination:
                 while chunk := await upload.read(1024 * 1024):
                     size += len(chunk)
@@ -212,9 +315,10 @@ class JobManager:
                     destination.write(chunk)
             if size == 0:
                 raise ServiceError(400, "EMPTY_UPLOAD", "An audio file is required.")
-            duration = await asyncio.to_thread(
-                self.duration_probe, path, self.settings.max_audio_seconds
-            )
+            async with self.duration_probe_slots:
+                duration = await asyncio.to_thread(
+                    self.duration_probe, path, self.settings.max_audio_seconds
+                )
             job = Job(
                 job_id=str(uuid.uuid4()),
                 path=path,
@@ -222,15 +326,17 @@ class JobManager:
                 audio_duration_seconds=round(duration, 3),
             )
             async with self.lock:
-                if len(self.pending) >= self.settings.queue_capacity:
-                    raise ServiceError(503, "QUEUE_FULL", "The transcription queue is full. Please try again later.")
                 self.jobs[job.job_id] = job
                 self.pending.append(job.job_id)
                 self.pending_event.set()
+                reservation_held = False
             LOGGER.info("job accepted job_id=%s bytes=%d", job.job_id, size)
             return job
         except BaseException:
-            path.unlink(missing_ok=True)
+            if path is not None:
+                path.unlink(missing_ok=True)
+            if reservation_held:
+                await self._release_unassigned_admission()
             raise
         finally:
             await upload.close()
@@ -265,6 +371,7 @@ class JobManager:
                 if not self.pending:
                     self.pending_event.clear()
                 path = job.path
+                self._release_job_admission_locked(job)
                 LOGGER.info("queued job cancelled job_id=%s", job_id)
                 outcome = "cancelled"
             else:
@@ -338,6 +445,10 @@ class JobManager:
                         job.updated_at = time.time()
                 LOGGER.info("job finished job_id=%s", job_id)
             finally:
+                async with self.lock:
+                    job = self.jobs.get(job_id)
+                    if job is not None:
+                        self._release_job_admission_locked(job)
                 path.unlink(missing_ok=True)
 
     def _transcribe(self, path: Path) -> dict[str, Any]:
@@ -347,11 +458,11 @@ class JobManager:
             vad_filter=True,
         )
         segments = []
-        text_parts = []
+        raw_text_parts = []
         for segment in segments_iter:
-            text = str(segment.text).strip()
-            if text:
-                text_parts.append(text)
+            raw_text = str(segment.text)
+            text = raw_text.strip()
+            raw_text_parts.append(raw_text)
             segments.append(
                 {
                     "start": round(float(segment.start), 3),
@@ -360,7 +471,7 @@ class JobManager:
                 }
             )
         return {
-            "text": " ".join(text_parts).strip(),
+            "text": "".join(raw_text_parts).strip(),
             "language": getattr(info, "language", None),
             "languageProbability": round(float(getattr(info, "language_probability", 0.0)), 4),
             "durationSeconds": round(float(getattr(info, "duration", 0.0)), 3),
@@ -401,8 +512,23 @@ class JobManager:
             "queuedJobs": counts["queued"],
             "runningJobs": counts["running"],
             "cancellingJobs": counts["cancelling"],
+            "admittedJobs": self.admitted_jobs,
             "queueCapacity": self.settings.queue_capacity,
         }
+
+    async def _release_unassigned_admission(self) -> None:
+        async with self.lock:
+            if self.admitted_jobs <= 0:
+                raise RuntimeError("admission reservation underflow")
+            self.admitted_jobs -= 1
+
+    def _release_job_admission_locked(self, job: Job) -> None:
+        if not job.admission_reserved:
+            return
+        if self.admitted_jobs <= 0:
+            raise RuntimeError("admission reservation underflow")
+        job.admission_reserved = False
+        self.admitted_jobs -= 1
 
 
 def create_app(
@@ -444,6 +570,10 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        RequestBodyLimitMiddleware,
+        maximum_bytes=config.max_upload_bytes + MULTIPART_OVERHEAD_BYTES,
     )
 
     @application.exception_handler(ServiceError)

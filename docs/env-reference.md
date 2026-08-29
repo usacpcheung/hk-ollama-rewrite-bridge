@@ -26,7 +26,7 @@ the Node environment. `WHISPER_INTERNAL_TOKEN` must never reach a browser.
 
 | Variable | Default | Meaning |
 |---|---:|---|
-| `WHISPER_INTERNAL_TOKEN` | required | Bearer token protecting private `/jobs` routes. |
+| `WHISPER_INTERNAL_TOKEN` | required | Exactly 64 lowercase hexadecimal characters protecting private `/jobs` routes. |
 | `WHISPER_MODEL` | `medium` | Offline Faster Whisper model name. |
 | `WHISPER_MODEL_DIRECTORY` | `/var/lib/whisper-asr/models` | Model storage outside the repository. |
 | `WHISPER_JOB_DIRECTORY` | `/var/lib/whisper-asr/jobs` | Private temporary-upload directory. |
