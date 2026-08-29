@@ -5,6 +5,11 @@ Production-ready Node.js Express bridge that exposes two API services behind a s
 - **Rewrite**: converts Hong Kong colloquial Cantonese into formal Traditional Chinese.
 - **T2A (text-to-audio)**: generates Cantonese-oriented speech audio through the Minimax-compatible provider path.
 
+The repository also contains the source and deployment guide for a private Faster
+Whisper transcription companion daemon under `services/whisper-asr/`. It is not yet
+exposed by the Node bridge or public Apache routes. See
+[`services/whisper-asr/README.md`](services/whisper-asr/README.md).
+
 This README is the top-level operator and integrator guide. For exact endpoint contracts, see `docs/api-reference.md`.
 
 ## What is implemented

@@ -1,5 +1,12 @@
 # API Reference (hk-ollama-rewrite-bridge)
 
+> **Transcription status:** `services/whisper-asr/` contains an internal,
+> loopback-only job API for the forthcoming transcription capability. It is not a
+> public bridge API in this release. Browsers must not call port `8020` or receive its
+> internal token. Its private contract is documented in
+> `services/whisper-asr/README.md`; authenticated public routes will be a separate
+> change.
+
 This document reflects the current server implementation and is intended for downstream applications that integrate with the API.
 
 - Internal bind: `http://127.0.0.1:3001`

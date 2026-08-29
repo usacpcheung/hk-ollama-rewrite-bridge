@@ -1,0 +1,37 @@
+[Unit]
+Description=Private Whisper ASR Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=whisper-asr
+Group=whisper-asr
+WorkingDirectory=/opt/whisper-asr
+EnvironmentFile=/etc/default/whisper-asr
+
+Environment=HF_HOME=/var/lib/whisper-asr/.cache/huggingface
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=HF_HUB_DISABLE_TELEMETRY=1
+Environment=OMP_NUM_THREADS=4
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/opt/whisper-asr/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8020 --workers 1
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillSignal=SIGINT
+Nice=5
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/whisper-asr
+
+[Install]
+WantedBy=multi-user.target

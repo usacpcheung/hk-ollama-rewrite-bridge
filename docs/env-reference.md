@@ -18,6 +18,25 @@ Use the most specific stable scope:
 Legacy fallback is allowed for old variable names only. Provider identity must
 not silently fall back to another provider.
 
+## Private Whisper companion service
+
+These variables belong to the separate loopback-only Python daemon documented in
+`services/whisper-asr/README.md`. They are loaded from `/etc/default/whisper-asr`, not
+the Node environment. `WHISPER_INTERNAL_TOKEN` must never reach a browser.
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `WHISPER_INTERNAL_TOKEN` | required | Bearer token protecting private `/jobs` routes. |
+| `WHISPER_MODEL` | `medium` | Offline Faster Whisper model name. |
+| `WHISPER_MODEL_DIRECTORY` | `/var/lib/whisper-asr/models` | Model storage outside the repository. |
+| `WHISPER_JOB_DIRECTORY` | `/var/lib/whisper-asr/jobs` | Private temporary-upload directory. |
+| `WHISPER_CPU_THREADS` | `4` | CPU threads used by the resident model. |
+| `WHISPER_QUEUE_CAPACITY` | `10` | Maximum waiting jobs. |
+| `WHISPER_MAX_UPLOAD_BYTES` | `20971520` | Maximum audio-file size (20 MiB). |
+| `WHISPER_MAX_AUDIO_SECONDS` | `60` | Maximum decoded recording duration. |
+| `WHISPER_RESULT_TTL_SECONDS` | `1800` | Terminal in-memory result lifetime. |
+| `WHISPER_CLEANUP_INTERVAL_SECONDS` | `30` | Expired-job sweep interval. |
+
 ## Bridge And Auth
 
 | Variable | Default | Meaning |

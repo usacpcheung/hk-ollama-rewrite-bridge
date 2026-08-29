@@ -1,2 +1,19 @@
 node_modules/
 npm-debug.log*
+
+# Private Whisper ASR runtime and development artifacts
+services/whisper-asr/.venv/
+services/whisper-asr/__pycache__/
+services/whisper-asr/.pytest_cache/
+services/whisper-asr/*.env
+services/whisper-asr/models/
+services/whisper-asr/jobs/
+services/whisper-asr/uploads/
+services/whisper-asr/test-audio/
+*.py[cod]
+*.wav
+*.mp3
+*.m4a
+*.webm
+*.ogg
+*.flac
