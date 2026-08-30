@@ -33,6 +33,7 @@ the Node environment. `WHISPER_INTERNAL_TOKEN` must never reach a browser.
 | `WHISPER_CPU_THREADS` | `4` | CPU threads used by the resident model. |
 | `WHISPER_QUEUE_CAPACITY` | `10` | Maximum waiting jobs. |
 | `WHISPER_MAX_UPLOAD_BYTES` | `20971520` | Maximum audio-file size (20 MiB). |
+| `WHISPER_UPLOAD_TIMEOUT_SECONDS` | `120` | Maximum total upload-body receive time before admission is released. |
 | `WHISPER_MAX_AUDIO_SECONDS` | `60` | Maximum decoded recording duration. |
 | `WHISPER_RESULT_TTL_SECONDS` | `1800` | Terminal in-memory result lifetime. |
 | `WHISPER_CLEANUP_INTERVAL_SECONDS` | `30` | Expired-job sweep interval. |

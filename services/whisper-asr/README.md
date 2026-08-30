@@ -15,7 +15,7 @@ job ownership and public responses.
 | Model and application workers | 1 each |
 | Waiting queue | 10 jobs |
 | Concurrent duration probes | 2 |
-| Upload / duration limits | 20 MiB / 60 decoded seconds |
+| Upload / duration limits | 20 MiB / 120-second upload timeout / 60 decoded seconds |
 | Terminal-result lifetime | 30 minutes |
 | Recognition | `task=transcribe`, automatic language detection, VAD enabled |
 
@@ -30,7 +30,9 @@ and `DELETE /jobs/{jobId}` require `Authorization: Bearer <WHISPER_INTERNAL_TOKE
 Create requests use multipart field `audio` and return `202` with a UUID.
 The token must be exactly 64 lowercase hexadecimal characters. Request bodies are
 limited before multipart parsing to the audio limit plus 64 KiB of framing overhead;
-the audio file itself is still checked against the exact configured limit.
+the audio file itself is still checked against the exact configured limit. Authentication
+and admission are checked before reading the body. If the complete upload does not arrive
+within the configured timeout, the service returns `408 UPLOAD_TIMEOUT` and releases admission.
 
 Statuses are `queued`, `running`, `cancelling`, `completed`, `failed`, and
 `cancelled`. Completed jobs contain the combined text, detected language, durations
@@ -41,9 +43,10 @@ immediately. A running job becomes `cancelling`; native inference finishes priva
 its output is discarded, audio is deleted, then the job becomes `cancelled`. A
 terminal job is deleted immediately.
 
-Admission is reserved before upload validation. At most one running job plus the
-configured number of waiting jobs may be admitted, and no more than two audio
-duration probes run concurrently.
+Admission is reserved before the request body is read and transferred to the job when
+accepted. Uploads in progress, duration validation, queued jobs and the running job
+therefore share one limit: at most one running job plus the configured number of waiting
+jobs. No more than two audio duration probes run concurrently.
 
 ## Privacy and cleanup
 

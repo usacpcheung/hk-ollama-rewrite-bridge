@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 import tempfile
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 import uuid
 
 import av
@@ -32,6 +32,7 @@ ACTIVE_STATUSES = {"queued", "running", "cancelling"}
 INTERNAL_TOKEN_PATTERN = re.compile(r"[0-9a-f]{64}")
 MULTIPART_OVERHEAD_BYTES = 64 * 1024
 MAX_CONCURRENT_DURATION_PROBES = 2
+ADMISSION_SCOPE_KEY = "whisper_asr.admission_reserved"
 
 
 class ServiceError(Exception):
@@ -43,9 +44,21 @@ class ServiceError(Exception):
 
 
 class RequestBodyLimitMiddleware:
-    def __init__(self, app: Any, maximum_bytes: int):
+    def __init__(
+        self,
+        app: Any,
+        maximum_bytes: int,
+        internal_token: str,
+        reserve_admission: Callable[[], Awaitable[bool]],
+        release_admission: Callable[[], Awaitable[None]],
+        upload_timeout_seconds: int,
+    ):
         self.app = app
         self.maximum_bytes = maximum_bytes
+        self.internal_token = internal_token.encode("ascii")
+        self.reserve_admission = reserve_admission
+        self.release_admission = release_admission
+        self.upload_timeout_seconds = upload_timeout_seconds
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if (
@@ -57,6 +70,18 @@ class RequestBodyLimitMiddleware:
             return
 
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        authorization = headers.get(b"authorization", b"")
+        prefix = b"Bearer "
+        supplied = authorization[len(prefix):] if authorization.startswith(prefix) else b""
+        if not supplied or not hmac.compare_digest(supplied, self.internal_token):
+            await self._reject(
+                send,
+                401,
+                "AUTH_REQUIRED",
+                "Internal authentication is required.",
+            )
+            return
+
         raw_content_length = headers.get(b"content-length")
         if raw_content_length is not None:
             try:
@@ -64,26 +89,57 @@ class RequestBodyLimitMiddleware:
             except ValueError:
                 content_length = None
             if content_length is not None and content_length > self.maximum_bytes:
-                await self._reject(send)
+                await self._reject(
+                    send,
+                    413,
+                    "UPLOAD_TOO_LARGE",
+                    "The upload request is too large.",
+                )
                 return
 
+        if not await self.reserve_admission():
+            await self._reject(
+                send,
+                503,
+                "QUEUE_FULL",
+                "The transcription queue is full. Please try again later.",
+            )
+            return
+
+        scope[ADMISSION_SCOPE_KEY] = True
         received_bytes = 0
-        spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+        spool: Any | None = None
         try:
-            while True:
-                message = await receive()
-                if message.get("type") == "http.disconnect":
-                    return
-                if message.get("type") != "http.request":
-                    continue
-                body = message.get("body", b"")
-                received_bytes += len(body)
-                if received_bytes > self.maximum_bytes:
-                    await self._reject(send)
-                    return
-                spool.write(body)
-                if not message.get("more_body", False):
-                    break
+            spool = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+            try:
+                async with asyncio.timeout(self.upload_timeout_seconds):
+                    while True:
+                        message = await receive()
+                        if message.get("type") == "http.disconnect":
+                            return
+                        if message.get("type") != "http.request":
+                            continue
+                        body = message.get("body", b"")
+                        received_bytes += len(body)
+                        if received_bytes > self.maximum_bytes:
+                            await self._reject(
+                                send,
+                                413,
+                                "UPLOAD_TOO_LARGE",
+                                "The upload request is too large.",
+                            )
+                            return
+                        spool.write(body)
+                        if not message.get("more_body", False):
+                            break
+            except TimeoutError:
+                await self._reject(
+                    send,
+                    408,
+                    "UPLOAD_TIMEOUT",
+                    "The upload did not complete in time.",
+                )
+                return
 
             spool.seek(0)
 
@@ -97,16 +153,19 @@ class RequestBodyLimitMiddleware:
 
             await self.app(scope, replay_receive, send)
         finally:
-            spool.close()
+            if spool is not None:
+                spool.close()
+            if scope.pop(ADMISSION_SCOPE_KEY, False):
+                await self.release_admission()
 
     @staticmethod
-    async def _reject(send: Any) -> None:
+    async def _reject(send: Any, status: int, code: str, message: str) -> None:
         body = json.dumps(
             {
                 "ok": False,
                 "error": {
-                    "code": "UPLOAD_TOO_LARGE",
-                    "message": "The upload request is too large.",
+                    "code": code,
+                    "message": message,
                 },
             },
             separators=(",", ":"),
@@ -114,7 +173,7 @@ class RequestBodyLimitMiddleware:
         await send(
             {
                 "type": "http.response.start",
-                "status": 413,
+                "status": status,
                 "headers": [
                     (b"content-type", b"application/json"),
                     (b"content-length", str(len(body)).encode("ascii")),
@@ -152,6 +211,7 @@ class Settings:
     max_audio_seconds: int = 60
     result_ttl_seconds: int = 30 * 60
     cleanup_interval_seconds: int = 30
+    upload_timeout_seconds: int = 120
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -176,6 +236,9 @@ class Settings:
             max_audio_seconds=_read_int(source, "WHISPER_MAX_AUDIO_SECONDS", 60, 1, 3600),
             result_ttl_seconds=_read_int(source, "WHISPER_RESULT_TTL_SECONDS", 1800, 60, 86400),
             cleanup_interval_seconds=_read_int(source, "WHISPER_CLEANUP_INTERVAL_SECONDS", 30, 1, 3600),
+            upload_timeout_seconds=_read_int(
+                source, "WHISPER_UPLOAD_TIMEOUT_SECONDS", 120, 1, 600
+            ),
         )
 
 
@@ -281,13 +344,17 @@ class JobManager:
             if path.is_file() or path.is_symlink():
                 path.unlink(missing_ok=True)
 
-    async def submit(self, upload: UploadFile) -> Job:
-        reservation_held = False
+    async def reserve_admission(self) -> bool:
         async with self.lock:
             maximum_admitted = self.settings.queue_capacity + 1
             if self.admitted_jobs < maximum_admitted:
                 self.admitted_jobs += 1
-                reservation_held = True
+                return True
+        return False
+
+    async def submit(self, upload: UploadFile, reservation_held: bool = False) -> Job:
+        if not reservation_held:
+            reservation_held = await self.reserve_admission()
 
         if not reservation_held:
             await upload.close()
@@ -336,7 +403,7 @@ class JobManager:
             if path is not None:
                 path.unlink(missing_ok=True)
             if reservation_held:
-                await self._release_unassigned_admission()
+                await self.release_admission()
             raise
         finally:
             await upload.close()
@@ -516,7 +583,7 @@ class JobManager:
             "queueCapacity": self.settings.queue_capacity,
         }
 
-    async def _release_unassigned_admission(self) -> None:
+    async def release_admission(self) -> None:
         async with self.lock:
             if self.admitted_jobs <= 0:
                 raise RuntimeError("admission reservation underflow")
@@ -571,9 +638,20 @@ def create_app(
         openapi_url=None,
         lifespan=lifespan,
     )
+
+    async def reserve_admission() -> bool:
+        return await application.state.manager.reserve_admission()
+
+    async def release_admission() -> None:
+        await application.state.manager.release_admission()
+
     application.add_middleware(
         RequestBodyLimitMiddleware,
         maximum_bytes=config.max_upload_bytes + MULTIPART_OVERHEAD_BYTES,
+        internal_token=config.internal_token,
+        reserve_admission=reserve_admission,
+        release_admission=release_admission,
+        upload_timeout_seconds=config.upload_timeout_seconds,
     )
 
     @application.exception_handler(ServiceError)
@@ -618,7 +696,8 @@ def create_app(
 
     @application.post("/jobs", status_code=202, dependencies=[Depends(require_internal_token)])
     async def create_job(request: Request, audio: UploadFile = File(...)):
-        job = await request.app.state.manager.submit(audio)
+        reservation_held = bool(request.scope.pop(ADMISSION_SCOPE_KEY, False))
+        job = await request.app.state.manager.submit(audio, reservation_held=reservation_held)
         return request.app.state.manager.public_job(job)
 
     @application.get("/jobs/{job_id}", dependencies=[Depends(require_internal_token)])

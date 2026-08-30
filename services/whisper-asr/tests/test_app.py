@@ -251,6 +251,191 @@ def test_request_body_limit_rejects_before_multipart_parsing(tmp_path):
         assert probe_calls == 0
 
 
+def test_request_middleware_authenticates_before_reading_body():
+    async def scenario():
+        receive_calls = 0
+        reserve_calls = 0
+        sent = []
+
+        async def downstream(_scope, _receive, _send):
+            raise AssertionError("unauthorized request reached the application")
+
+        async def receive():
+            nonlocal receive_calls
+            receive_calls += 1
+            raise AssertionError("unauthorized request body was consumed")
+
+        async def reserve():
+            nonlocal reserve_calls
+            reserve_calls += 1
+            return True
+
+        async def release():
+            raise AssertionError("unauthorized request acquired admission")
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = whisper_asr.RequestBodyLimitMiddleware(
+            downstream,
+            maximum_bytes=1024,
+            internal_token=TOKEN,
+            reserve_admission=reserve,
+            release_admission=release,
+            upload_timeout_seconds=1,
+        )
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/jobs",
+                "headers": [(b"content-length", b"999999")],
+            },
+            receive,
+            send,
+        )
+
+        assert sent[0]["status"] == 401
+        assert b'"code":"AUTH_REQUIRED"' in sent[1]["body"]
+        assert receive_calls == 0
+        assert reserve_calls == 0
+
+    asyncio.run(scenario())
+
+
+def test_request_middleware_bounds_concurrent_uploads_before_body_read(tmp_path):
+    async def scenario():
+        configured = settings(tmp_path, queue_capacity=1)
+        manager = whisper_asr.JobManager(configured, FakeModel())
+        entered = asyncio.Event()
+        release_downstream = asyncio.Event()
+        downstream_count = 0
+
+        async def downstream(_scope, _receive, send):
+            nonlocal downstream_count
+            downstream_count += 1
+            if downstream_count == configured.queue_capacity + 1:
+                entered.set()
+            await release_downstream.wait()
+            await send({"type": "http.response.start", "status": 202, "headers": []})
+            await send({"type": "http.response.body", "body": b""})
+
+        middleware = whisper_asr.RequestBodyLimitMiddleware(
+            downstream,
+            maximum_bytes=1024,
+            internal_token=TOKEN,
+            reserve_admission=manager.reserve_admission,
+            release_admission=manager.release_admission,
+            upload_timeout_seconds=1,
+        )
+
+        async def admitted_request():
+            delivered = False
+
+            async def receive():
+                nonlocal delivered
+                assert not delivered
+                delivered = True
+                return {"type": "http.request", "body": b"audio", "more_body": False}
+
+            sent = []
+
+            async def send(message):
+                sent.append(message)
+
+            await middleware(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/jobs",
+                    "headers": [(b"authorization", f"Bearer {TOKEN}".encode())],
+                },
+                receive,
+                send,
+            )
+            return sent
+
+        admitted = [
+            asyncio.create_task(admitted_request())
+            for _ in range(configured.queue_capacity + 1)
+        ]
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert manager.admitted_jobs == configured.queue_capacity + 1
+
+        rejected_receive_calls = 0
+
+        async def rejected_receive():
+            nonlocal rejected_receive_calls
+            rejected_receive_calls += 1
+            raise AssertionError("queue-full request body was consumed")
+
+        rejected_sent = []
+
+        async def rejected_send(message):
+            rejected_sent.append(message)
+
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/jobs",
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode())],
+            },
+            rejected_receive,
+            rejected_send,
+        )
+        assert rejected_sent[0]["status"] == 503
+        assert b'"code":"QUEUE_FULL"' in rejected_sent[1]["body"]
+        assert rejected_receive_calls == 0
+
+        release_downstream.set()
+        await asyncio.gather(*admitted)
+        assert manager.admitted_jobs == 0
+
+    asyncio.run(scenario())
+
+
+def test_request_middleware_times_out_and_releases_admission(tmp_path):
+    async def scenario():
+        manager = whisper_asr.JobManager(settings(tmp_path), FakeModel())
+        sent = []
+
+        async def downstream(_scope, _receive, _send):
+            raise AssertionError("timed-out upload reached the application")
+
+        async def receive():
+            await asyncio.sleep(0.005)
+            return {"type": "http.request", "body": b"x", "more_body": True}
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = whisper_asr.RequestBodyLimitMiddleware(
+            downstream,
+            maximum_bytes=1024,
+            internal_token=TOKEN,
+            reserve_admission=manager.reserve_admission,
+            release_admission=manager.release_admission,
+            upload_timeout_seconds=0.03,
+        )
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/jobs",
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode())],
+            },
+            receive,
+            send,
+        )
+
+        assert sent[0]["status"] == 408
+        assert b'"code":"UPLOAD_TIMEOUT"' in sent[1]["body"]
+        assert manager.admitted_jobs == 0
+
+    asyncio.run(scenario())
+
+
 def test_queue_capacity_is_bounded(tmp_path):
     model = BlockingModel()
     client, _app = make_client(
@@ -416,6 +601,10 @@ def test_settings_require_token_and_validate_bounds():
     with pytest.raises(RuntimeError, match="WHISPER_QUEUE_CAPACITY"):
         whisper_asr.Settings.from_env(
             {"WHISPER_INTERNAL_TOKEN": TOKEN, "WHISPER_QUEUE_CAPACITY": "0"}
+        )
+    with pytest.raises(RuntimeError, match="WHISPER_UPLOAD_TIMEOUT_SECONDS"):
+        whisper_asr.Settings.from_env(
+            {"WHISPER_INTERNAL_TOKEN": TOKEN, "WHISPER_UPLOAD_TIMEOUT_SECONDS": "0"}
         )
     for invalid_token in (
         "x",

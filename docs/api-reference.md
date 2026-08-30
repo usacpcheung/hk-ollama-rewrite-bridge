@@ -6,7 +6,8 @@
 > internal 64-character lowercase hexadecimal token. Its private contract is
 > documented in
 > `services/whisper-asr/README.md`; authenticated public routes will be a separate
-> change.
+> change. The daemon authenticates and reserves shared admission before reading an
+> upload body, and abandons uploads that exceed the configured total receive timeout.
 
 This document reflects the current server implementation and is intended for downstream applications that integrate with the API.
 
