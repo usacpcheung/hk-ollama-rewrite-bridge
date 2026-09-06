@@ -4,6 +4,7 @@ const { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES } = requi
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRuntimes } = require('./lib/service-runtime');
 const { createServiceRegistry } = require('./services');
+const { createTranscriptionService } = require('./services/transcription');
 const { createRewriteHeaderAuth } = require('./auth/header-auth');
 const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
@@ -1268,6 +1269,14 @@ app.post(
     }
   }
 );
+
+const transcriptionService = createTranscriptionService();
+app.post(transcriptionService.paths, (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  // Covers auth, rate-limit and disabled-service rejections before body consumption.
+  res.once('finish', () => { if (!req.complete) req.destroy(); });
+  next();
+}, rewriteHeaderAuth, ...transcriptionService.middleware);
 
 app.use((_req, res) => {
   return errorResponse(res, 404, 'NOT_FOUND', 'Not Found');
