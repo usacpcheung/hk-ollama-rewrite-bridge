@@ -150,6 +150,33 @@ BRIDGE_EXPRESS_TRUST_PROXY=loopback
 BRIDGE_TRUSTED_PROXY_ADDRESSES=127.0.0.1,::1
 ```
 
+### Worksheet rewrite profile
+
+For the planned record → transcribe → rewrite → student edit workflow, use these
+explicit overrides in the existing bridge environment file:
+
+```bash
+REWRITE_MAX_TEXT_LENGTH=2000
+REWRITE_MAX_COMPLETION_TOKENS=4096
+```
+
+The code permits an input setting up to 4,000 Unicode characters, but the profile
+above accepts only 2,000. Existing defaults remain 200 characters and 300 output
+tokens. A larger output allowance is a maximum, not a requested answer length.
+If later accepting 4,000 characters, test with an 8,192-token output allowance;
+tokenization varies, so neither pairing guarantees a complete answer.
+
+The incoming JSON body still has a separate 16 KiB limit, including JSON syntax
+and escaped characters. Prefer normal UTF-8 JSON rather than escaping every
+Chinese character. The system prompt is added on the server and does not count
+toward this incoming body limit. Align the worksheet/widget character limit with
+the configured backend limit before exposing longer input to students.
+
+Validate long mixed-language answers for preserved meaning, completion, latency
+and actual token usage before rollout. Keep the original transcript available
+if rewriting fails or is incomplete. This profile does not enable transcription;
+the Google provider and recording UI are separate implementation steps.
+
 ## 5) Environment reference
 
 The canonical environment reference is `docs/env-reference.md`.

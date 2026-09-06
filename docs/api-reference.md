@@ -90,7 +90,7 @@ Rewrite Hong Kong colloquial Cantonese into formal Traditional Chinese.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters. |
+| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters (default 200; configurable up to 4,000). |
 | `stream` | boolean/string/number | No | `true`, `"true"`, `1`, `"1"` request NDJSON streaming; only works when provider capability and env toggles both allow it. |
 
 ### Rewrite request examples

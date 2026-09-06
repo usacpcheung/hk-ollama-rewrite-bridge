@@ -12,6 +12,23 @@ function parseBounded(rawValue, fallback, { min = 0, max = Number.MAX_SAFE_INTEG
   return parsed;
 }
 
+test('worksheet rewrite limits are opt-in and bounded', () => {
+  for (const [input, output, expectedInput, expectedOutput] of [
+    ['2000', '4096', 2000, 4096],
+    ['4000', '8192', 4000, 8192],
+    ['4001', '8193', 200, 300]
+  ]) {
+    const config = resolveRewriteConfig({
+      env: { REWRITE_MAX_TEXT_LENGTH: input, REWRITE_MAX_COMPLETION_TOKENS: output },
+      parseEnvBoundedInteger: parseBounded,
+      parseEnvMilliseconds: parseBounded,
+      providerCapabilities: PROVIDER_CAPABILITIES
+    });
+    assert.equal(config.maxTextLength, expectedInput);
+    assert.equal(config.maxCompletionTokens, expectedOutput);
+  }
+});
+
 test('new service-scoped key overrides legacy key', () => {
   const env = {
     REWRITE_MAX_COMPLETION_TOKENS: '111',

@@ -34,8 +34,8 @@ not silently fall back to another provider.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length in Unicode characters. |
-| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers. |
+| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length in Unicode characters; range 1–4,000. Worksheet starting profile: 2,000. |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
 | `REWRITE_COLD_INVOKE_TIMEOUT_MS` | `120000` | Provider invocation timeout during cold/warming rewrite phases. |
 | `REWRITE_STREAMING_ENABLED` | `false` | Service-level rewrite streaming toggle. |
