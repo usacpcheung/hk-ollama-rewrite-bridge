@@ -14,7 +14,18 @@ function createGoogleSpeechProvider(config, { createClient } = {}) {
   let client;
   let initialization;
   async function initialize(speech, signal, timeoutMs) {
-    initialization ||= Promise.resolve().then(() => speech.initialize?.());
+    initialization ||= Promise.resolve().then(() => speech.initialize?.()).catch(error => {
+      // Reset only on shared initialization failure, not a caller's timeout/abort.
+      // The SDK also caches its rejected stub, so a later request needs a new client.
+      if (client === speech) {
+        client = undefined;
+        initialization = undefined;
+      }
+      // Failed SDK initialization can make close reject too. Cleanup must neither
+      // mask the original error nor prevent the next request from recovering.
+      void Promise.resolve().then(() => speech.close?.()).catch(() => {});
+      throw error;
+    });
     // Initialization has no audio/request payload. Share it and bound each caller's
     // wait, so a stalled credential lookup cannot occupy all admission slots forever.
     let timer;

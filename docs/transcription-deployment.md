@@ -37,7 +37,7 @@ Do not switch a running production checkout to an unreviewed branch.
 
 Inspect the real `rewrite-bridge.service` with `systemctl cat`: the repository's
 generic unit example is not a replacement for the existing `/opt` deployment.
-Check Node (`node --version`; use Node 20 or newer), `ffmpeg -version`,
+Check Node (`node --version`; use Node 22 or newer), `ffmpeg -version`,
 `ffprobe -version`, available disk, and Google Cloud API/billing/IAM configuration.
 On Ubuntu/Debian, install FFmpeg through the system package manager if absent:
 

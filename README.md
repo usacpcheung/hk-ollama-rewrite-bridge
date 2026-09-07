@@ -57,7 +57,7 @@ and [environment settings](docs/env-reference.md#transcription) for details.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22+ (CI tests Node 22 and 24)
 - For rewrite with Ollama: Ollama reachable at `127.0.0.1:11434` and the configured model pulled
 - For rewrite or T2A with Minimax: outbound network access and `MINIMAX_API_KEY`
 

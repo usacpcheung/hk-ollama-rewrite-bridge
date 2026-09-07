@@ -107,6 +107,94 @@ test('Google initialization failures are controlled and cannot trigger a recogni
   assert.ok(!JSON.stringify(result).includes('private-credential-path'));
 });
 
+test('failed initialization is retired once and concurrent later requests share a fresh client', async () => {
+  let clients = 0;
+  let initializations = 0;
+  let closes = 0;
+  let rejectFirst;
+  let resolveSecond;
+  const calls = [];
+  const provider = createGoogleSpeechProvider({ location: 'us' }, { createClient: () => {
+    const id = ++clients;
+    return {
+      initialize: () => {
+        initializations++;
+        return new Promise((resolve, reject) => { if (id === 1) rejectFirst = reject; else resolveSecond = resolve; });
+      },
+      close: async () => { closes++; throw new Error('failed stub cannot close'); },
+      recognize: async request => {
+        calls.push(request.content.toString());
+        return [{ results: [{ alternatives: [{ transcript: request.content.toString() }] }] }];
+      }
+    };
+  } });
+  const invoke = text => provider.services.transcription.sync({ content: Buffer.from(text), signal: new AbortController().signal, timeoutMs: 1000 });
+  const first = [invoke('failed-a'), invoke('failed-b')];
+  await until(() => rejectFirst);
+  rejectFirst(new Error('temporary credential failure'));
+  assert.ok((await Promise.all(first)).every(result => !result.ok));
+  assert.deepEqual(calls, []); // No automatic retry of the failed requests.
+  const second = [invoke('recovered-a'), invoke('recovered-b')];
+  await until(() => resolveSecond);
+  assert.equal(clients, 2);
+  assert.equal(initializations, 2);
+  assert.equal(closes, 1);
+  resolveSecond();
+  const results = await Promise.all(second);
+  assert.deepEqual(results.map(result => result.data.response), ['recovered-a', 'recovered-b']);
+  assert.deepEqual(calls, ['recovered-a', 'recovered-b']);
+  assert.equal((await invoke('reused')).ok, true);
+  assert.equal(clients, 2);
+});
+
+test('initialization rejection after all callers time out still allows later recovery', async () => {
+  let rejectInitialization;
+  let clients = 0;
+  let calls = 0;
+  const provider = createGoogleSpeechProvider({ location: 'us' }, { createClient: () => {
+    const id = ++clients;
+    return {
+      initialize: () => id === 1 ? new Promise((_resolve, reject) => { rejectInitialization = reject; }) : Promise.resolve(),
+      recognize: async () => { calls++; return [{ results: [{ alternatives: [{ transcript: 'recovered' }] }] }]; }
+    };
+  } });
+  const invoke = timeoutMs => provider.services.transcription.sync({ content: Buffer.from('audio'), signal: new AbortController().signal, timeoutMs });
+  assert.equal((await invoke(20)).error.code, 'TRANSCRIPTION_TIMEOUT');
+  assert.equal(clients, 1);
+  rejectInitialization(new Error('late initialization failure'));
+  await delay(0);
+  assert.equal((await invoke(1000)).ok, true);
+  assert.equal(clients, 2);
+  assert.equal(calls, 1);
+});
+
+test('one cancelled initialization waiter does not retire the shared healthy client', async () => {
+  let resolveInitialization;
+  let clients = 0;
+  let closes = 0;
+  let calls = 0;
+  const provider = createGoogleSpeechProvider({ location: 'us' }, { createClient: () => {
+    clients++;
+    return {
+      initialize: () => new Promise(resolve => { resolveInitialization = resolve; }),
+      close: () => { closes++; },
+      recognize: async () => { calls++; return [{ results: [{ alternatives: [{ transcript: 'healthy' }] }] }]; }
+    };
+  } });
+  const controller = new AbortController();
+  const invoke = signal => provider.services.transcription.sync({ content: Buffer.from('audio'), signal, timeoutMs: 1000 });
+  const cancelled = invoke(controller.signal);
+  const healthy = invoke(new AbortController().signal);
+  await until(() => resolveInitialization);
+  controller.abort(new TranscriptionError(408, 'TRANSCRIPTION_CANCELLED', 'cancelled'));
+  assert.equal((await cancelled).error.code, 'TRANSCRIPTION_CANCELLED');
+  resolveInitialization();
+  assert.equal((await healthy).ok, true);
+  assert.equal(clients, 1);
+  assert.equal(closes, 0);
+  assert.equal(calls, 1);
+});
+
 test('invalid actual audio never reaches Google and temporary upload files are removed', async t => {
   const f = await fixture(t, { normalize: async () => { throw new TranscriptionError(415, 'UNSUPPORTED_AUDIO', 'Unsupported audio.'); } });
   const result = await f.submit('a fake recording');

@@ -10,7 +10,7 @@ It covers provider selection, environment configuration, reverse-proxy setup, an
 ## 1) Prerequisites
 
 - Linux host with systemd
-- Node.js 18+
+- Node.js 22+ (CI tests Node 22 and 24)
 - App bound locally on `127.0.0.1:3001`
 - Reverse proxy in front of the app for public exposure
 - Choose providers:
