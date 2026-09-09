@@ -111,6 +111,64 @@ function startMockMinimaxServer(handler) {
 
 
 
+test('larger configured rewrite limits preserve full input and the provider output budget', async (t) => {
+  const captured = [];
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      captured.push(JSON.parse(raw));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ reply: '改寫完成' }));
+    });
+  });
+  t.after(() => mockServer.close());
+  for (const limit of [2000, 4000]) {
+    const serverProcess = spawn(process.execPath, ['server.js'], {
+      env: {
+        ...process.env,
+        REWRITE_PROVIDER: 'minimax', WARMUP_ON_START: 'false',
+        BRIDGE_INTERNAL_AUTH_SECRET: AUTH_SECRET,
+        REWRITE_MAX_TEXT_LENGTH: String(limit), REWRITE_MAX_COMPLETION_TOKENS: '4096',
+        REWRITE_MINIMAX_API_FORMAT: 'legacy-chat',
+        REWRITE_MINIMAX_API_URL: `http://127.0.0.1:${port}/v1/text/chatcompletion_v2`,
+        MINIMAX_API_KEY: 'minimax-test-key'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    try {
+      await waitForServerReady(serverProcess);
+      const text = '中'.repeat(limit - 1) + '😊';
+      for (const path of ['/rewrite', '/api/rewrite']) {
+        const response = await fetch(`${BASE_URL}${path}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Bridge-Auth': AUTH_SECRET,
+            'X-Authenticated-Email': 'tester@hs.edu.hk'
+          },
+          body: JSON.stringify({ text })
+        });
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).result, '改寫完成');
+        assert.equal(captured.at(-1).messages[1].content, `把下方文字改寫為繁體書面語：\n${text}`);
+        assert.equal(captured.at(-1).max_completion_tokens, 4096);
+      }
+      const callsBefore = captured.length;
+      const rejected = await postRewrite(text + '多');
+      assert.equal(rejected.status, 413);
+      assert.equal(rejected.body.error.code, 'TOO_LONG');
+      assert.equal(captured.length, callsBefore);
+    } finally {
+      const exited = new Promise((resolve) => serverProcess.once('exit', resolve));
+      if (serverProcess.exitCode === null) {
+        serverProcess.kill('SIGTERM');
+        await exited;
+      }
+    }
+  }
+});
+
 test('POST /rewrite ignores legacy prompt-template env overrides for Minimax payloads', async (t) => {
   let capturedMessages = null;
   const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {

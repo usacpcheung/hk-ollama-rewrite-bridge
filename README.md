@@ -1,11 +1,33 @@
 # hk-ollama-rewrite-bridge
 
-Production-ready Node.js Express bridge that exposes two API services behind a shared auth, rate-limit, and provider-adapter layer:
+Node.js Express bridge that exposes AI services behind shared authentication and provider adapters:
 
 - **Rewrite**: converts Hong Kong colloquial Cantonese into formal Traditional Chinese.
 - **T2A (text-to-audio)**: generates Cantonese-oriented speech audio through the Minimax-compatible provider path.
+- **Transcription (opt-in)**: transcribes completed recordings through Google Cloud Speech-to-Text V2 Chirp 3.
 
 This README is the top-level operator and integrator guide. For exact endpoint contracts, see `docs/api-reference.md`.
+
+## Worksheet audio transcription (opt-in)
+
+Authenticated callers upload multipart field `audio` to public
+`POST /api/rewrite-bridge/transcriptions` (internal `/transcriptions` or
+`/api/transcriptions`). Success returns `{ ok: true, result, durationSeconds,
+requestId, timings }`. The client can then pass `result` to rewrite and let the
+student edit. This change supplies the backend, not the worksheet recording UI.
+
+Transcription is disabled by default. Enable with `TRANSCRIPTION_ENABLED=true`,
+`TRANSCRIPTION_GOOGLE_PROJECT`, the worksheet's `TRANSCRIPTION_ALLOWED_ORIGINS`,
+and server-side Application Default Credentials.
+It uses `chirp_3`, `yue-Hant-HK`, and the `us` endpoint by default. No Whisper daemon
+is needed. Uploads are limited to 20 MiB and 60 decoded seconds; FFmpeg normalizes
+audio to mono 16 kHz FLAC. Ten requests can be admitted, two conversions can run,
+and each user can have one active request. Audio is removed after processing;
+the bridge does not retain transcripts. Limits are configurable and process-local.
+
+Follow the [checkpoint deployment guide](docs/transcription-deployment.md) before
+enabling public access. See the [API contract](docs/api-reference.md#transcription)
+and [environment settings](docs/env-reference.md#transcription) for details.
 
 ## What is implemented
 
@@ -15,6 +37,7 @@ This README is the top-level operator and integrator guide. For exact endpoint c
 |---|---|---|---|
 | Rewrite | `POST /rewrite` | `POST /api/rewrite-bridge/rewrite` | Rewrite colloquial Cantonese into formal Traditional Chinese. |
 | T2A | `POST /t2a` | `POST /api/rewrite-bridge/t2a` | Generate speech audio from validated input text. |
+| Transcription | `POST /transcriptions` | `POST /api/rewrite-bridge/transcriptions` | Transcribe a completed audio recording (opt-in). |
 | Model status | `GET /model-status` | `GET /api/rewrite-bridge/model-status` | Diagnostics for frontend polling and operators. |
 | Health | `GET /healthz` | `GET /api/rewrite-bridge/healthz` | Process liveness. |
 | Ready | `GET /readyz` | `GET /api/rewrite-bridge/readyz` | Traffic-readiness gate. |
@@ -23,6 +46,7 @@ This README is the top-level operator and integrator guide. For exact endpoint c
 
 - Express server bound to `127.0.0.1:3001` only.
 - Service registry in `services/` resolves service-scoped configuration for both rewrite and T2A.
+- Transcription has an independent upload/conversion lifecycle and admission limits in `services/transcription.js`, using the shared provider adapter with `providers/google-speech.js`.
 - Provider adapters normalize upstream behavior so route handlers can keep a stable API contract.
 - Protected routes (`/rewrite`, `/t2a`) share:
   - trusted-header auth
@@ -33,7 +57,7 @@ This README is the top-level operator and integrator guide. For exact endpoint c
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 22+ (CI tests Node 22 and 24)
 - For rewrite with Ollama: Ollama reachable at `127.0.0.1:11434` and the configured model pulled
 - For rewrite or T2A with Minimax: outbound network access and `MINIMAX_API_KEY`
 
@@ -149,7 +173,8 @@ In production, public callers usually go through a reverse proxy that performs O
 
 ### 4) Respect validation limits
 
-- Rewrite input is capped by `REWRITE_MAX_TEXT_LENGTH`.
+- Rewrite input is capped by `REWRITE_MAX_TEXT_LENGTH` (default 200 Unicode characters; configurable up to 4,000).
+- For the planned worksheet recording workflow, explicitly configure `REWRITE_MAX_TEXT_LENGTH=2000` and `REWRITE_MAX_COMPLETION_TOKENS=4096`. These are starting settings for validation, not a guarantee that every rewrite will fit its output budget. Existing defaults remain unchanged. See the [deployment guide](docs/deployment-guide.md#worksheet-rewrite-profile).
 - T2A input is capped by `T2A_MAX_TEXT_LENGTH`.
 - T2A option ranges are validated server-side, so client apps should pre-validate where possible to give better UX.
 

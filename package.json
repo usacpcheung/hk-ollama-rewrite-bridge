@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "HK Cantonese rewrite bridge for Ollama",
   "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
@@ -10,6 +13,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@google-cloud/speech": "8.0.1",
+    "busboy": "1.6.0",
     "express": "^4.22.2",
     "opencc-js": "^1.0.5"
   }

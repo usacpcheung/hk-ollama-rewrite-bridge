@@ -4,7 +4,83 @@ This document reflects the current server implementation and is intended for dow
 
 - Internal bind: `http://127.0.0.1:3001`
 - Typical public namespace via reverse proxy: `/api/rewrite-bridge/*`
-- Protected routes: `POST /rewrite`, `POST /t2a`
+- Protected routes: `POST /rewrite`, `POST /t2a`, `POST /transcriptions` (and their `/api/` aliases)
+
+## Transcription
+
+Public route: `POST /api/rewrite-bridge/transcriptions`, proxied to internal
+`POST /transcriptions` (also available as `/api/transcriptions`). Uses the same
+trusted-header authentication and domain policy as rewrite. Google credentials
+are never sent to the browser. This is one request/response per completed recording;
+there is no job identifier to poll and no server-triggered rewrite call.
+
+Browser requests must come from an exact `TRANSCRIPTION_ALLOWED_ORIGINS` entry;
+cross-site uploads are rejected. This protects authenticated multipart uploads
+from cross-site form submission. No cross-origin browser access is enabled.
+Authenticated server-to-server calls may omit Origin.
+
+Send `multipart/form-data` containing exactly one file named `audio`, with no
+additional fields and no Content-Encoding. Maximum audio size is 20 MiB plus
+64 KiB for multipart framing; maximum duration is 60 decoded seconds (both can
+be configured lower). Empty files, multiple audio streams, video, and unsupported
+codecs fail validation. Supported actual media: PCM WAV (8/16/24/32-bit integer
+or 32-bit float), native FLAC, MP3, AAC in MP4/M4A/MOV, and Opus in WebM/OGG.
+One or two channels and sample rates 8–192 kHz are allowed. File extensions and
+declared MIME types are not used to validate media. All accepted audio is decoded
+to mono 16 kHz, then encoded as FLAC for Google.
+
+Success (`200`, JSON, `Cache-Control: no-store`):
+
+```json
+{
+  "ok": true,
+  "result": "Recognized speech text",
+  "durationSeconds": 31.808,
+  "requestId": "a-response-correlation-uuid",
+  "timings": { "conversionMs": 250, "transcriptionMs": 6000, "totalMs": 6400 }
+}
+```
+
+Timings above are illustrative, not a latency promise. `conversionMs` excludes
+waiting for a conversion slot; `totalMs` includes admission-to-response processing
+and upload. Segments are joined with newlines. `result` is transcription, not
+rewritten or guaranteed Traditional Chinese. Preserve it before calling rewrite;
+Google credentials, provider payloads, original filenames and audio are not returned.
+
+Defaults: up to 10 admitted requests across users, including uploads and work
+waiting for either of 2 conversion slots. One active request per user. Six requests
+per user per minute, plus the existing global limiter. Google calls run concurrently.
+No automatic retries: ambiguous failures can already have incurred charges.
+
+| Status | Error code | Meaning |
+|---|---|---|
+| 401 / 403 | Existing auth codes | Same authentication/domain checks as rewrite. |
+| 403 | `TRANSCRIPTION_ORIGIN_FORBIDDEN` | Browser origin is not allowed or request is cross-site. |
+| 400 | `INVALID_UPLOAD` | Missing, empty, malformed, extra or interrupted multipart input. |
+| 408 | `UPLOAD_TIMEOUT` | Upload exceeds its total receive deadline (default 120 s). |
+| 408 | `TRANSCRIPTION_CANCELLED` | Work was cancelled; normally the disconnected client receives no response. |
+| 413 | `AUDIO_TOO_LARGE`, `AUDIO_TOO_LONG` | Size or decoded duration limit exceeded. |
+| 415 | `UNSUPPORTED_MEDIA_TYPE`, `UNSUPPORTED_AUDIO` | Unsupported request format or actual media. |
+| 422 | `INVALID_AUDIO`, `NO_SPEECH` | Cannot decode audio or no transcript was recognized. |
+| 429 | `RATE_LIMITED` | Existing-style per-user/global request limit. |
+| 429 | `TRANSCRIPTION_ALREADY_ACTIVE` | This user has unfinished work. |
+| 429 | `TRANSCRIPTION_RATE_LIMITED` | Google quota/capacity rejection. |
+| 503 | `TRANSCRIPTION_DISABLED` | Feature is not enabled. |
+| 503 | `TRANSCRIPTION_BUSY` | Total admission slots are occupied. |
+| 503 | `AUDIO_PROCESSOR_UNAVAILABLE`, `TRANSCRIPTION_UNAVAILABLE` | Local processor/storage, credentials, or service access unavailable. |
+| 504 | `AUDIO_PROCESSING_TIMEOUT`, `TRANSCRIPTION_TIMEOUT` | Conversion, provider or total deadline exceeded. |
+| 502 | `TRANSCRIPTION_FAILED` | Other provider failure; internal details are suppressed. |
+
+Errors use `{ ok: false, error: { code, message } }`, with `requestId` where assigned.
+429/503 handler responses include `Retry-After: 10`; request-rate limiting uses
+its window's remaining time. Upload rejection can close the connection.
+
+Disconnecting cancels local upload/conversion work. If Google has already received
+the RPC, it may still finish and be charged; its result is discarded, and capacity
+is released only after settlement. The total deadline can return 504 while such
+a call is still settling. Audio is deleted on success/failure/cancellation; only
+an in-flight request holds the transcript in memory. Startup cleanup removes
+matching abandoned job directories for dead processes. No job history is stored.
 
 ## Global conventions
 
@@ -90,7 +166,7 @@ Rewrite Hong Kong colloquial Cantonese into formal Traditional Chinese.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters. |
+| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters (default 200; configurable up to 4,000). |
 | `stream` | boolean/string/number | No | `true`, `"true"`, `1`, `"1"` request NDJSON streaming; only works when provider capability and env toggles both allow it. |
 
 ### Rewrite request examples

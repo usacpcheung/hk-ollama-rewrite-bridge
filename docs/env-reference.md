@@ -4,6 +4,37 @@ This is the canonical reference for supported environment variables. New
 configuration should use the canonical names below. Deprecated aliases are kept
 for one compatibility window and emit startup warnings when used.
 
+## Transcription
+
+Disabled by default and independent of rewrite/T2A provider selection. Invalid
+settings fail startup when enabled; disabled deployments need no Google or media
+configuration. Credentials are read through Google Application Default Credentials.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRANSCRIPTION_ENABLED` | `false` | Enable transcription (`true`/`1` or `false`/`0`). |
+| `TRANSCRIPTION_GOOGLE_PROJECT` | Required when enabled | Google Cloud project ID (not project number). |
+| `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | `us` or `eu`; endpoint and recognizer location always match. |
+| `TRANSCRIPTION_ALLOWED_ORIGINS` | Empty | Comma-separated exact worksheet HTTP(S) origins without paths/trailing slashes. Required for browser uploads with Origin headers; cross-site requests are rejected. Authenticated server-side calls without Origin remain supported. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | ADC default | Absolute path to a server-readable credential file; never commit the file. |
+| `TRANSCRIPTION_TEMP_DIRECTORY` | OS temp directory + `rewrite-bridge-transcriptions` | Dedicated absolute, private service-owned directory; production recommendation `/var/lib/rewrite-bridge/transcriptions`. |
+| `TRANSCRIPTION_MAX_UPLOAD_BYTES` | `20971520` | Audio bytes; range 1,024–20 MiB, plus separate 64 KiB multipart allowance. |
+| `TRANSCRIPTION_MAX_AUDIO_SECONDS` | `60` | Decoded recording duration; range 1–60 s. |
+| `TRANSCRIPTION_MAX_CONCURRENCY` | `10` | Total admitted uploads/work; range 1–20. One active request per user is fixed. |
+| `TRANSCRIPTION_CONVERSION_CONCURRENCY` | `2` | Active conversion sequences; range 1–4. Each FFmpeg process uses one codec/filter thread. |
+| `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per-user request attempts per fixed minute window; range 1–60. |
+| `TRANSCRIPTION_UPLOAD_TIMEOUT_MS` | `120000` | Total upload receive deadline; range 1,000–120,000 ms. |
+| `TRANSCRIPTION_CONVERSION_TIMEOUT_MS` | `15000` | Probe/decode/encode time budget after obtaining a conversion slot; range 1,000–60,000 ms. |
+| `TRANSCRIPTION_GOOGLE_TIMEOUT_MS` | `60000` | Google RPC deadline; range 1,000–120,000 ms, bounded by remaining total deadline. |
+| `TRANSCRIPTION_TOTAL_TIMEOUT_MS` | `180000` | Overall response deadline; range 1,000–300,000 ms. In-flight Google calls retain admission until they settle. |
+| `TRANSCRIPTION_FFMPEG_PATH` | `ffmpeg` | Server executable; use an absolute path if systemd PATH is restricted. |
+| `TRANSCRIPTION_FFPROBE_PATH` | `ffprobe` | Server executable. |
+
+Model `chirp_3`, language `yue-Hant-HK`, and output mono 16 kHz FLAC are fixed to
+the reviewed/tested profile. `GOOGLE_SDK_NODE_LOGGING` must be empty/unset for
+privacy. See [deployment checkpoints](transcription-deployment.md), including
+Google access verification and the separate rewrite limit profile.
+
 ## Naming Model
 
 Use the most specific stable scope:
@@ -34,8 +65,8 @@ not silently fall back to another provider.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length in Unicode characters. |
-| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers. |
+| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length in Unicode characters; range 1–4,000. Worksheet starting profile: 2,000. |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
 | `REWRITE_COLD_INVOKE_TIMEOUT_MS` | `120000` | Provider invocation timeout during cold/warming rewrite phases. |
 | `REWRITE_STREAMING_ENABLED` | `false` | Service-level rewrite streaming toggle. |
