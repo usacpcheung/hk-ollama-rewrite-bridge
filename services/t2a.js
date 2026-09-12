@@ -1,5 +1,5 @@
 const DEFAULT_MAX_TEXT_LENGTH = 200;
-const ABSOLUTE_MAX_TEXT_LENGTH = 600;
+const ABSOLUTE_MAX_TEXT_LENGTH = 1000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 32000;
 const DEFAULT_AUDIO_BITRATE = 128000;
 const DEFAULT_AUDIO_FORMAT = 'mp3';
@@ -191,10 +191,16 @@ function resolveT2AConfig({
     env,
     preferredKeys: [`${serviceId}_MAX_TEXT_LENGTH`],
     legacyKeys: [],
-    parse: (raw, fallback) => parseEnvBoundedInteger(raw, fallback, {
-      min: 1,
-      max: ABSOLUTE_MAX_TEXT_LENGTH
-    }),
+    parse: (raw, fallback) => {
+      const value = Number(raw);
+      if (Number.isInteger(value) && value > ABSOLUTE_MAX_TEXT_LENGTH) {
+        return ABSOLUTE_MAX_TEXT_LENGTH;
+      }
+      return parseEnvBoundedInteger(raw, fallback, {
+        min: 1,
+        max: ABSOLUTE_MAX_TEXT_LENGTH
+      });
+    },
     defaultValue: DEFAULT_MAX_TEXT_LENGTH,
     warnLegacyUsage,
     warningLabel: 'maxTextLength'

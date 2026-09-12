@@ -11,6 +11,22 @@ function parseBounded(rawValue, fallback, { min = 0, max = Number.MAX_SAFE_INTEG
   return parsed;
 }
 
+test('T2A input budget defaults, clamps oversized integers, and rejects invalid settings', () => {
+  for (const [raw, expected] of [
+    [undefined, 200], ['', 200], ['   ', 200], ['1', 1], ['500', 500],
+    ['1000', 1000], ['1001', 1000], ['4000', 1000],
+    ['bad', 200], ['0', 200], ['-1', 200], ['1.5', 200],
+    ['1000.5', 200], ['Infinity', 200]
+  ]) {
+    const config = resolveT2AConfig({
+      env: raw === undefined ? {} : { T2A_MAX_TEXT_LENGTH: raw },
+      parseEnvBoundedInteger: parseBounded,
+      parseEnvMilliseconds: parseBounded
+    });
+    assert.equal(config.maxTextLength, expected, `setting: ${raw}`);
+  }
+});
+
 test('preferred service-scoped T2A keys override legacy minimax smoke envs', () => {
   const env = {
     T2A_MODEL: 'preferred-short-model',

@@ -175,7 +175,8 @@ In production, public callers usually go through a reverse proxy that performs O
 
 - Rewrite input is capped by `REWRITE_MAX_TEXT_LENGTH` (default 200 Unicode characters; configurable up to 4,000).
 - For the planned worksheet recording workflow, explicitly configure `REWRITE_MAX_TEXT_LENGTH=2000` and `REWRITE_MAX_COMPLETION_TOKENS=4096`. These are starting settings for validation, not a guarantee that every rewrite will fit its output budget. Existing defaults remain unchanged. See the [deployment guide](docs/deployment-guide.md#worksheet-rewrite-profile).
-- T2A input is capped by `T2A_MAX_TEXT_LENGTH`.
+- T2A input is capped by `T2A_MAX_TEXT_LENGTH` (default 200; configurable from 1 to 1,000). Integer settings above 1,000 clamp to 1,000; malformed, fractional, or non-positive settings fall back to 200. Unset or blank settings use 200.
+- Both input limits are application budget controls for usage and spending, not provider capability limits. They count Unicode code points after trimming surrounding whitespace. Raising the T2A ceiling adds operator flexibility while retaining an explicit cap; existing valid settings and the default remain unchanged.
 - T2A option ranges are validated server-side, so client apps should pre-validate where possible to give better UX.
 
 ### 5) Treat optional metadata as additive

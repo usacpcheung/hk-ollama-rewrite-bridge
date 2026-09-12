@@ -65,7 +65,7 @@ not silently fall back to another provider.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
-| `REWRITE_MAX_TEXT_LENGTH` | `200` | Max accepted rewrite input length in Unicode characters; range 1–4,000. Worksheet starting profile: 2,000. |
+| `REWRITE_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–4,000; invalid or out-of-range settings fall back to 200. Worksheet starting profile: 2,000. |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
 | `REWRITE_COLD_INVOKE_TIMEOUT_MS` | `120000` | Provider invocation timeout during cold/warming rewrite phases. |
@@ -132,7 +132,7 @@ only supported value. Unknown explicit values fail with controlled
 | Variable | Default | Meaning |
 |---|---:|---|
 | `T2A_PROVIDER` | `minimax` | T2A provider selector. Supported today: `minimax`. |
-| `T2A_MAX_TEXT_LENGTH` | `200` | Max accepted T2A input length in Unicode characters. |
+| `T2A_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–1,000. Integer settings above 1,000 clamp to 1,000. Malformed, fractional, or non-positive settings fall back to 200; unset or blank settings use 200. |
 | `T2A_INVOKE_TIMEOUT_MS` | `30000` | T2A provider invocation timeout. |
 | `T2A_MINIMAX_API_URL` | `https://api.minimax.io/v1/t2a_v2` | Minimax T2A endpoint. |
 | `T2A_PROVIDER_MINIMAX_API_URL` | same | Alternate Minimax T2A endpoint key. |

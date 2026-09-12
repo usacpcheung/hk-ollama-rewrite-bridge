@@ -365,6 +365,58 @@ test('t2a routes reject unsupported providers without calling Minimax', async (t
   assert.equal(minimaxCalls, 0);
 });
 
+test('T2A configured budgets preserve alias and audio contracts without invoking over-limit input', async (t) => {
+  const captured = [];
+  const audio = Buffer.from('mock mp3 budget boundary '.repeat(4));
+  const { server: mockServer, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      captured.push(JSON.parse(raw));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ data: { audio: audio.toString('hex'), format: 'mp3' } }));
+    });
+  });
+  t.after(() => mockServer.close());
+  for (const [setting, limit] of [['', 200], ['500', 500], ['1000', 1000], ['1001', 1000], ['bad', 200]]) {
+    const bridge = spawnBridge({
+      MINIMAX_API_KEY: 'test-key', T2A_MAX_TEXT_LENGTH: setting,
+      T2A_MINIMAX_API_URL: `http://127.0.0.1:${port}/t2a`
+    });
+    try {
+      await waitForServerReady(bridge);
+      const text = '中'.repeat(limit - 2) + '😊。';
+      for (const path of ['/t2a', '/api/t2a']) {
+        const response_mode = path === '/t2a' ? 'binary' : 'base64_json';
+        const accepted = await postJson(path, { text: `  ${text}\n`, response_mode }, authHeaders);
+        assert.equal(accepted.status, 200);
+        assert.equal(captured.at(-1).text, text);
+        if (response_mode === 'binary') {
+          assert.match(accepted.headers.get('content-type'), /audio\/mpeg/);
+          assert.ok(accepted.headers.get('content-disposition'));
+          assert.deepEqual(Buffer.from(await accepted.arrayBuffer()), audio);
+        } else {
+          const body = await accepted.json();
+          assert.equal(body.ok, true);
+          assert.equal(body.audio, audio.toString('base64'));
+          assert.equal(body.size, audio.length);
+        }
+        const callsBefore = captured.length;
+        const rejected = await postJson(path, { text: text + '！' }, authHeaders);
+        assert.equal(rejected.status, 413);
+        assert.equal((await rejected.json()).error.code, 'TOO_LONG');
+        assert.equal(captured.length, callsBefore);
+      }
+    } finally {
+      if (bridge.exitCode === null) {
+        const exited = new Promise((resolve) => bridge.once('exit', resolve));
+        bridge.kill('SIGTERM');
+        await exited;
+      }
+    }
+  }
+});
+
 test('t2a routes preserve validation errors for invalid, missing, and overlong text', async (t) => {
   const serverProcess = spawnBridge({
     MINIMAX_API_KEY: 'test-key',

@@ -25,6 +25,26 @@ function createService(env = {}) {
   }
 }
 
+test('T2A budget boundaries count trimmed Unicode text and punctuation', () => {
+  for (const [raw, limit] of [['', 200], ['500', 500], ['1000', 1000], ['1001', 1000], ['bad', 200]]) {
+    const service = createService({ T2A_MAX_TEXT_LENGTH: raw });
+    const text = '中'.repeat(limit - 3) + ' 😊。';
+    const accepted = service.validateRequest({ body: { text: ` \n${text}\t ` } });
+    assert.equal(accepted.ok, true);
+    assert.equal(accepted.value.inputCharCount, limit);
+    assert.equal(accepted.value.trimmedText, text);
+    const rejected = service.validateRequest({ body: { text: text + '！' } });
+    assert.equal(rejected.status, 413);
+    assert.equal(rejected.code, 'TOO_LONG');
+    assert.equal(rejected.message, `Max ${limit} characters`);
+    for (const empty of ['', ' \n\t　']) {
+      const result = service.validateRequest({ body: { text: empty } });
+      assert.equal(result.status, 400);
+      assert.equal(result.code, 'INVALID_INPUT');
+    }
+  }
+});
+
 test('t2a validation rejects missing text', () => {
   const service = createService();
 

@@ -166,7 +166,7 @@ Rewrite Hong Kong colloquial Cantonese into formal Traditional Chinese.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode characters (default 200; configurable up to 4,000). |
+| `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode code points (default 200; configurable up to 4,000). Application budget control for usage and spending, not a provider capability limit. |
 | `stream` | boolean/string/number | No | `true`, `"true"`, `1`, `"1"` request NDJSON streaming; only works when provider capability and env toggles both allow it. |
 
 ### Rewrite request examples
@@ -302,7 +302,7 @@ Generate speech audio from validated text input using the T2A service definition
 
 | Field | Type | Required | Accepted values / behavior |
 |---|---|---|---|
-| `text` | string | Yes | Trimmed, non-empty, max `T2A_MAX_TEXT_LENGTH` Unicode characters. |
+| `text` | string | Yes | Trimmed, non-empty, max `T2A_MAX_TEXT_LENGTH` Unicode code points (default 200; configurable from 1 to 1,000). Application budget control for usage and spending, not a provider capability limit. Integer configuration above 1,000 clamps to 1,000; malformed, fractional, or non-positive configuration falls back to 200. Unset or blank configuration uses 200. Over-limit input is rejected, never truncated. |
 | `response_mode` | string | No | `binary`, `default`, `base64_json`, `base64-json`. Omitted defaults to `binary`. |
 | `voice_id` | string | No | Non-empty string. Defaults from T2A env config. |
 | `language_boost` | string | No | Non-empty string forwarded to the selected provider. Omitted defaults to `Chinese,Yue`. |
