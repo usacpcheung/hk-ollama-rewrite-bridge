@@ -67,7 +67,7 @@ Both routes are equivalent.
 
 ### 2.4 Limitations
 
-- `text` max length comes from `REWRITE_MAX_TEXT_LENGTH` (default `200`, hard max `600`).
+- `text` max length comes from `REWRITE_MAX_TEXT_LENGTH` (default `200`, hard max `4000`). This is an application budget control for usage and spending, not a provider capability limit.
 - Empty or missing `text` returns `400 INVALID_INPUT`.
 - Over-limit text returns `413 TOO_LONG`.
 - Streaming only works if selected provider supports streaming **and** streaming is enabled by env config.
@@ -180,7 +180,7 @@ Both routes are equivalent.
 
 ### 3.4 Limitations
 
-- `text` max length from `T2A_MAX_TEXT_LENGTH` (default `200`, hard max `600`).
+- `text` max length from `T2A_MAX_TEXT_LENGTH` (default `200`, configurable range `1`–`1000`). Integer settings above `1000` clamp to `1000`; malformed, fractional, or non-positive settings fall back to `200`. Unset or blank settings use `200`. This is an application budget control for usage and spending, not a provider capability limit.
 - Streaming is **not supported** for T2A v1.
   - If `stream` is requested, server returns `501 STREAMING_UNSUPPORTED`.
 - If provider is Minimax and `MINIMAX_API_KEY` is missing, server returns:
