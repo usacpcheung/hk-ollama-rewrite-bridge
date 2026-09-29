@@ -150,6 +150,20 @@ Example success body:
 }
 ```
 
+### Stable T2A voice choices
+
+Callers can send a stable `voice_choice` instead of provider-specific voice controls:
+
+```json
+{"text":"你好，歡迎使用","voice_choice":"cantonese_narrator_female"}
+```
+
+There are seven Cantonese choices (three male character presets, three female character presets and a female narrator), plus `mandarin_narrator_female` and `english_narrator_female`. The bridge maps each ID to MiniMax's voice, language and delivery settings. See the [voice catalogue and exact settings](docs/api-reference.md#stable-voice-choices).
+
+A choice is a complete preset: do not combine it with `voice_id`, `language_boost`, `speed`, `volume` or `pitch`, including null values. Invalid or conflicting choices return `400 INVALID_INPUT`. Audio format and response mode remain independent. Named presets use their explicit settings rather than generic environment voice defaults.
+
+Existing requests without `voice_choice` retain raw voice controls, environment defaults and binary/base64 response contracts. No new environment variables are required. The configured provider and model are unchanged; existing consumers are not migrated automatically.
+
 ## How downstream apps should integrate
 
 ### 1) Choose the right endpoint

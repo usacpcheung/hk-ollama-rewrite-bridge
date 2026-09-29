@@ -169,7 +169,9 @@ Both routes are equivalent.
 |---|---|---|---|---|
 | `text` | string | Yes | non-empty string | - |
 | `stream` | boolean/string/number | No | If truthy as `true`/`"true"`/`1`/`"1"`, request is rejected | - |
-| `voice_id` | string | No | non-empty string | env default voice ID |
+| `voice_choice` | string | No | case-sensitive known preset ID; conflicts with raw voice controls | absent (legacy settings) |
+| `voice_id` | string | No | non-empty string, only without `voice_choice` | env default voice ID |
+| `language_boost` | string | No | non-empty string, only without `voice_choice` | `Chinese,Yue` |
 | `speed` | number | No | `0.5` to `2` | env/default value |
 | `volume` | number | No | `0` to `10` | env/default value |
 | `pitch` | number | No | `-12` to `12` | env/default value |
@@ -177,6 +179,24 @@ Both routes are equivalent.
 | `bitrate` | integer | No | `32000` to `320000` | `128000` |
 | `format` | string | No | `mp3`, `wav`, `pcm` | `mp3` |
 | `response_mode` | string | No | `binary` / `default` / `base64_json` / `base64-json` | `binary` |
+
+### 3.3.1 Provider-independent voice choices
+
+```json
+{
+  "text": "Hello, welcome",
+  "voice_choice": "english_narrator_female",
+  "response_mode": "base64_json"
+}
+```
+
+Use a stable ID from the [voice catalogue](api-reference.md#stable-voice-choices). Each ID includes the language and full voice tuning; the bridge translates it to the selected provider's native settings. The initial catalogue has seven Cantonese choices plus Putonghua and English female narration. No provider or model change is implied.
+
+When using `voice_choice`, omit `voice_id`, `language_boost`, `speed`, `volume` and `pitch`. Supplying any of them, including null, returns `400 INVALID_INPUT`. Choice IDs are trimmed but case-sensitive; null, empty, non-string and unknown choices also return `400 INVALID_INPUT`. Output format/rate/bitrate and response mode keep their current defaults and validation.
+
+A known choice without a mapping in a supported provider fails with `422 VOICE_CHOICE_UNSUPPORTED`, without falling back. An unsupported T2A provider still returns `501 UNSUPPORTED_PROVIDER`. Currently only MiniMax is supported and all nine choices have mappings.
+
+Without `voice_choice`, all existing raw settings and omitted-field environment defaults continue to work. Existing consumers need no changes to keep using these requests.
 
 ### 3.4 Limitations
 

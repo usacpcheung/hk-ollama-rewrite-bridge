@@ -529,3 +529,184 @@ test('rewrite and t2a routes use independent service-specific limiter buckets', 
   assert.equal(rewriteCalls, 1);
   assert.equal(t2aCalls, 2);
 });
+
+// Expected values are the reviewed public choices, independently of the resolver.
+const reviewedVoiceChoices = [
+  ['cantonese_male_1', 'Cantonese_PlayfulMan', 1.1, -1, 'Chinese,Yue'],
+  ['cantonese_male_2', 'Cantonese_PlayfulMan', 1.1, 3, 'Chinese,Yue'],
+  ['cantonese_male_3', 'Cantonese_ProfessionalHost（M)', 1.1, 1, 'Chinese,Yue'],
+  ['cantonese_female_1', 'Cantonese_CuteGirl', 1.1, 2, 'Chinese,Yue'],
+  ['cantonese_female_2', 'Cantonese_GentleLady', 1.1, 0, 'Chinese,Yue'],
+  ['cantonese_female_3', 'Cantonese_KindWoman', 1.1, 1, 'Chinese,Yue'],
+  ['cantonese_narrator_female', 'Cantonese_ProfessionalHost（F)', 1, 0, 'Chinese,Yue'],
+  ['mandarin_narrator_female', 'Chinese (Mandarin)_News_Anchor', 1, 0, 'Chinese'],
+  ['english_narrator_female', 'English_compelling_lady1', 0.85, 0, 'English']
+];
+
+async function captureVoiceRequests(t, envOverrides = {}) {
+  const captured = [];
+  const audio = Buffer.from('voice contract audio '.repeat(4));
+  const { server, port } = await startMockMinimaxServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      captured.push(JSON.parse(raw));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        trace_id: 'voice-contract',
+        data: { audio: audio.toString('hex'), format: 'mp3', audio_length: audio.length }
+      }));
+    });
+  });
+  let bridge;
+  t.after(async () => {
+    if (bridge?.exitCode === null) {
+      const exited = new Promise((resolve) => bridge.once('exit', resolve));
+      bridge.kill('SIGTERM');
+      await exited;
+    }
+    await new Promise((resolve) => server.close(resolve));
+  });
+  bridge = spawnBridge({
+    MINIMAX_API_KEY: 'test-key',
+    T2A_PROVIDER: 'minimax',
+    T2A_MINIMAX_API_URL: 'http://127.0.0.1:' + port + '/t2a',
+    T2A_MINIMAX_MODEL: 'speech-2.6-hd',
+    T2A_MINIMAX_VOICE_ID: 'Cantonese_ProfessionalHost（F)',
+    T2A_MINIMAX_SPEED: '1', T2A_MINIMAX_VOLUME: '1', T2A_MINIMAX_PITCH: '0',
+    T2A_MAX_TEXT_LENGTH: '200',
+    RATE_LIMIT_T2A_AUTH_MAX_REQUESTS: '100', RATE_LIMIT_GLOBAL_MAX_REQUESTS: '1000',
+    ...envOverrides
+  });
+  await waitForServerReady(bridge);
+  return { captured, audio };
+}
+
+test('all nine voice choices preserve both route aliases and audio response contracts', async (t) => {
+  const { captured, audio } = await captureVoiceRequests(t, {
+    // Named choices must not inherit generic tuning overrides.
+    T2A_MINIMAX_VOICE_ID: 'override-voice', T2A_MINIMAX_SPEED: '0.6',
+    T2A_MINIMAX_VOLUME: '4', T2A_MINIMAX_PITCH: '-5'
+  });
+  for (const [choice, voiceId, speed, pitch, languageBoost] of reviewedVoiceChoices) {
+    for (const path of ['/t2a', '/api/t2a']) {
+      for (const mode of [undefined, 'base64_json']) {
+        const response = await postJson(path, {
+          text: '  你好，Hello！ ', voice_choice: ' ' + choice + ' ', response_mode: mode,
+          sample_rate: 24000, bitrate: 64000
+        }, authHeaders);
+        assert.equal(response.status, 200, choice + ' ' + path);
+        assert.deepEqual(captured.at(-1), {
+          model: 'speech-2.6-hd', text: '你好，Hello！', stream: false,
+          voice_setting: { voice_id: voiceId, speed, vol: 1, pitch },
+          audio_setting: { sample_rate: 24000, bitrate: 64000, format: 'mp3', channel: 1 },
+          language_boost: languageBoost, voice_modify: { pitch: 0, intensity: 0, timbre: 0 },
+          output_format: 'hex'
+        });
+        if (mode === undefined) {
+          assert.equal(response.headers.get('content-type'), 'audio/mpeg');
+          assert.equal(response.headers.get('content-disposition'), 'inline; filename="speech.mp3"');
+          assert.equal(response.headers.get('content-length'), String(audio.length));
+          assert.deepEqual(Buffer.from(await response.arrayBuffer()), audio);
+        } else {
+          const body = await response.json();
+          assert.deepEqual(Object.keys(body).sort(), ['ok', 'audio', 'format', 'mime', 'contentType', 'size', 'provider'].sort());
+          assert.equal(body.ok, true);
+          assert.equal(body.audio, audio.toString('base64'));
+          assert.equal(body.format, 'mp3');
+          assert.equal(body.mime, 'audio/mpeg');
+          assert.equal(body.contentType, 'audio/mpeg');
+          assert.equal(body.size, audio.length);
+          assert.equal(body.provider.traceId, 'voice-contract');
+        }
+      }
+    }
+  }
+  assert.equal(captured.length, 36);
+});
+
+test('voice choice errors and gatekeeping never invoke MiniMax', async (t) => {
+  const { captured } = await captureVoiceRequests(t);
+  for (const path of ['/t2a', '/api/t2a']) {
+    for (const choice of [null, '', '   ', 1, false, {}, [], 'missing', '__proto__', 'constructor', 'CANTONESE_MALE_1']) {
+      const response = await postJson(path, { text: '你好', voice_choice: choice }, authHeaders);
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).error.code, 'INVALID_INPUT');
+    }
+    for (const field of ['voice_id', 'language_boost', 'speed', 'volume', 'pitch']) {
+      for (const value of [null, field === 'voice_id' ? 'raw-voice' : field === 'language_boost' ? 'English' : 1]) {
+        const response = await postJson(path, { text: '你好', voice_choice: 'cantonese_male_1', [field]: value }, authHeaders);
+        assert.equal(response.status, 400);
+        assert.equal((await response.json()).error.code, 'INVALID_INPUT');
+      }
+    }
+    for (const [body, headers, status, code] of [
+      [{ text: '你好', voice_choice: 'cantonese_male_1' }, {}, 401, 'AUTH_REQUIRED'],
+      [{ text: '你好', voice_choice: 'cantonese_male_1' }, { ...authHeaders, 'X-Authenticated-Email': 'other@example.com' }, 403, 'FORBIDDEN_DOMAIN'],
+      [{ text: '你好', voice_choice: 'cantonese_male_1', stream: true }, authHeaders, 501, 'STREAMING_UNSUPPORTED'],
+      [{ text: '中'.repeat(201), voice_choice: 'cantonese_male_1' }, authHeaders, 413, 'TOO_LONG']
+    ]) {
+      const response = await postJson(path, body, headers);
+      assert.equal(response.status, status);
+      assert.equal((await response.json()).error.code, code);
+    }
+  }
+  assert.equal(captured.length, 0);
+});
+
+test('named choices preserve missing-key and unsupported-provider errors', async (t) => {
+  for (const [env, status, code] of [
+    [{ MINIMAX_API_KEY: '' }, 503, 'MINIMAX_API_KEY_MISSING'],
+    [{ T2A_PROVIDER: 'unknown-provider' }, 501, 'UNSUPPORTED_PROVIDER']
+  ]) {
+    await t.test(code, async (subtest) => {
+      const { captured } = await captureVoiceRequests(subtest, env);
+      for (const path of ['/t2a', '/api/t2a']) {
+        const response = await postJson(path, { text: '你好', voice_choice: 'cantonese_male_1' }, authHeaders);
+        assert.equal(response.status, status);
+        assert.equal((await response.json()).error.code, code);
+      }
+      assert.equal(captured.length, 0);
+    });
+  }
+});
+
+test('existing worksheet and roleplay raw requests preserve explicit and inherited settings', async (t) => {
+  const fixtures = [
+    { voice_id: 'Cantonese_ProfessionalHost（F)', language_boost: 'Chinese,Yue' },
+    { voice_id: 'Chinese (Mandarin)_News_Anchor', language_boost: 'Chinese' },
+    { voice_id: 'English_compelling_lady1', language_boost: 'English', speed: 0.85 },
+    {},
+    { voice_id: 'Cantonese_PlayfulMan', speed: 1.1, volume: 1, pitch: -1 },
+    { voice_id: 'Cantonese_PlayfulMan', speed: 1.1, volume: 1, pitch: 3 },
+    { voice_id: 'Cantonese_CuteGirl', speed: 1.1, volume: 1, pitch: 2 },
+    { voice_id: 'Cantonese_GentleLady', speed: 1.1, volume: 1, pitch: 0 }
+  ];
+  for (const defaults of [
+    { voiceId: 'Cantonese_ProfessionalHost（F)', speed: 1, volume: 1, pitch: 0 },
+    { voiceId: 'custom-default', speed: 0.7, volume: 2, pitch: -2 }
+  ]) {
+    await t.test(defaults.voiceId, async (subtest) => {
+      const { captured, audio } = await captureVoiceRequests(subtest, {
+        T2A_MINIMAX_VOICE_ID: defaults.voiceId,
+        T2A_MINIMAX_SPEED: String(defaults.speed), T2A_MINIMAX_VOLUME: String(defaults.volume),
+        T2A_MINIMAX_PITCH: String(defaults.pitch)
+      });
+      for (const fixture of fixtures) {
+        for (const path of ['/t2a', '/api/t2a']) {
+          const response = await postJson(path, { text: '原有設定', ...fixture }, authHeaders);
+          assert.equal(response.status, 200);
+          assert.deepEqual(Buffer.from(await response.arrayBuffer()), audio);
+          assert.deepEqual(captured.at(-1).voice_setting, {
+            voice_id: fixture.voice_id ?? defaults.voiceId, speed: fixture.speed ?? defaults.speed,
+            vol: fixture.volume ?? defaults.volume, pitch: fixture.pitch ?? defaults.pitch
+          });
+          assert.equal(captured.at(-1).language_boost, fixture.language_boost ?? 'Chinese,Yue');
+          assert.deepEqual(captured.at(-1).voice_modify, { pitch: 0, intensity: 0, timbre: 0 });
+          assert.equal(captured.at(-1).model, 'speech-2.6-hd');
+        }
+      }
+      assert.equal(captured.length, 16);
+    });
+  }
+});
