@@ -1,3 +1,5 @@
+const { resolveT2AVoiceChoice } = require('../lib/t2a-voice-choices');
+
 const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 1000;
 const DEFAULT_AUDIO_SAMPLE_RATE = 32000;
@@ -477,6 +479,34 @@ function createT2AServiceDefinition({
         return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'format must be one of mp3, wav, or pcm' };
       }
 
+      let selectedChoice = null;
+      if (Object.hasOwn(body || {}, 'voice_choice')) {
+        const conflictingField = ['voice_id', 'language_boost', 'speed', 'volume', 'pitch']
+          .find((field) => Object.hasOwn(body, field));
+        if (conflictingField) {
+          return {
+            ok: false,
+            status: 400,
+            code: 'INVALID_INPUT',
+            message: 'voice_choice cannot be combined with ' + conflictingField
+          };
+        }
+        const choiceResult = resolveT2AVoiceChoice({ choice: body.voice_choice, provider: resolvedConfig.provider });
+        if (!choiceResult.ok) {
+          // Unsupported service providers keep their existing route error.
+          if (choiceResult.code === 'VOICE_CHOICE_UNSUPPORTED' && !resolvedConfig.providerSupported) {
+            return {
+              ok: false,
+              status: 501,
+              code: 'UNSUPPORTED_PROVIDER',
+              message: 'Provider "' + resolvedConfig.provider + '" is not supported for t2a'
+            };
+          }
+          return choiceResult;
+        }
+        selectedChoice = choiceResult.value;
+      }
+
       return {
         ok: true,
         value: {
@@ -484,7 +514,7 @@ function createT2AServiceDefinition({
           inputCharCount,
           streamRequested: false,
           responseMode,
-          voice: {
+          voice: selectedChoice ? selectedChoice.voice : {
             voiceId: typeof voiceId === 'string' ? voiceId.trim() : providerDefaults.voiceId,
             speed: parsedSpeed === undefined ? providerDefaults.speed : parsedSpeed,
             volume: parsedVolume === undefined ? providerDefaults.volume : parsedVolume,
@@ -496,9 +526,9 @@ function createT2AServiceDefinition({
             format: parsedFormat === undefined ? providerDefaults.audioSetting.format : parsedFormat,
             channel: providerDefaults.audioSetting.channel
           },
-          languageBoost: typeof languageBoost === 'string' ? languageBoost.trim() : providerDefaults.languageBoost,
+          languageBoost: selectedChoice ? selectedChoice.languageBoost : (typeof languageBoost === 'string' ? languageBoost.trim() : providerDefaults.languageBoost),
           voiceModify: {
-            ...providerDefaults.voiceModify
+            ...(selectedChoice ? selectedChoice.voiceModify : providerDefaults.voiceModify)
           },
           outputFormat: providerDefaults.outputFormat
         }

@@ -134,3 +134,30 @@ test('t2a validation rejects stream true as unsupported in v1', () => {
   assert.equal(result.code, 'STREAMING_UNSUPPORTED');
   assert.equal(result.message, 'stream is not supported for t2a v1');
 });
+
+test('named voices retain text, streaming and output validation', () => {
+  const service = createService({ T2A_MAX_TEXT_LENGTH: '4', T2A_PROVIDER: 'minimax' });
+  const choice = { voice_choice: 'cantonese_male_1' };
+  for (const [body, status, code] of [
+    [{ ...choice, text: '' }, 400, 'INVALID_INPUT'],
+    [{ ...choice, text: 'a😊bcd' }, 413, 'TOO_LONG'],
+    [{ ...choice, text: '你好', stream: true }, 501, 'STREAMING_UNSUPPORTED'],
+    [{ ...choice, text: '你好', sample_rate: 1234 }, 400, 'INVALID_INPUT'],
+    [{ ...choice, text: '你好', bitrate: 1 }, 400, 'INVALID_INPUT'],
+    [{ ...choice, text: '你好', format: 'invalid' }, 400, 'INVALID_INPUT'],
+    [{ ...choice, text: '你好', response_mode: 'hex' }, 400, 'INVALID_INPUT']
+  ]) {
+    const result = service.validateRequest({ body });
+    assert.equal(result.ok, false);
+    assert.equal(result.status, status);
+    assert.equal(result.code, code);
+  }
+  const result = service.validateRequest({ body: {
+    ...choice, text: ' a😊bc ', response_mode: 'base64-json',
+    sample_rate: 24000, bitrate: 64000, format: 'wav'
+  } });
+  assert.equal(result.ok, true);
+  assert.equal(result.value.inputCharCount, 4);
+  assert.equal(result.value.responseMode, 'base64_json');
+  assert.deepEqual(result.value.audio, { sampleRate: 24000, bitrate: 64000, format: 'wav', channel: 1 });
+});

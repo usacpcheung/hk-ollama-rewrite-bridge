@@ -304,7 +304,8 @@ Generate speech audio from validated text input using the T2A service definition
 |---|---|---|---|
 | `text` | string | Yes | Trimmed, non-empty, max `T2A_MAX_TEXT_LENGTH` Unicode code points (default 200; configurable from 1 to 1,000). Application budget control for usage and spending, not a provider capability limit. Integer configuration above 1,000 clamps to 1,000; malformed, fractional, or non-positive configuration falls back to 200. Unset or blank configuration uses 200. Over-limit input is rejected, never truncated. |
 | `response_mode` | string | No | `binary`, `default`, `base64_json`, `base64-json`. Omitted defaults to `binary`. |
-| `voice_id` | string | No | Non-empty string. Defaults from T2A env config. |
+| `voice_choice` | string | No | Stable ID from the catalogue below. Complete preset; cannot be combined with raw voice controls. |
+| `voice_id` | string | No | Non-empty string. Defaults from T2A env config when `voice_choice` is absent. |
 | `language_boost` | string | No | Non-empty string forwarded to the selected provider. Omitted defaults to `Chinese,Yue`. |
 | `speed` | number | No | `0.5` to `2`. Defaults from T2A env config. |
 | `volume` | number | No | `0` to `10`. Defaults from T2A env config. |
@@ -314,9 +315,45 @@ Generate speech audio from validated text input using the T2A service definition
 | `format` | string | No | `mp3`, `wav`, or `pcm`. Defaults to `mp3`. |
 | `stream` | boolean/string/number | No | If truthy in the supported forms, request is rejected with `501 STREAMING_UNSUPPORTED`. |
 
+### Stable voice choices
+
+Send `voice_choice` to select a complete, provider-independent preset:
+
+```json
+{
+  "text": "你好，歡迎使用",
+  "voice_choice": "cantonese_narrator_female",
+  "response_mode": "binary"
+}
+```
+
+The choice includes its language, voice identity, speed, volume, pitch and additional effects. Do not combine it with `voice_id`, `language_boost`, `speed`, `volume` or `pitch`, even with null values; mixed requests return `400 INVALID_INPUT`. Output settings remain independent. IDs are case-sensitive after surrounding whitespace is trimmed. Null, empty, non-string and unknown choices return `400 INVALID_INPUT` without a provider call.
+
+MiniMax mappings:
+
+| `voice_choice` | Intended character | MiniMax `voice_id` | Speed | Pitch | Language |
+| --- | --- | --- | ---: | ---: | --- |
+| `cantonese_male_1` | 男聲一：活潑、較低音 | `Cantonese_PlayfulMan` | 1.1 | -1 | `Chinese,Yue` |
+| `cantonese_male_2` | 男聲二：活潑、較高音 | `Cantonese_PlayfulMan` | 1.1 | 3 | `Chinese,Yue` |
+| `cantonese_male_3` | 男聲三：穩重、清晰 | `Cantonese_ProfessionalHost（M)` | 1.1 | 1 | `Chinese,Yue` |
+| `cantonese_female_1` | 女聲一：可愛、明亮 | `Cantonese_CuteGirl` | 1.1 | 2 | `Chinese,Yue` |
+| `cantonese_female_2` | 女聲二：溫柔、平靜 | `Cantonese_GentleLady` | 1.1 | 0 | `Chinese,Yue` |
+| `cantonese_female_3` | 女聲三：親切、自然 | `Cantonese_KindWoman` | 1.1 | 1 | `Chinese,Yue` |
+| `cantonese_narrator_female` | 旁白：專業女聲 | `Cantonese_ProfessionalHost（F)` | 1.0 | 0 | `Chinese,Yue` |
+| `mandarin_narrator_female` | 普通話：專業女聲 | `Chinese (Mandarin)_News_Anchor` | 1.0 | 0 | `Chinese` |
+| `english_narrator_female` | English female narrator | `English_compelling_lady1` | 0.85 | 0 | `English` |
+
+All choices use volume 1 and `voice_modify={"pitch":0,"intensity":0,"timbre":0}`. The two playful male choices share a base speaker with different pitch settings. The ProfessionalHost IDs include a full-width opening parenthesis and an ASCII closing parenthesis.
+
+Named choices use these mapped settings even when environment voice defaults differ. Provider, API key, endpoint, configured model, output defaults, text budget and timeout settings remain unchanged. This does not switch providers or upgrade the configured model (the code default remains `speech-2.6-hd`).
+
+A valid choice with no mapping in a supported provider returns `422 VOICE_CHOICE_UNSUPPORTED`; no voice or provider is silently substituted. MiniMax is currently the only supported T2A provider and maps all nine choices. Selecting an unsupported T2A provider continues to return `501 UNSUPPORTED_PROVIDER`.
+
+When `voice_choice` is absent, raw voice settings, omitted-field defaults and existing request/response behaviour remain unchanged. Existing consumers are not migrated automatically. The choice ID is resolved inside the bridge and is not forwarded to MiniMax.
+
 ### Effective server-side defaults
 
-If optional fields are omitted, T2A resolves to:
+Without `voice_choice`, if optional fields are omitted, T2A resolves to:
 
 ```json
 {
@@ -338,7 +375,7 @@ In addition, upstream Minimax requests are sent with:
 - `voice_modify={"pitch":0,"intensity":0,"timbre":0}`
 - `output_format="hex"`
 
-The caller may override `language_boost`; the other values above are implementation defaults, not caller-supplied request fields.
+Without `voice_choice`, the caller may override `language_boost`; the other values above are implementation defaults, not caller-supplied request fields.
 
 ### Calling examples
 
@@ -402,8 +439,10 @@ Body: raw audio bytes.
 - `401 AUTH_HEADER_INVALID`
 - `403 FORBIDDEN_DOMAIN`
 - `413 TOO_LONG`
+- `422 VOICE_CHOICE_UNSUPPORTED` (valid choice lacks a mapping in a supported provider)
 - `429 RATE_LIMITED`
 - `501 STREAMING_UNSUPPORTED`
+- `501 UNSUPPORTED_PROVIDER`
 - `503 MINIMAX_API_KEY_MISSING`
 - `503 ADMISSION_OVERLOADED`
 - provider-mapped failures such as `PROVIDER_AUTH_ERROR`, `PROVIDER_ERROR`, `MODEL_TIMEOUT`
