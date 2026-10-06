@@ -1,6 +1,6 @@
 # Repository documentation
 
-Active guidance was reviewed against main commit `2a453d040506b909ada41842eed3f7b2347dbf82` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [review record](reviews/2026-10-06-documentation-review.md) for the complete original-file inventory, code evidence and changes.
+Active guidance was reviewed against main commit `31ce143878ef0f41627b95e8511ac268b67adba5` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [review record](reviews/2026-10-06-documentation-review.md) for the complete original-file inventory, code evidence and changes.
 
 ## Find the right document
 
@@ -14,6 +14,7 @@ Active guidance was reviewed against main commit `2a453d040506b909ada41842eed3f7
 | [Widget guide](guides/rewrite-widget.md) | Static hosting, asynchronous widget API and UI behavior |
 | [Auth runbook](runbooks/auth-matrix-manual-cli-checklist.md) | Local auth/alias matrix and deployment gateway checks |
 | [Transcription runbook](runbooks/transcription-deployment.md) | Opt-in Google/media setup, validation, rollback and cleanup |
+| [Compatibility baseline](architecture/compatibility-baseline.md) | Code/test-backed contracts, legacy support, corrected defects and remaining coverage gaps |
 | [Runtime architecture](architecture/runtime.md) | Current request flows and actual service/provider boundaries |
 | [ADR 0001](architecture/adr/0001-internal-bridge-contract.md) | Accepted internal result/event contract |
 | [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented rewrite/T2A boundary and remaining limits |

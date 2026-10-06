@@ -45,7 +45,7 @@ async function fixture(t, { config: overrides = {}, recognize, normalize, disabl
     else form.append('audio', new Blob([text], { type: 'application/octet-stream' }), '../../untrusted-name');
     const response = await fetch(url + route, { method: 'POST', body: form, signal,
       headers: { ...(user ? { 'X-Bridge-Auth': 'test-secret', 'X-Authenticated-Email': `${user}@hs.edu.hk` } : {}), ...headers } });
-    return { status: response.status, body: await response.json() };
+    return { status: response.status, headers: response.headers, body: await response.json() };
   }
   return { submit, calls, directory, config, url };
 }
@@ -230,9 +230,16 @@ test('transcription aliases preserve each transcript, configure the Google V2 ca
   for (const route of ['/transcriptions', '/api/transcriptions']) {
     const result = await f.submit('廣東話 English', { route });
     assert.equal(result.status, 200);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+    assert.match(result.headers.get('content-type'), /^application\/json/);
+    assert.deepEqual(Object.keys(result.body).sort(), ['durationSeconds', 'ok', 'requestId', 'result', 'timings']);
+    assert.equal(result.body.ok, true);
     assert.equal(result.body.result, '廣東話 English');
     assert.equal(result.body.durationSeconds, 1);
     assert.match(result.body.requestId, /^[a-f0-9-]{36}$/);
+    assert.deepEqual(Object.keys(result.body.timings).sort(), ['conversionMs', 'totalMs', 'transcriptionMs']);
+    for (const value of Object.values(result.body.timings)) assert.ok(Number.isFinite(value) && value >= 0);
+    assert.ok(result.body.timings.totalMs >= result.body.timings.conversionMs + result.body.timings.transcriptionMs);
     const { request, options } = f.calls.at(-1);
     assert.equal(request.recognizer, 'projects/test-project/locations/us/recognizers/_');
     assert.deepEqual(request.config, { autoDecodingConfig: {}, model: 'chirp_3', languageCodes: ['yue-Hant-HK'] });
@@ -293,16 +300,88 @@ test('conversion concurrency is bounded independently from Google calls', async 
 });
 
 test('provider errors and empty speech are controlled and never expose raw details', async t => {
-  for (const [code, expectedStatus] of [[8, 429], [4, 504], [7, 503], [16, 503], [13, 502], [null, 422]]) {
+  for (const [code, expectedStatus, expectedCode] of [
+    [8, 429, 'TRANSCRIPTION_RATE_LIMITED'], [4, 504, 'TRANSCRIPTION_TIMEOUT'],
+    [7, 503, 'TRANSCRIPTION_UNAVAILABLE'], [16, 503, 'TRANSCRIPTION_UNAVAILABLE'],
+    [13, 502, 'TRANSCRIPTION_FAILED'], [null, 422, 'NO_SPEECH']
+  ]) {
     const f = await fixture(t, { recognize: async () => {
       if (code !== null) throw Object.assign(new Error('secret transcript credential path'), { code });
       return [{ results: [] }];
     } });
     const result = await f.submit();
     assert.equal(result.status, expectedStatus);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.error.code, expectedCode);
+    assert.match(result.body.requestId, /^[a-f0-9-]{36}$/);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+    assert.equal(result.headers.get('retry-after'), [429, 503].includes(expectedStatus) ? '10' : null);
     assert.ok(!JSON.stringify(result).includes('secret'));
     await until(async () => (await fs.readdir(f.directory)).length === 0);
   }
+});
+
+test('transcription joins recognized segments without applying rewrite post-processing', async t => {
+  const f = await fixture(t, { recognize: async () => [{ results: [
+    { alternatives: [{ transcript: '  广东话  ' }] },
+    { alternatives: [{ transcript: '   ' }] },
+    { alternatives: [] },
+    { alternatives: [{ transcript: ' English ' }, { transcript: 'unused alternative' }] }
+  ] }] });
+  const result = await f.submit();
+  assert.equal(result.status, 200);
+  assert.equal(result.body.result, '广东话\nEnglish');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(await fs.readdir(f.directory), []);
+});
+
+test('transcription deletion failure prevents success and blocks later provider calls', async t => {
+  const f = await fixture(t);
+  const remove = fs.rm.bind(fs);
+  let failed = false;
+  t.mock.method(fs, 'rm', async (target, options) => {
+    if (!failed && String(target).startsWith(path.join(f.directory, 'job-'))) {
+      failed = true;
+      throw new Error('private cleanup failure');
+    }
+    return remove(target, options);
+  });
+  const first = await f.submit();
+  assert.equal(first.status, 503, 'success must wait for deletion');
+  assert.equal(first.body.error.code, 'TRANSCRIPTION_UNAVAILABLE');
+  assert.equal(first.headers.get('retry-after'), '10');
+  assert.equal(Object.hasOwn(first.body, 'result'), false);
+  assert.ok(!JSON.stringify(first.body).includes('private'));
+  assert.equal(f.calls.length, 1);
+  // Final cleanup succeeds, but the process remains closed to new admission.
+  assert.deepEqual(await fs.readdir(f.directory), []);
+  const next = await f.submit('another recording', { user: 'another' });
+  assert.equal(next.status, 503);
+  assert.equal(next.body.error.code, 'TRANSCRIPTION_UNAVAILABLE');
+  assert.equal(f.calls.length, 1);
+});
+
+test('transcription final cleanup failure preserves the original error and blocks admission', async t => {
+  const f = await fixture(t, { recognize: async () => {
+    throw Object.assign(new Error('private provider error'), { code: 13 });
+  } });
+  const remove = fs.rm.bind(fs);
+  const logs = [];
+  t.mock.method(console, 'error', message => logs.push(JSON.parse(message)));
+  t.mock.method(fs, 'rm', async (target, options) => {
+    if (String(target).startsWith(path.join(f.directory, 'job-'))) throw new Error('private cleanup failure');
+    return remove(target, options);
+  });
+  const first = await f.submit();
+  assert.equal(first.status, 502);
+  assert.equal(first.body.error.code, 'TRANSCRIPTION_FAILED');
+  assert.deepEqual(logs, [{ level: 'error', code: 'TRANSCRIPTION_CLEANUP_FAILED', requestId: first.body.requestId }]);
+  assert.ok((await fs.readdir(f.directory)).some(name => name.startsWith('job-')));
+  assert.ok(!JSON.stringify(first.body).includes('private'));
+  const next = await f.submit('another recording', { user: 'another' });
+  assert.equal(next.status, 503);
+  assert.equal(next.body.error.code, 'TRANSCRIPTION_UNAVAILABLE');
+  assert.equal(f.calls.length, 1);
 });
 
 test('total deadline responds promptly but retains admission until an outstanding provider call settles', async t => {
@@ -363,12 +442,24 @@ test('conversion queue cancellation removes the waiting entry', async () => {
   release(); release();
 });
 
-test('restart cleanup preserves live-process jobs and unrelated files', async t => {
+test('restart cleanup removes only exact dead-process jobs and preserves live jobs, links and unrelated files', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bridge-cleanup-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const live = `job-${process.pid}-ABCdef`;
+  const deadPid = process.pid + 1;
+  const dead = `job-${deadPid}-ABC123`;
+  const link = `job-${deadPid}-DEF456`;
+  const malformed = `job-${deadPid}-ABC123-extra`;
   await fs.mkdir(path.join(root, live));
+  await fs.mkdir(path.join(root, dead));
+  await fs.mkdir(path.join(root, malformed));
+  await fs.symlink(path.join(root, live), path.join(root, link));
   await fs.writeFile(path.join(root, 'unrelated'), 'keep');
+  const kill = process.kill.bind(process);
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === deadPid && signal === 0) throw Object.assign(new Error('dead test process'), { code: 'ESRCH' });
+    return kill(pid, signal);
+  });
   await prepareDirectory(root);
-  assert.deepEqual((await fs.readdir(root)).sort(), [live, 'unrelated'].sort());
+  assert.deepEqual((await fs.readdir(root)).sort(), [live, link, malformed, 'unrelated'].sort());
 });

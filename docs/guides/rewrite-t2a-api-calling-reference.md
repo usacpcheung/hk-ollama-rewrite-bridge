@@ -4,7 +4,7 @@ This document is a caller-focused reference for integrating with the bridge APIs
 All request/response contracts below are based on the current server and service code.
 
 - Service bind address (fixed in code): `http://127.0.0.1:3001`
-- JSON parser limit: `16kb` request body size (oversize JSON currently maps to `500 INTERNAL_ERROR`; text budgets independently return `413 TOO_LONG`)
+- JSON parser limit: `16kb` request body size (oversize JSON returns `413 PAYLOAD_TOO_LARGE`; text budgets independently return `413 TOO_LONG`)
 - Protected endpoints: both Rewrite and T2A require trusted auth headers
 
 ---
@@ -214,7 +214,7 @@ with an invalid choice returns 413. See the [exact validation order and legacy c
   - If `stream` is requested, server returns `501 STREAMING_UNSUPPORTED`.
 - If provider is Minimax and `MINIMAX_API_KEY` is missing, server returns:
   - `503 MINIMAX_API_KEY_MISSING`
-- `format` is forwarded to MiniMax and returned bytes are not transcoded. The adapter currently labels output `format` as `mp3` and binary filenames as `speech.mp3` even for WAV/PCM requests; MIME values may reflect upstream metadata. Use MP3 for consistent metadata. Do not assume a WAV/PCM request returned MP3 bytes based on the filename. See the [metadata limitation](../reference/api-reference.md#current-audio-format-metadata-limitation).
+- `format` is forwarded to MiniMax and bytes are not transcoded. The adapter normalizes declarations along the selected audio ancestry, including wrappers, and uses the requested format when declarations are absent. Format, MIME and filename agree; contradictory or unsupported metadata returns 502 `PROVIDER_ERROR`. See [audio-format metadata](../reference/api-reference.md#audio-format-metadata).
 
 ### 3.5 Success response when `response_mode=binary` (default)
 
@@ -223,7 +223,7 @@ with an invalid choice returns 413. See the [exact validation order and legacy c
 - Response headers include:
   - `Content-Type`: provider content type (fallback `audio/mpeg`)
   - `Content-Length`
-  - `Content-Disposition: inline; filename="speech.mp3"` (current adapter metadata, including WAV/PCM requests)
+  - `Content-Disposition: inline; filename="speech.mp3"` (MP3; WAV uses `speech.wav`, PCM uses `speech.pcm`)
 
 ### 3.6 Success response when `response_mode=base64_json`
 

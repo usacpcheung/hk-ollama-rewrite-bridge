@@ -21,7 +21,7 @@ The global limiter precedes auth on all routes. Rewrite/T2A route limiters also 
 
 The shared JSON parser runs even earlier. Use valid JSON in rewrite/T2A auth
 probes: malformed JSON returns `400 INVALID_JSON`, and a body above 16 KiB
-currently returns `500 INTERNAL_ERROR`, before the auth matrix applies. The
+returns `413 PAYLOAD_TOO_LARGE`, before the auth matrix applies. The
 octet-stream transcription probe below avoids the JSON parser.
 
 ## 2) Setup

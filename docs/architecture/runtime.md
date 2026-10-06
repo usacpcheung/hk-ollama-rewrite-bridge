@@ -1,6 +1,6 @@
 # Current runtime and request flows
 
-Reviewed against main `2a453d040506b909ada41842eed3f7b2347dbf82` on 2026-10-06. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Reviewed against main `31ce143878ef0f41627b95e8511ac268b67adba5` on 2026-10-06. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
@@ -12,7 +12,7 @@ Provider lifecycle wiring is implemented, but startup state and several provider
 
 ## Shared middleware and trust
 
-For matching JSON requests, the 16 KiB parser runs first. Client identity resolution follows, then the baseline limiter for non-ops routes. `/healthz` and `/readyz` instead use the ops limiter. `/model-status` uses the baseline limiter. These diagnostics routes have no backend header-auth middleware; their public protection comes from the proxy.
+For matching JSON requests, the 16 KiB parser runs first: oversized JSON returns 413 `PAYLOAD_TOO_LARGE`, malformed JSON returns 400 `INVALID_JSON`. Client identity resolution follows, then the baseline limiter for non-ops routes. `/healthz` and `/readyz` instead use the ops limiter. `/model-status` uses the baseline limiter. These diagnostics routes have no backend header-auth middleware; their public protection comes from the proxy.
 
 [`auth/header-auth.js`](../../auth/header-auth.js) checks the bridge secret, non-empty normalized email, comma rejection and allowed domain suffix. It does not validate OIDC tokens or check the source-address list. [`auth/client-identity.js`](../../auth/client-identity.js) separately requires a trusted socket address and matching bridge secret before accepting identity headers for a `user:*` limiter key; otherwise it uses `ip:*`. The first non-empty, non-comma-separated email/user/subject header wins. Keep loopback binding and gateway header stripping as the deployment boundary.
 
@@ -36,7 +36,7 @@ Both `/t2a` and `/api/t2a` run the T2A limiter and shared auth. [`services/t2a.j
 
 The route checks supported provider/key, invokes through the shared admission/invocation path, and writes raw bytes or base64 JSON. T2A's lifecycle is a no-op; it does not consult rewrite readiness before invocation. The MiniMax adapter sends native settings, not `voice_choice`, and does not write audio to disk.
 
-The current adapter always labels output `format` as MP3 although requested format is forwarded and bytes are unchanged. MIME values can reflect upstream metadata. This limitation is documented in the [API reference](../reference/api-reference.md#current-audio-format-metadata-limitation).
+The adapter normalizes format/MIME declarations along the selected audio ancestry, including wrapped/array responses, without mixing unrelated siblings. Declared format takes precedence; absent metadata uses the request format. Unsupported or contradictory declarations return controlled 502. Binary filenames and JSON labels agree; bytes remain unchanged. See [audio-format metadata](../reference/api-reference.md#audio-format-metadata) and the [compatibility baseline](compatibility-baseline.md).
 
 [`lib/admission-controller.js`](../../lib/admission-controller.js) has counters and queues per provider. Rewrite and T2A share a pool if both use MiniMax. Ollama and MiniMax have separate pools; `ADMISSION_*` supplies each pool's defaults, not a total process limit.
 
@@ -62,4 +62,4 @@ A deletion failure blocks further admission in that process. Failed final cleanu
 
 ## Validation evidence
 
-The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The 2026-10-06 review ran `npm test` under Node 24.19.0: 203 passed, zero failures/skips, including real FFmpeg normalization. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.
+The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The original documentation review passed 203 tests; after PRs #128/#129 the suite contains 238 passing tests, including real FFmpeg normalization. The reconciled documentation tree passed all 238 tests with zero failures/skips. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.

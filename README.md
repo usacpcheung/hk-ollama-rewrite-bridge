@@ -84,6 +84,11 @@ The server listens on `http://127.0.0.1:3001`.
 
 All automated tests live under `tests/`.
 
+Before changing service/provider boundaries, use the
+[compatibility baseline](docs/architecture/compatibility-baseline.md). It maps
+current behavior to code and tests, distinguishes portable contracts from legacy
+provider behavior and observed quirks, and records verification limits.
+
 - `tests/rewrite-validation.test.js`: rewrite request validation.
 - `tests/rewrite-auth-parity.test.js`: auth/domain enforcement behavior.
 - `tests/providers/ollama.test.js`: Ollama parsing and error handling.
@@ -97,6 +102,17 @@ Run the full suite:
 ```bash
 npm test
 ```
+
+## API corrections before provider refactoring
+
+JSON bodies exceeding the 16 KiB parser limit return **413 `PAYLOAD_TOO_LARGE`**
+(previously 500). Clients should reduce the payload instead of retrying it unchanged.
+T2A retains MP3, WAV, and PCM output: JSON `format`/MIME and binary filenames now
+match the normalized provider format instead of always using MP3 labels. Missing
+provider metadata uses the requested format; conflicting or unsupported declarations
+return controlled 502 `PROVIDER_ERROR`. No audio transcoding is added. Consumers
+should use returned metadata rather than assume `.mp3`. Admission `Retry-After`
+policy is unchanged. See the [API reference](docs/reference/api-reference.md).
 
 ## Quick start for app developers
 
@@ -291,7 +307,7 @@ Internal loopback routes remain:
 - `response_mode=base64_json` returns JSON with base64 audio.
 - `stream=true` is rejected with `501 STREAMING_UNSUPPORTED` in v1.
 - The bridge does not write generated audio to disk.
-- MiniMax forwards requested audio format but currently labels output `format` as `mp3`; the MIME type may reflect upstream metadata. Use MP3 for consistent current format/filename metadata. See the [T2A contract](docs/reference/api-reference.md#2-post-t2a).
+- MiniMax normalizes declared audio format and MIME, including nested response wrappers, and uses the requested format when metadata is absent. Binary filenames and JSON labels agree; contradictory or unsupported declarations return a controlled 502. Bytes are not transcoded. See the [T2A contract](docs/reference/api-reference.md#2-post-t2a).
 
 ## API and deployment docs
 

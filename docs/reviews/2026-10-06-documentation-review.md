@@ -1,5 +1,9 @@
 # Documentation review against main — 2026-10-06
 
+The original review and second pass below are historical snapshots of main
+`2a453d0`. Claims about 500 parser errors and hardcoded MP3 labels were superseded
+by PR #129. The reconciliation section at the end records the current result.
+
 ## Scope and baseline
 
 Reviewed all tracked standalone repository documents: 12 Markdown files and `LICENSE` (13 original documents). `git ls-files` showed no other standalone document formats. Source comments, scripts, configuration examples, tests, package files and workflow files were read as evidence and were not changed. No external consumer repository, live deployment or external document was reviewed.
@@ -139,3 +143,30 @@ non-Markdown files** retain main's Git objects and modes.
 - `git diff --check` and a documentation-only path/content check confirm no JS, HTML, tests, package/lock files, workflow, unit, Apache configuration or license changes.
 
 This review does not establish active production settings, downstream UI adoption, Google billing/quota/language availability or live voice accuracy. Tests used local mocks/synthetic media and made no live paid cloud requests. Those deployment/listening checks remain operator activities in the active runbooks; they do not authorize new code work or deployment through this documentation PR.
+
+
+## Reconciliation after PRs #128 and #129
+
+Reconciled against main `31ce143878ef0f41627b95e8511ac268b67adba5` on
+2026-10-06. Merged main into this documentation branch, preserving its folder
+structure, archive notice/original plan body, and the newer source/tests.
+
+- Resolved the content conflict in the moved API reference by retaining its more
+  precise route error-envelope description and the corrected 413 parser contract.
+- Replaced stale 500/MP3-label guidance in the README, API reference, caller guide,
+  runtime walkthrough and auth runbook. This includes cleanly merged paragraphs
+  that were semantically inconsistent despite having no Git conflict.
+- Retained PR #129's wrapped/array audio metadata rules, controlled conflict errors,
+  request-format fallback, client migration advice and no-transcoding limitation.
+- Added PR #128's compatibility baseline to the index, linked it to current API and
+  runtime guidance, and distinguished historical test counts from the 238-test suite.
+- Updated the README's newly added API link to the reorganized reference path.
+  The original review remains above as dated evidence; it is not active API guidance.
+
+Verification: the final diff against updated main changes only Markdown. All
+non-Markdown tracked files (including source, tests, configuration and LICENSE)
+retain the exact Git objects/modes from main. The archived plan body is preserved.
+
+Reconciliation validation passed: 238 tests, zero failures/skips; 216 local
+Markdown links/heading targets; 32 shell example syntax checks (`bash -n`, not
+executed); archive-body and license comparisons; and `git diff --check`.
