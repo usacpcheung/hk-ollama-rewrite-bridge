@@ -1202,3 +1202,48 @@ test('t2a maps unexpected schema drift when provider returns non-object JSON', a
     }
   });
 });
+
+test('t2a normalizes declared audio metadata and falls back to the requested format', async t => {
+  const audio = Buffer.from('opaque audio bytes '.repeat(8));
+  const cases = [
+    ['default mp3', undefined, {}, 'mp3', 'audio/mpeg'],
+    ['requested wav', 'wav', {}, 'wav', 'audio/wav'],
+    ['requested pcm', 'pcm', {}, 'pcm', 'audio/pcm'],
+    ['data format overrides request', 'mp3', { data: { format: 'wav' } }, 'wav', 'audio/wav'],
+    ['extra info format', 'mp3', { extra_info: { audio_format: 'PCM' } }, 'pcm', 'audio/pcm'],
+    ['top-level MIME', 'mp3', { content_type: 'Audio/X-Wav' }, 'wav', 'audio/wav'],
+    ['nested MIME', 'wav', { data: { content_type: 'audio/mpeg' } }, 'mp3', 'audio/mpeg'],
+    ['matching declarations', 'mp3', { content_type: 'audio/wave', data: { format: 'wav' }, extra_info: { audio_format: 'wav' } }, 'wav', 'audio/wav'],
+    ['conflicting format/MIME', 'mp3', { content_type: 'audio/mpeg', data: { format: 'wav' } }],
+    ['conflicting MIME fields', 'mp3', { content_type: 'audio/mpeg', data: { content_type: 'audio/wav' } }],
+    ['conflicting formats', 'mp3', { data: { format: 'wav' }, extra_info: { audio_format: 'pcm' } }],
+    ['unsupported MIME', 'mp3', { content_type: 'text/html' }],
+    ['unsupported format', 'mp3', { data: { format: 'aac' } }],
+    ['malformed metadata', 'mp3', { data: { format: 1 } }]
+  ];
+  for (const [name, requestedFormat, metadata, format, contentType] of cases) {
+    await t.test(name, async t => {
+      t.mock.method(global, 'fetch', async () => new Response(JSON.stringify({
+        ...metadata, data: { audio: audio.toString('hex'), ...metadata.data }
+      }), { status: 200 }));
+      const provider = createMinimaxProvider({ apiUrl: 'http://minimax.test/t2a', model: 'speech-test', apiKey: 'test-key' });
+      const result = await provider.t2a({ text: 'test', audio: { format: requestedFormat }, timeoutMs: 1000 });
+      if (!format) {
+        assert.equal(result.ok, false);
+        assert.equal(result.error.code, 'PROVIDER_ERROR');
+        assert.equal(result.error.status, 502);
+        return;
+      }
+      assert.equal(result.ok, true);
+      const { meta, artifacts } = result.data.output;
+      for (const item of [meta, artifacts[0]]) {
+        assert.equal(item.format, format);
+        assert.equal(item.mime, contentType);
+        assert.equal(item.contentType, contentType);
+      }
+      assert.deepEqual(meta.audio, audio);
+      assert.deepEqual(artifacts[0].data, audio);
+      assert.equal(meta.provider.contentType, contentType);
+    });
+  }
+});

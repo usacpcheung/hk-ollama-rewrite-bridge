@@ -136,12 +136,12 @@ test('compatibility: all six aliases share the full auth rejection matrix', asyn
   assert.equal(f.calls.length, 0);
 });
 
-test('quirk: JSON parser failures precede auth and transcription no-store on every POST alias', async t => {
+test('compatibility: JSON parser rejects malformed and oversized bodies before auth on every POST alias', async t => {
   const f = await fixture(t);
   for (const route of POST_ROUTES) {
     for (const [raw, status, code] of [
       ['{', 400, 'INVALID_JSON'],
-      [JSON.stringify({ text: 'x'.repeat(17_000) }), 500, 'INTERNAL_ERROR']
+      [JSON.stringify({ text: 'x'.repeat(17_000) }), 413, 'PAYLOAD_TOO_LARGE']
     ]) {
       const response = await f.request(route, { raw, headers: {} });
       const body = await expectError(response, status, code);
@@ -337,7 +337,7 @@ test('compatibility: MiniMax rewrite and T2A share admission and streaming overl
   assert.equal(f.calls.length, 2, 'admission is released after successful invocation');
 });
 
-test('quirk: MiniMax WAV bytes pass through but public format and filename remain mp3', async t => {
+test('compatibility: MiniMax WAV bytes and public audio metadata agree', async t => {
   const f = await fixture(t, { handle: (req, res, body) => {
     if (req.url !== '/t2a') return false;
     json(res, 200, { data: { audio: AUDIO.toString('hex'), format: body.audio_setting.format } });
@@ -346,13 +346,13 @@ test('quirk: MiniMax WAV bytes pass through but public format and filename remai
   const binary = await f.request('/t2a', { body: { text: '測試', format: 'wav' } });
   assert.equal(binary.status, 200);
   assert.equal(binary.headers.get('content-type'), 'audio/wav');
-  assert.equal(binary.headers.get('content-disposition'), 'inline; filename="speech.mp3"');
+  assert.equal(binary.headers.get('content-disposition'), 'inline; filename="speech.wav"');
   assert.equal(Number(binary.headers.get('content-length')), AUDIO.length);
   assert.deepEqual(Buffer.from(await binary.arrayBuffer()), AUDIO);
   const wrapped = await f.request('/api/t2a', { body: { text: '測試', format: 'wav', response_mode: 'base64_json' } });
   assert.equal(wrapped.status, 200);
   const body = await wrapped.json();
-  assert.equal(body.format, 'mp3');
+  assert.equal(body.format, 'wav');
   assert.equal(body.mime, 'audio/wav');
   assert.equal(body.contentType, 'audio/wav');
   assert.deepEqual(Buffer.from(body.audio, 'base64'), AUDIO);

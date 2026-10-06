@@ -98,6 +98,17 @@ Run the full suite:
 npm test
 ```
 
+## API corrections before provider refactoring
+
+JSON bodies exceeding the 16 KiB parser limit return **413 `PAYLOAD_TOO_LARGE`**
+(previously 500). Clients should reduce the payload instead of retrying it unchanged.
+T2A retains MP3, WAV, and PCM output: JSON `format`/MIME and binary filenames now
+match the normalized provider format instead of always using MP3 labels. Missing
+provider metadata uses the requested format; conflicting or unsupported declarations
+return controlled 502 `PROVIDER_ERROR`. No audio transcoding is added. Consumers
+should use returned metadata rather than assume `.mp3`. Admission `Retry-After`
+policy is unchanged. See the [API reference](docs/api-reference.md).
+
 ## Quick start for app developers
 
 ### Rewrite request

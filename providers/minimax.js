@@ -25,7 +25,6 @@ function createMinimaxProvider({
   debugLog
 }) {
   const t2aFormat = 'mp3';
-  const t2aMimeType = 'audio/mpeg';
   const probeBody = buildMinimaxRewriteBody({
     model,
     messages: buildProbeMessages(),
@@ -205,7 +204,10 @@ function createMinimaxProvider({
         return failureResult(mapError(new Error(extractedAudio.reason), { kind: extractedAudio.reason }));
       }
 
-      const providerMeta = extractMinimaxT2AProviderMetadata(data, extractedAudio.sourcePath);
+      const providerMeta = extractMinimaxT2AProviderMetadata(data, extractedAudio.sourcePath, body.audio_setting.format);
+      if (!providerMeta) {
+        return failureResult(mapError(new Error('invalid_audio_metadata'), { kind: 'schema_drift' }));
+      }
       const audioBuffer = Buffer.from(extractedAudio.hexAudio, 'hex');
 
       return successResult({
@@ -215,16 +217,16 @@ function createMinimaxProvider({
             {
               kind: 'audio',
               data: audioBuffer,
-              mime: t2aMimeType,
-              contentType: providerMeta.contentType || t2aMimeType,
-              format: t2aFormat
+              mime: providerMeta.contentType,
+              contentType: providerMeta.contentType,
+              format: providerMeta.format
             }
           ],
           meta: {
             audio: audioBuffer,
-            mime: t2aMimeType,
-            contentType: providerMeta.contentType || t2aMimeType,
-            format: t2aFormat,
+            mime: providerMeta.contentType,
+            contentType: providerMeta.contentType,
+            format: providerMeta.format,
             provider: providerMeta
           }
         },
@@ -1172,13 +1174,32 @@ function isLikelyHexAudio(value) {
   return typeof value === 'string' && value.length > 64 && value.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(value);
 }
 
-function extractMinimaxT2AProviderMetadata(payload, sourcePath) {
+function extractMinimaxT2AProviderMetadata(payload, sourcePath, requestedFormat) {
   const baseResp = payload?.base_resp && typeof payload.base_resp === 'object' ? payload.base_resp : null;
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
-  const contentType = (typeof payload?.content_type === 'string' && payload.content_type)
-    || (typeof data?.content_type === 'string' && data.content_type)
-    || t2aContentTypeFromFormat((typeof data?.format === 'string' && data.format) || null)
-    || 'audio/mpeg';
+  // Normalize recognized metadata once. Never copy an arbitrary upstream MIME
+  // value into response headers or guess through contradictory declarations.
+  const formats = [];
+  for (const value of [data?.format, payload?.extra_info?.audio_format]) {
+    if (value == null) continue;
+    if (typeof value !== 'string') return null;
+    const format = value.trim().toLowerCase();
+    if (!t2aContentTypeFromFormat(format)) return null;
+    formats.push(format);
+  }
+  const mimeFormats = { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+    'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/pcm': 'pcm' };
+  for (const value of [payload?.content_type, data?.content_type]) {
+    if (value == null) continue;
+    if (typeof value !== 'string') return null;
+    const mime = value.split(';', 1)[0].trim().toLowerCase();
+    const format = Object.hasOwn(mimeFormats, mime) ? mimeFormats[mime] : null;
+    if (!format) return null;
+    formats.push(format);
+  }
+  const format = formats[0] || requestedFormat;
+  if (!t2aContentTypeFromFormat(format) || formats.some(value => value !== format)) return null;
+  const contentType = t2aContentTypeFromFormat(format);
 
   return {
     statusCode: typeof payload?.status_code === 'number' ? payload.status_code : null,
@@ -1188,6 +1209,7 @@ function extractMinimaxT2AProviderMetadata(payload, sourcePath) {
     subtitles: data?.subtitles || null,
     audioLength: typeof data?.audio_length === 'number' ? data.audio_length : null,
     sourcePath,
+    format,
     contentType,
     baseResp
   };

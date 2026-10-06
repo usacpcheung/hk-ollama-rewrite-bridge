@@ -1283,6 +1283,9 @@ app.use((_req, res) => {
 });
 
 app.use((err, _req, res, _next) => {
+  if (err.type === 'entity.too.large' && err.status === 413) {
+    return errorResponse(res, 413, 'PAYLOAD_TOO_LARGE', 'JSON body exceeds the 16 KiB limit');
+  }
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return errorResponse(res, 400, 'INVALID_JSON', 'Invalid JSON body');
   }

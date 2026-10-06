@@ -2,8 +2,9 @@
 
 Status: current-behavior baseline for abstraction PR 1, checked against `main`
 commit `2a453d040506b909ada41842eed3f7b2347dbf82` on 2026-10-06.
-PR 1 adds documentation and tests only. It does not complete provider abstraction,
-change production behavior, retire request fields, or introduce a new provider.
+PR 1 established the tests/documentation baseline. The corrective PR stacked on
+PR #128 updates the two confirmed defects below. Provider abstraction and raw-ID
+retirement remain future work.
 
 ## Purpose and classification
 
@@ -24,9 +25,9 @@ Use these classifications when reviewing later changes:
 
 Characterization tests describe current behavior; they do not make defects permanent
 contracts. Oversized JSON returning 500 (Q-01) and WAV audio carrying MP3 labels
-(Q-02) are confirmed defects scheduled for a corrective PR before abstraction work.
-That PR should replace those assertions with the corrected behavior and document
-client impact. The absence of `Retry-After` on admission overload is a separate
+(Q-02) were confirmed defects. The corrective PR replaces their assertions with
+413 responses and consistent audio metadata, respectively; these corrected
+expectations now form the baseline for abstraction work. The absence of `Retry-After` on admission overload is a separate
 policy decision, not a confirmed defect: no reliable queue-availability estimate
 is currently provided. Other behavior changes still need an explicit scope and
 compatibility assessment rather than being incidental to structural refactoring.
@@ -90,8 +91,8 @@ Google client and media conversion fixture; real FFmpeg coverage is separate.
 | ID / class | Current behavior to preserve or explicitly migrate | Source and evidence |
 |---|---|---|
 | CFG-01 C/L | Service-scoped settings, defaults, bounds, canonical/legacy precedence, and alias warnings retain their current resolution. Protocol selection is explicit rather than inferred from a model name. Unsupported combinations fail under existing controlled behavior; there is no automatic switch to another provider. | [environment reader](../../lib/env-config.js), [rewrite](../../services/rewrite.js), [T2A](../../services/t2a.js), [transcription configuration](../../lib/transcription-config.js); [environment tests](../../tests/env-config.test.js), [boolean tests](../../tests/env-boolean-parsing.test.js), [rewrite configuration tests](../../tests/rewrite-config-resolution.test.js), [T2A configuration tests](../../tests/t2a-config-resolution.test.js), [runtime tests](../../tests/service-runtime.test.js), [transcription tests](../../tests/transcription.test.js). These suites cover representative resolution rules, not every possible environment combination. |
-| Q-01 Q | The global 16 KiB JSON parser precedes authentication and transcription's no-store middleware. Malformed JSON returns 400 `INVALID_JSON`; oversized JSON currently returns 500 `INTERNAL_ERROR`, not 413. These early responses lack transcription request IDs/no-store. The baseline limiter can also respond before no-store. | [server](../../server.js); [HTTP tests](../../tests/service-compatibility.test.js), “quirk: JSON parser failures precede auth and transcription no-store on every POST alias” and baseline-limiter coverage. This concerns JSON requests, not the transcription multipart upload limit. |
-| Q-02 Q/L | MiniMax audio bytes pass through without transcoding. An upstream WAV result can have `audio/wav` MIME while the public JSON `format` and download filename remain `mp3` / `speech.mp3`. Do not silently correct this metadata during boundary extraction. | [MiniMax](../../providers/minimax.js), [output writer](../../lib/service-output-writer.js); [HTTP tests](../../tests/service-compatibility.test.js), “quirk: MiniMax WAV bytes pass through but public format and filename remain mp3”. The fixture tests opaque byte preservation and metadata, not WAV decoding. |
+| Q-01 C (defect corrected) | The global 16 KiB JSON parser precedes authentication and transcription's no-store middleware. Malformed JSON returns 400 `INVALID_JSON`; oversized JSON returns 413 `PAYLOAD_TOO_LARGE` (previously 500 `INTERNAL_ERROR`). These early responses lack transcription request IDs/no-store. The baseline limiter can also respond before no-store. | [server](../../server.js); [HTTP tests](../../tests/service-compatibility.test.js), “compatibility: JSON parser rejects malformed and oversized bodies before auth on every POST alias” and baseline-limiter coverage. This concerns JSON requests, not the transcription multipart upload limit. |
+| Q-02 C/L (defect corrected) | MiniMax audio bytes pass through without transcoding. Public format, MIME and filename now agree: `mp3`/`audio/mpeg`, `wav`/`audio/wav`, or `pcm`/`audio/pcm`. Recognized provider declarations take precedence over the request; missing declarations use the requested format. Unsupported or contradictory metadata returns controlled 502 `PROVIDER_ERROR`. Previously WAV bytes could carry MP3 labels. This uses provider declarations, not binary codec detection. | [MiniMax](../../providers/minimax.js), [output writer](../../lib/service-output-writer.js); [HTTP tests](../../tests/service-compatibility.test.js), “compatibility: MiniMax WAV bytes and public audio metadata agree”. The fixture tests opaque byte preservation and metadata, not WAV decoding. |
 | Q-03 Q/L | `WARMUP_ON_START=false` marks service state `ready` but does not suppress on-demand Ollama warmup. A cold model can yield `MODEL_WARMING` and readiness 503 `MODEL_NOT_READY` with `serviceState: ready`. | [server](../../server.js); [HTTP tests](../../tests/service-compatibility.test.js), Ollama warmup/recovery case. Do not infer model readiness from the service-state string alone. |
 
 ## Voice portability and eventual legacy retirement
