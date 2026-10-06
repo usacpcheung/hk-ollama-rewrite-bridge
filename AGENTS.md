@@ -21,7 +21,7 @@ This `AGENTS.md` applies to the full repository tree unless a deeper nested `AGE
 - Preserve the bridge role as a centralized AI service interface: services may be backed by different providers, but callers should not need to know provider-specific details unless the public contract explicitly exposes them.
 
 ## Public API Compatibility Rules
-Existing public behavior for `/rewrite`, `/api/rewrite`, `/t2a`, and `/api/t2a` must remain backward compatible unless the user explicitly requests a breaking API change.
+Existing public behavior for `/rewrite`, `/api/rewrite`, `/t2a`, `/api/t2a`, `/transcriptions`, and `/api/transcriptions` must remain backward compatible unless the user explicitly requests a breaking API change.
 
 Do not change the following without an explicit breaking-change request:
 - Rewrite JSON success response field names: `ok`, `result`, and optional `usage`.
@@ -29,6 +29,7 @@ Do not change the following without an explicit breaking-change request:
 - T2A default binary response behavior, including default `response_mode`, raw audio bytes, `Content-Type`, and `Content-Disposition`.
 - T2A `base64_json` response fields: `ok`, `audio`, `format`, `mime`, `contentType`, `size`, and `provider`.
 - Existing validation status codes and error code strings, including `INVALID_INPUT`, `TOO_LONG`, `STREAMING_UNSUPPORTED`, and `MINIMAX_API_KEY_MISSING`.
+- Transcription success fields (`ok`, `result`, `durationSeconds`, `requestId`, `timings`), controlled errors, upload/media limits, cancellation/admission ownership and cleanup-before-success behavior.
 - Existing authentication, authorization, trusted-header, and identity gatekeeping behavior.
 
 When adding new services or providers:
@@ -41,7 +42,7 @@ When adding new services or providers:
 - Before separating service/provider runtime code, preserve current route behavior with HTTP-level contract tests from request to response.
 - Internal contracts may evolve, but public contracts must remain stable.
 - Refactors should move hardcoded provider logic into service/provider lifecycle or adapter layers without changing observable API behavior.
-- If a refactor affects route handling, provider dispatch, admission control, readiness, warmup, streaming, output writing, or error mapping, update or add tests that prove rewrite and T2A compatibility is preserved.
+- If a refactor affects route handling, provider dispatch, admission control, readiness, warmup, streaming, output writing, or error mapping, update or add tests that prove compatibility for every affected service, including transcription, is preserved. Use the coverage gates in `docs/architecture/compatibility-baseline.md`; passing the existing suite alone does not close a documented coverage gap.
 
 ## Testing Requirements
 - Run `npm test` whenever provider logic changes.

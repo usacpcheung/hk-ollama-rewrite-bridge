@@ -1,8 +1,9 @@
 # Environment Reference
 
 This is the canonical reference for supported environment variables. New
-configuration should use the canonical names below. Deprecated aliases are kept
-for one compatibility window and emit startup warnings when used.
+configuration should use the canonical names below. Deprecated aliases remain supported and emit startup warnings when used. The
+code defines no removal date or release window; retirement requires a separate
+migration decision.
 
 ## Transcription
 
@@ -194,7 +195,7 @@ only supported value. Unknown explicit values fail with controlled
 
 ## Deprecated Aliases
 
-Deprecated aliases still work for one compatibility window. Valid preferred service/provider settings win over legacy values. See the
+Deprecated aliases still work; no retirement schedule is implemented. Valid preferred service/provider settings win over legacy values. See the
 resolution rules below for invalid preferred values and bridge-level aliases.
 
 | Deprecated alias | Canonical name |

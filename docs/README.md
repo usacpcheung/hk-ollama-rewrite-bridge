@@ -1,6 +1,6 @@
 # Repository documentation
 
-Active guidance was reviewed against main commit `31ce143878ef0f41627b95e8511ac268b67adba5` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [review record](reviews/2026-10-06-documentation-review.md) for the complete original-file inventory, code evidence and changes.
+Active guidance was reviewed against main commit `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [merged-main audit](reviews/2026-10-06-main-baseline-audit.md) for the current inventory, code evidence and readiness decision. The [earlier review](reviews/2026-10-06-documentation-review.md) preserves historical review checkpoints.
 
 ## Find the right document
 
@@ -15,11 +15,14 @@ Active guidance was reviewed against main commit `31ce143878ef0f41627b95e8511ac2
 | [Auth runbook](runbooks/auth-matrix-manual-cli-checklist.md) | Local auth/alias matrix and deployment gateway checks |
 | [Transcription runbook](runbooks/transcription-deployment.md) | Opt-in Google/media setup, validation, rollback and cleanup |
 | [Compatibility baseline](architecture/compatibility-baseline.md) | Code/test-backed contracts, legacy support, corrected defects and remaining coverage gaps |
+| [Refactor roadmap](architecture/provider-abstraction-roadmap.md) | Six stages, production baseline, VPS acceptance and rollback gates |
+| [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Working-code implementation scope, acceptance criteria and deferred migration gates |
 | [Runtime architecture](architecture/runtime.md) | Current request flows and actual service/provider boundaries |
 | [ADR 0001](architecture/adr/0001-internal-bridge-contract.md) | Accepted internal result/event contract |
 | [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented rewrite/T2A boundary and remaining limits |
 | [Past documents](past/README.md) | Completed/superseded plans preserved as history |
-| [Review record](reviews/2026-10-06-documentation-review.md) | File-by-file decisions and validation evidence |
+| [Current audit](reviews/2026-10-06-main-baseline-audit.md) | Post-merge document review and baseline readiness evidence |
+| [Historical review](reviews/2026-10-06-documentation-review.md) | Original review and reconciliation checkpoints; not current implementation instructions |
 
 `README.md`, `AGENTS.md` and `LICENSE` remain at the repository root for their conventional roles. Browser code and its runnable example remain under `public/rewrite-widget/`; their documentation now lives with the other guides.
 

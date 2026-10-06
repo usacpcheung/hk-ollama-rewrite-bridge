@@ -184,8 +184,8 @@ enable the implemented Google backend separately using the [transcription runboo
 The canonical environment reference is [environment settings](../reference/env-reference.md).
 
 Use canonical names from that document for new deployments. Deprecated aliases
-remain supported for one compatibility window and emit startup warnings when
-used.
+remain supported and emit startup warnings when used. The code defines no
+removal date or release window; retirement needs a separate migration decision.
 
 ## 6) systemd setup
 

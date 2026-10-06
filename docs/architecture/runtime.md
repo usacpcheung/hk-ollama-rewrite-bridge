@@ -1,6 +1,6 @@
 # Current runtime and request flows
 
-Reviewed against main `31ce143878ef0f41627b95e8511ac268b67adba5` on 2026-10-06. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Reviewed against main `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 

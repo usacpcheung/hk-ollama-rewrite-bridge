@@ -286,6 +286,7 @@ A similar `202` contract may also use `MODEL_WARMUP_STARTED`.
 - `401 AUTH_REQUIRED`
 - `401 AUTH_HEADER_INVALID`
 - `403 FORBIDDEN_DOMAIN`
+- `413 PAYLOAD_TOO_LARGE` (global JSON parser)
 - `413 TOO_LONG`
 - `429 RATE_LIMITED`
 - `429 MINIMAX_RECOVERY_COOLDOWN`
@@ -519,6 +520,7 @@ and binary/base64 response modes are unchanged.
 - `401 AUTH_REQUIRED`
 - `401 AUTH_HEADER_INVALID`
 - `403 FORBIDDEN_DOMAIN`
+- `413 PAYLOAD_TOO_LARGE` (global JSON parser)
 - `413 TOO_LONG`
 - `422 VOICE_CHOICE_UNSUPPORTED` (valid choice lacks a mapping in a supported provider)
 - `429 RATE_LIMITED`
@@ -527,6 +529,9 @@ and binary/base64 response modes are unchanged.
 - `503 MINIMAX_API_KEY_MISSING`
 - `503 ADMISSION_OVERLOADED`
 - provider-mapped failures such as `PROVIDER_AUTH_ERROR`, `PROVIDER_ERROR`, `MODEL_TIMEOUT`
+
+`provider` is an opaque provider-specific metadata object (or null), not the
+selected provider name. Its nested keys are not a portable service contract.
 
 ### Client integration notes for T2A
 

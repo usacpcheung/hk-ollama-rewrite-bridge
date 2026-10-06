@@ -2,7 +2,7 @@
 
 - Status: Accepted; amended to reflect current structured output
 - Date: 2026-03-03
-- Implementation reviewed: 2026-10-06 against main `2a453d040506b909ada41842eed3f7b2347dbf82`
+- Implementation reviewed: 2026-10-06 against main `a50c47d150724820080a8e7d7861070b7a0ecc51`
 
 ## Context
 
@@ -22,12 +22,14 @@ Provider implementations are responsible for stream event order and completion. 
 
 ## Public boundary
 
-[`lib/service-output-writer.js`](../../../lib/service-output-writer.js) translates internal results into service-specific HTTP contracts:
+[`lib/service-output-writer.js`](../../../lib/service-output-writer.js) translates internal results into rewrite/T2A HTTP contracts:
 
 - Rewrite JSON: `ok`, `result`, optional `usage`; internal artifacts/metadata are not exposed.
 - Rewrite NDJSON: text in `response`, `done`, optional `done_reason` and `usage`, or a terminal `error`.
 - T2A: raw audio bytes by default, or the established base64 JSON fields. Audio buffers live internally in artifacts/metadata.
-- Transcription: its independent handler returns transcript, duration, request ID and timings, using the shared sync result for the Google adapter.
+
+Transcription uses its own handler, not this HTTP writer. It returns transcript,
+duration, request ID and timings using the shared sync result for the Google adapter.
 
 ## Consequences and evidence
 

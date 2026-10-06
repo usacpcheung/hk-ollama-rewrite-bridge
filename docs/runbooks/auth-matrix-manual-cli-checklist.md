@@ -17,7 +17,7 @@ The shared gate checks a trimmed `X-Bridge-Auth` matching the configured secret 
 | Disallowed domain | Valid secret + outside-domain email | `403 FORBIDDEN_DOMAIN` |
 | Valid headers | Matching secret + allowed suffix | Passes auth; later validation, provider or capacity errors remain possible |
 
-The global limiter precedes auth on all routes. Rewrite/T2A route limiters also precede auth; enabled transcription's service limiter follows it. Keep test attempts within budgets or wait for their windows so a 429 does not mask the auth result. Loopback binding, gateway authentication and stripping spoofed headers remain part of the deployment boundary.
+The baseline limiter precedes auth on all six service aliases. Health/readiness use the separate ops limiter. Rewrite/T2A route limiters also precede auth; enabled transcription's service limiter follows it. Keep test attempts within budgets or wait for their windows so a 429 does not mask the auth result. Loopback binding, gateway authentication and stripping spoofed headers remain part of the deployment boundary.
 
 The shared JSON parser runs even earlier. Use valid JSON in rewrite/T2A auth
 probes: malformed JSON returns `400 INVALID_JSON`, and a body above 16 KiB

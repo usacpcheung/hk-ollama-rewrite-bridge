@@ -2,7 +2,7 @@
 
 - Status: Implemented for rewrite/T2A; broader route orchestration remains partial
 - Date: 2026-05-07
-- Implementation reviewed: 2026-10-06 against main `2a453d040506b909ada41842eed3f7b2347dbf82`
+- Implementation reviewed: 2026-10-06 against main `a50c47d150724820080a8e7d7861070b7a0ecc51`
 
 ## Context
 
