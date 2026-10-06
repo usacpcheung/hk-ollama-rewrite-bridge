@@ -23,8 +23,10 @@ Send `multipart/form-data` containing exactly one file named `audio`, with no
 additional fields and no Content-Encoding. Maximum audio size is 20 MiB plus
 64 KiB for multipart framing; maximum duration is 60 decoded seconds (both can
 be configured lower). Empty files, multiple audio streams, video, and unsupported
-codecs fail validation. Supported actual media: PCM WAV (8/16/24/32-bit integer
-or 32-bit float), native FLAC, MP3, AAC in MP4/M4A/MOV, and Opus in WebM/OGG.
+codecs fail validation. Supported actual media: WAV with unsigned 8-bit PCM,
+little-endian signed 16/24/32-bit PCM or little-endian 32-bit float PCM
+(`pcm_u8`, `pcm_s16le`, `pcm_s24le`, `pcm_s32le`, `pcm_f32le`); native FLAC;
+MP3; AAC in MP4/M4A/MOV; and Opus in WebM/Matroska/OGG.
 One or two channels and sample rates 8–192 kHz are allowed. File extensions and
 declared MIME types are not used to validate media. All accepted audio is decoded
 to mono 16 kHz, then encoded as FLAC for Google.
@@ -78,6 +80,12 @@ Errors use `{ ok: false, error: { code, message } }`, with `requestId` where ass
 Enabled-handler 429/503 responses include `Retry-After: 10`; disabled-mode 503
 does not set that header. Request-rate limiting uses its window's remaining time.
 Upload rejection can close the connection.
+
+The shared JSON parser and baseline limiter run before transcription's route
+middleware. Their rejections can therefore lack `Cache-Control: no-store` and
+`requestId`. In particular, a request labeled `application/json` can return
+`400 INVALID_JSON` or `500 INTERNAL_ERROR` before transcription auth or multipart
+validation. Use multipart requests for this endpoint.
 
 Disconnecting cancels local upload/conversion work. If Google has already received
 the RPC, it may still finish and be charged; its result is discarded, and capacity
@@ -156,7 +164,9 @@ For the canonical env reference and defaults, see [environment settings](env-ref
 Environment variables are documented centrally in [environment settings](env-reference.md).
 This API reference only describes request and response contracts.
 
-Rewrite/T2A JSON parsing has a separate 16 KiB body limit. The current generic
+The shared parser runs on requests labeled `application/json` before identity,
+rate limits and route auth, with a separate 16 KiB body limit. This includes
+misformatted requests to transcription or diagnostics routes. The current generic
 error middleware maps parser-size failures to `500 INTERNAL_ERROR`; this differs
 from a validated over-budget `text`, which returns `413 TOO_LONG`. Malformed JSON
 returns `400 INVALID_JSON`. Do not assume every request-level failure reaches
@@ -186,7 +196,7 @@ Rewrite Hong Kong colloquial Cantonese into formal Traditional Chinese.
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `text` | string | Yes | Trimmed, non-empty, max `REWRITE_MAX_TEXT_LENGTH` Unicode code points (default 200; configurable up to 4,000). Application budget control for usage and spending, not a provider capability limit. |
-| `stream` | boolean/string/number | No | `true`, `"true"`, `1`, `"1"` request NDJSON streaming; only works when provider capability and env toggles both allow it. |
+| `stream` | boolean/string/number | No | Exactly `true`, `"true"`, `1`, `"1"` request NDJSON streaming; all other values use non-streaming. Requires provider capability and enabled env configuration. |
 
 ### Rewrite request examples
 
@@ -199,10 +209,16 @@ curl -i -sS http://127.0.0.1:3001/rewrite \
 ```
 
 ```bash
-curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
+curl -i -sS 'https://<your-domain>/api/rewrite-bridge/rewrite' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 ```
+
+The public example requires an authenticated gateway session in the private cookie
+jar. The checked-in Apache configuration uses interactive OIDC. Use a bearer token
+instead only if your gateway separately supports it; public clients do not send
+the backend's bridge secret.
 
 ### Success (`stream=false`)
 
@@ -331,7 +347,7 @@ Generate speech audio from validated text input using the T2A service definition
 | `sample_rate` | integer | No | `8000` to `48000`. Defaults to `32000`. |
 | `bitrate` | integer | No | `32000` to `320000`. Defaults to `128000`. |
 | `format` | string | No | `mp3`, `wav`, or `pcm`. Defaults to `mp3`. |
-| `stream` | boolean/string/number | No | If truthy in the supported forms, request is rejected with `501 STREAMING_UNSUPPORTED`. |
+| `stream` | boolean/string/number | No | Exactly `true`, `"true"`, `1`, `"1"` cause `501 STREAMING_UNSUPPORTED`; all other values use non-streaming. |
 
 Raw numeric controls are converted with `Number(...)`; numeric strings can be
 accepted when in range (integer controls must resolve to integers). For legacy
@@ -340,6 +356,21 @@ or `language_boost` also uses defaults. `format` and `response_mode` strings are
 trimmed/lowercased; null or empty response mode defaults to binary. Prefer the
 JSON types in the table for callers. When `voice_choice` is present, the mere
 presence of a conflicting raw voice field is invalid even if its value is null.
+
+### Validation order
+
+After the shared parser, rate limits and auth, T2A checks streaming first, then
+text presence/length, raw voice controls and output settings, and finally
+`voice_choice` conflicts/resolution. The route checks provider support and API-key
+presence after successful validation. The first failing check wins: a streaming
+request with invalid text returns 501; over-limit text with an unknown choice
+returns 413; an invalid choice can return 400 before an unsupported-provider 501.
+Neither validation failures nor provider/key-gate failures call MiniMax.
+
+Request `stream` values are not trimmed or lowercased: `"TRUE"` and `" true "`
+do not request streaming on either JSON service. For legacy T2A controls, empty
+`format` uses its default but whitespace-only `format` is invalid; whitespace-only
+`response_mode` defaults to binary.
 
 ### Stable voice choices
 

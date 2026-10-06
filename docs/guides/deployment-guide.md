@@ -217,7 +217,7 @@ sudo systemctl restart apache2
 
 Use `apache/proxy-snippet.conf` as the baseline and inspect it before installation. It maps rewrite and ops routes and comments out transcription; it currently omits T2A. Add the T2A mapping below to the deployed vhost. It also retains the protected legacy `/api/rewrite` public alias.
 
-The sample uses interactive `AuthType openid-connect`; bearer-token acceptance depends on separate gateway configuration. `Authorization: Bearer ...` in client examples is only applicable to gateways configured for it.
+The sample uses interactive `AuthType openid-connect`; the public curl examples use an authenticated session cookie jar. Bearer-token acceptance depends on separate gateway configuration.
 
 Important hardening rules:
 

@@ -3,7 +3,7 @@
 This document is a caller-focused reference for integrating with the bridge APIs.
 All request/response contracts below are based on the current server and service code.
 
-- Service bind address (default): `http://127.0.0.1:3001`
+- Service bind address (fixed in code): `http://127.0.0.1:3001`
 - JSON parser limit: `16kb` request body size (oversize JSON currently maps to `500 INTERNAL_ERROR`; text budgets independently return `413 TOO_LONG`)
 - Protected endpoints: both Rewrite and T2A require trusted auth headers
 
@@ -172,7 +172,7 @@ Both routes are equivalent.
 | Field | Type | Required | Range / Allowed values | Default |
 |---|---|---|---|---|
 | `text` | string | Yes | non-empty string | - |
-| `stream` | boolean/string/number | No | If truthy as `true`/`"true"`/`1`/`"1"`, request is rejected | - |
+| `stream` | boolean/string/number | No | Exactly `true`/`"true"`/`1`/`"1"` reject the request; all other values use non-streaming | - |
 | `voice_choice` | string | No | case-sensitive known preset ID; conflicts with raw voice controls | absent (legacy settings) |
 | `voice_id` | string | No | non-empty string, only without `voice_choice` | env default voice ID |
 | `language_boost` | string | No | non-empty string, only without `voice_choice` | `Chinese,Yue` |
@@ -202,6 +202,11 @@ A known choice without a mapping in a supported provider fails with `422 VOICE_C
 
 Without `voice_choice`, all existing raw settings and omitted-field environment defaults continue to work. Existing consumers need no changes to keep using these requests.
 
+T2A validates streaming before text, then raw controls/output settings, then
+choice conflicts/resolution, and finally the provider/key gates. The first failure
+wins, so a streaming request with missing text returns 501 and over-limit text
+with an invalid choice returns 413. See the [exact validation order and legacy coercion rules](../reference/api-reference.md#validation-order).
+
 ### 3.4 Limitations
 
 - `text` max length from `T2A_MAX_TEXT_LENGTH` (default `200`, configurable range `1`–`1000`). Integer settings above `1000` clamp to `1000`; malformed, fractional, or non-positive settings fall back to `200`. Unset or blank settings use `200`. This is an application budget control for usage and spending, not a provider capability limit.
@@ -218,7 +223,7 @@ Without `voice_choice`, all existing raw settings and omitted-field environment 
 - Response headers include:
   - `Content-Type`: provider content type (fallback `audio/mpeg`)
   - `Content-Length`
-  - `Content-Disposition: inline; filename="speech.<format>"`
+  - `Content-Disposition: inline; filename="speech.mp3"` (current adapter metadata, including WAV/PCM requests)
 
 ### 3.6 Success response when `response_mode=base64_json`
 

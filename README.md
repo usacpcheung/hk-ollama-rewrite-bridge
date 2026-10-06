@@ -100,12 +100,18 @@ npm test
 
 ## Quick start for app developers
 
+Public examples below use a private cookie jar containing an authenticated gateway
+session, matching the checked-in Apache `AuthType openid-connect` configuration.
+Replace the host and cookie-jar path. Bearer tokens are an alternative only when
+the gateway is explicitly configured to accept them; the bridge does not validate
+them. T2A also requires adding the proxy mapping from the deployment guide.
+
 ### Rewrite request
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/rewrite \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/rewrite' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 ```
 
@@ -121,9 +127,9 @@ Example success body:
 ### T2A request returning binary audio
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/t2a' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
   -d '{"text":"你好，歡迎使用","response_mode":"binary"}' \
   --output speech.mp3
 ```
@@ -131,9 +137,9 @@ curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
 ### T2A request returning JSON-wrapped base64 audio
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/t2a' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
   -d '{"text":"Hello, welcome","response_mode":"base64_json","voice_choice":"english_narrator_female","format":"mp3"}'
 ```
 

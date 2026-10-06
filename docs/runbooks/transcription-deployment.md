@@ -94,7 +94,8 @@ smoke checks without an Origin header still require the usual bridge authenticat
 No CORS access is granted to other sites.
 
 Leave `GOOGLE_SDK_NODE_LOGGING` unset/empty. Enabling transcription with SDK
-payload logging enabled fails configuration validation. Do not enable gRPC or
+logging configured to any non-empty value (even `false` or `0`) fails configuration
+validation. Do not enable gRPC or
 HTTP payload tracing. The bridge's rewrite provider debug setting does not enable
 transcription logging. Do not log recordings or real transcripts in Apache, Node,
 or an external monitoring service.

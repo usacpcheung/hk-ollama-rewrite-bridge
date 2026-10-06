@@ -42,7 +42,7 @@ The current adapter always labels output `format` as MP3 although requested form
 
 ## Transcription
 
-Both `/transcriptions` and `/api/transcriptions` set `Cache-Control: no-store`, run shared auth, then transcription middleware. Disabled mode returns 503 after auth. Enabled mode has its own limiter and handler:
+After the shared JSON parser and baseline limiter, both `/transcriptions` and `/api/transcriptions` set `Cache-Control: no-store`, run shared auth, then transcription middleware. Earlier parser/baseline-limiter rejections do not receive that header. Disabled mode returns 503 after auth. Enabled mode has its own limiter and handler:
 
 1. Check allowed Origin / `Sec-Fetch-Site`, storage, one-active-request-per-authenticated-email and total admission capacity before receiving audio.
 2. Create a private job directory and enforce exact multipart field `audio`, byte limit and receive deadline in [`lib/transcription-upload.js`](../../lib/transcription-upload.js).

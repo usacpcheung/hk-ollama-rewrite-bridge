@@ -19,6 +19,11 @@ The shared gate checks a trimmed `X-Bridge-Auth` matching the configured secret 
 
 The global limiter precedes auth on all routes. Rewrite/T2A route limiters also precede auth; enabled transcription's service limiter follows it. Keep test attempts within budgets or wait for their windows so a 429 does not mask the auth result. Loopback binding, gateway authentication and stripping spoofed headers remain part of the deployment boundary.
 
+The shared JSON parser runs even earlier. Use valid JSON in rewrite/T2A auth
+probes: malformed JSON returns `400 INVALID_JSON`, and a body above 16 KiB
+currently returns `500 INTERNAL_ERROR`, before the auth matrix applies. The
+octet-stream transcription probe below avoids the JSON parser.
+
 ## 2) Setup
 
 Load the shared secret into an environment variable from your secure operator environment without printing it. Do not paste real secrets/tokens into commands or shell history. Replace the example allowed account/domain to match the deployment.

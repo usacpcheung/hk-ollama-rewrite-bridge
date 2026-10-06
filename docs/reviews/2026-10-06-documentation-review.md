@@ -105,7 +105,32 @@ The Google backend is already implemented. Its runbook remains active, with rele
 
 The archived voice plan is implemented; its remaining live listening review is not evidence that the API implementation is pending. The ADRs describe live architectural boundaries, so they were updated rather than archived. ADR 0002 accurately records the implemented runtime and remaining server/provider branches, with transcription's separate lifecycle and no claimed image-generation service.
 
-## Validation and limits
+## Second review of PR #127
+
+Re-read every active document against the same main baseline after the initial PR
+was opened. Retained the folder/archive decisions and corrected eight active
+documents; this review record also records the follow-up. No code, configuration
+example, asset, test or dependency file was changed.
+
+| Follow-up correction | Documents | Code evidence and reason |
+|---|---|---|
+| Make public requests match the supplied gateway mode | Root README, API reference, deployment guide | `apache/proxy-snippet.conf` uses interactive OIDC. Public examples now include an authenticated private cookie jar; bearer tokens require separate gateway support. Quoted URL placeholders avoid shell redirection. |
+| Describe parser/limiter precedence and header exceptions | API reference, runtime architecture, auth runbook | `server.js` installs JSON parsing before identity/limits/auth and the baseline limiter before transcription's `no-store` middleware. Malformed JSON returns 400 and oversized JSON returns 500 before auth, even on transcription; early rejections can omit `no-store` and `requestId`. |
+| Specify the actual accepted media | API reference | `lib/transcription-media.js` admits Opus in Matroska as well as WebM/OGG. Its WAV allowlist is unsigned 8-bit PCM, little-endian signed 16/24/32-bit PCM and little-endian 32-bit float PCM; the earlier wording was broader. |
+| Clarify T2A validation precedence and exact stream values | API reference, caller guide | `services/t2a.js` checks stream, text, raw controls/output settings and then choice resolution. Route provider/key gates follow successful validation. Multiple invalid fields do not always produce a choice/auth error. Both JSON services recognize only exact `true`, `"true"`, `1`, `"1"` stream values. Empty versus whitespace format/response-mode behavior is now explicit. |
+| Keep the binary filename example consistent | Caller guide | `providers/minimax.js` labels output as MP3 regardless of requested format; the current writer uses `speech.mp3`, including WAV/PCM requests. |
+| Clarify transcription configuration and ADC timing | Environment reference, transcription runbook | `lib/transcription-config.js` rejects any non-empty SDK logging value, even `false`/`0`, and empty numeric settings fail positive bounds. Rate limiting uses resolved user/IP while the active lock uses authenticated email. `providers/google-speech.js` initializes ADC when valid work reaches the provider, rather than preflighting access at startup. An absolute credential path is deployment guidance, not a bridge-enforced requirement. |
+
+Follow-up validation: **33 existing T2A/transcription/media tests passed, zero
+failures/skips**, including actual FFmpeg normalization. **36 additional local
+checks** verified validation precedence/coercion, media allowlists, configuration
+edge cases and actual HTTP parser/auth/limiter status/header outcomes. These
+diagnostic checks were kept outside the repository and made no cloud calls.
+All **120 local Markdown links** and **32 active Bash examples** passed. The
+original archived plan body and license remain unchanged, and all **67 tracked
+non-Markdown files** retain main's Git objects and modes.
+
+## Initial validation and limits
 
 - Full existing `npm test` suite: **203 passed, 0 failed, 0 skipped**, Node **24.19.0**, including real FFmpeg/FFprobe normalization and mocked-provider HTTP contracts. The first sandboxed attempt lacked localhost socket permission; the successful rerun enabled access for local test servers. No repository change was made to accommodate that environment restriction.
 - All **119 local Markdown file/heading links** passed after moves; historical old path literals in the preserved plan are intentional.

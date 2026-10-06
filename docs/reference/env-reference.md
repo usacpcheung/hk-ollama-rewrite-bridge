@@ -16,13 +16,13 @@ configuration. Credentials are read through Google Application Default Credentia
 | `TRANSCRIPTION_GOOGLE_PROJECT` | Required when enabled | Google Cloud project ID (not project number). |
 | `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | `us` or `eu`; endpoint and recognizer location always match. |
 | `TRANSCRIPTION_ALLOWED_ORIGINS` | Empty | Comma-separated exact worksheet HTTP(S) origins without paths/trailing slashes. Required for browser uploads with Origin headers; cross-site requests are rejected. Authenticated server-side calls without Origin remain supported. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | ADC default | Absolute path to a server-readable credential file; never commit the file. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | ADC discovery | Optional SDK credential-file path; use an absolute server-readable path for deployment and never commit the file. If unset, the SDK uses other ADC sources. |
 | `TRANSCRIPTION_TEMP_DIRECTORY` | OS temp directory + `rewrite-bridge-transcriptions` | Dedicated absolute, private service-owned directory; production recommendation `/var/lib/rewrite-bridge/transcriptions`. |
 | `TRANSCRIPTION_MAX_UPLOAD_BYTES` | `20971520` | Audio bytes; range 1,024–20 MiB, plus separate 64 KiB multipart allowance. |
 | `TRANSCRIPTION_MAX_AUDIO_SECONDS` | `60` | Decoded recording duration; range 1–60 s. |
 | `TRANSCRIPTION_MAX_CONCURRENCY` | `10` | Total admitted uploads/work; range 1–20. One active request per user is fixed. |
 | `TRANSCRIPTION_CONVERSION_CONCURRENCY` | `2` | Active conversion sequences; range 1–4. Each FFmpeg process uses one codec/filter thread. |
-| `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per-user request attempts per fixed minute window; range 1–60. |
+| `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per resolved user/IP request attempts per fixed minute window; range 1–60. The separate one-active-request lock uses authenticated email. |
 | `TRANSCRIPTION_UPLOAD_TIMEOUT_MS` | `120000` | Total upload receive deadline; range 1,000–120,000 ms. |
 | `TRANSCRIPTION_CONVERSION_TIMEOUT_MS` | `15000` | Probe/decode/encode time budget after obtaining a conversion slot; range 1,000–60,000 ms. |
 | `TRANSCRIPTION_GOOGLE_TIMEOUT_MS` | `60000` | Google RPC deadline; range 1,000–120,000 ms, bounded by remaining total deadline. |
@@ -32,7 +32,12 @@ configuration. Credentials are read through Google Application Default Credentia
 
 Model `chirp_3`, language `yue-Hant-HK`, and output mono 16 kHz FLAC are fixed to
 the reviewed/tested profile. `GOOGLE_SDK_NODE_LOGGING` must be empty/unset for
-privacy. See [deployment checkpoints](../runbooks/transcription-deployment.md), including
+privacy; any non-empty value, including `false` or `0`, blocks enabled startup.
+Unset numeric transcription settings use defaults, but empty/whitespace values
+coerce to zero and fail their positive bounds. The bridge validates transcription
+configuration at startup; it does not preflight ADC credentials or Google access.
+Credential initialization and recognition occur only when a request reaches the
+Google provider after upload/media validation. See [deployment checkpoints](../runbooks/transcription-deployment.md), including
 Google access verification and the separate rewrite limit profile.
 
 ## Naming Model
