@@ -6,7 +6,7 @@ Node.js Express bridge that exposes AI services behind shared authentication and
 - **T2A (text-to-audio)**: generates Cantonese-oriented speech audio through the Minimax-compatible provider path.
 - **Transcription (opt-in)**: transcribes completed recordings through Google Cloud Speech-to-Text V2 Chirp 3.
 
-This README is the top-level operator and integrator guide. For exact endpoint contracts, see `docs/api-reference.md`.
+This README is the top-level operator and integrator guide. Start with the [documentation index](docs/README.md), or use the [API reference](docs/reference/api-reference.md) for exact endpoint contracts.
 
 ## Worksheet audio transcription (opt-in)
 
@@ -22,12 +22,14 @@ and server-side Application Default Credentials.
 It uses `chirp_3`, `yue-Hant-HK`, and the `us` endpoint by default. No Whisper daemon
 is needed. Uploads are limited to 20 MiB and 60 decoded seconds; FFmpeg normalizes
 audio to mono 16 kHz FLAC. Ten requests can be admitted, two conversions can run,
-and each user can have one active request. Audio is removed after processing;
-the bridge does not retain transcripts. Limits are configurable and process-local.
+and each user can have one active request. Audio deletion is attempted after
+processing; successful responses follow cleanup. Cleanup failures block further
+admission until restart. The bridge does not retain transcripts. Limits are
+configurable and process-local.
 
-Follow the [checkpoint deployment guide](docs/transcription-deployment.md) before
-enabling public access. See the [API contract](docs/api-reference.md#transcription)
-and [environment settings](docs/env-reference.md#transcription) for details.
+Follow the [checkpoint deployment guide](docs/runbooks/transcription-deployment.md) before
+enabling public access. See the [API contract](docs/reference/api-reference.md#transcription)
+and [environment settings](docs/reference/env-reference.md#transcription) for details.
 
 ## What is implemented
 
@@ -40,7 +42,7 @@ and [environment settings](docs/env-reference.md#transcription) for details.
 | Transcription | `POST /transcriptions` | `POST /api/rewrite-bridge/transcriptions` | Transcribe a completed audio recording (opt-in). |
 | Model status | `GET /model-status` | `GET /api/rewrite-bridge/model-status` | Diagnostics for frontend polling and operators. |
 | Health | `GET /healthz` | `GET /api/rewrite-bridge/healthz` | Process liveness. |
-| Ready | `GET /readyz` | `GET /api/rewrite-bridge/readyz` | Traffic-readiness gate. |
+| Ready | `GET /readyz` | `GET /api/rewrite-bridge/readyz` | Rewrite-readiness gate; does not check T2A or Google. |
 
 ### Runtime architecture
 
@@ -48,23 +50,26 @@ and [environment settings](docs/env-reference.md#transcription) for details.
 - Service registry in `services/` resolves service-scoped configuration for both rewrite and T2A.
 - Transcription has an independent upload/conversion lifecycle and admission limits in `services/transcription.js`, using the shared provider adapter with `providers/google-speech.js`.
 - Provider adapters normalize upstream behavior so route handlers can keep a stable API contract.
-- Protected routes (`/rewrite`, `/t2a`) share:
+- Protected JSON routes (`/rewrite`, `/api/rewrite`, `/t2a`, `/api/t2a`) share:
   - trusted-header auth
   - client identity derivation
   - layered fixed-window rate limiting
-  - admission control
+  - provider-keyed admission control (shared when services use the same provider)
   - JSON error envelope conventions
+- Transcription aliases share header auth and the global rate limiter, with separate per-user rate limits, admission and conversion slots.
+- The bridge does not serve the widget assets; host `public/rewrite-widget/` on your web server. See the [widget guide](docs/guides/rewrite-widget.md).
 
 ## Requirements
 
 - Node.js 22+ (CI tests Node 22 and 24)
 - For rewrite with Ollama: Ollama reachable at `127.0.0.1:11434` and the configured model pulled
 - For rewrite or T2A with Minimax: outbound network access and `MINIMAX_API_KEY`
+- For enabled transcription: FFmpeg/FFprobe, Google Cloud Speech-to-Text access and server-side ADC
 
 ## Install
 
 ```bash
-npm install
+npm ci --ignore-scripts
 ```
 
 ## Run
@@ -107,16 +112,22 @@ match the normalized provider format instead of always using MP3 labels. Missing
 provider metadata uses the requested format; conflicting or unsupported declarations
 return controlled 502 `PROVIDER_ERROR`. No audio transcoding is added. Consumers
 should use returned metadata rather than assume `.mp3`. Admission `Retry-After`
-policy is unchanged. See the [API reference](docs/api-reference.md).
+policy is unchanged. See the [API reference](docs/reference/api-reference.md).
 
 ## Quick start for app developers
+
+Public examples below use a private cookie jar containing an authenticated gateway
+session, matching the checked-in Apache `AuthType openid-connect` configuration.
+Replace the host and cookie-jar path. Bearer tokens are an alternative only when
+the gateway is explicitly configured to accept them; the bridge does not validate
+them. T2A also requires adding the proxy mapping from the deployment guide.
 
 ### Rewrite request
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/rewrite \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/rewrite' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
   -d '{"text":"我今日唔係好舒服，想請半日假。"}'
 ```
 
@@ -132,9 +143,9 @@ Example success body:
 ### T2A request returning binary audio
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/t2a' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
   -d '{"text":"你好，歡迎使用","response_mode":"binary"}' \
   --output speech.mp3
 ```
@@ -142,10 +153,10 @@ curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
 ### T2A request returning JSON-wrapped base64 audio
 
 ```bash
-curl -sS https://<your-domain>/api/rewrite-bridge/t2a \
+curl -sS 'https://<your-domain>/api/rewrite-bridge/t2a' \
+  --cookie '/path/to/private-authenticated-cookie-jar' \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <gateway-token-if-applicable>' \
-  -d '{"text":"Hello, welcome","response_mode":"base64_json","voice_id":"English_expressive_narrator","language_boost":"English","speed":1.1,"format":"mp3"}'
+  -d '{"text":"Hello, welcome","response_mode":"base64_json","voice_choice":"english_narrator_female","format":"mp3"}'
 ```
 
 Example success body:
@@ -174,7 +185,7 @@ Callers can send a stable `voice_choice` instead of provider-specific voice cont
 {"text":"你好，歡迎使用","voice_choice":"cantonese_narrator_female"}
 ```
 
-There are seven Cantonese choices (three male character presets, three female character presets and a female narrator), plus `mandarin_narrator_female` and `english_narrator_female`. The bridge maps each ID to MiniMax's voice, language and delivery settings. See the [voice catalogue and exact settings](docs/api-reference.md#stable-voice-choices).
+There are seven Cantonese choices (three male character presets, three female character presets and a female narrator), plus `mandarin_narrator_female` and `english_narrator_female`. The bridge maps each ID to MiniMax's voice, language and delivery settings. See the [voice catalogue and exact settings](docs/reference/api-reference.md#stable-voice-choices).
 
 A choice is a complete preset: do not combine it with `voice_id`, `language_boost`, `speed`, `volume` or `pitch`, including null values. Invalid or conflicting choices return `400 INVALID_INPUT`. Audio format and response mode remain independent. Named presets use their explicit settings rather than generic environment voice defaults.
 
@@ -186,6 +197,7 @@ Existing requests without `voice_choice` retain raw voice controls, environment 
 
 - Use `/rewrite` when you need transformed text.
 - Use `/t2a` when you need generated audio.
+- Use `/transcriptions` for a completed recording when enabled; the caller decides whether to submit its transcript to rewrite.
 - Use `/model-status` for UX hints or admin dashboards, not as a hard prerequisite before every request.
 
 ### 2) Handle both auth and gateway behavior
@@ -204,21 +216,21 @@ In production, public callers usually go through a reverse proxy that performs O
 ### 4) Respect validation limits
 
 - Rewrite input is capped by `REWRITE_MAX_TEXT_LENGTH` (default 200 Unicode characters; configurable up to 4,000).
-- For the planned worksheet recording workflow, explicitly configure `REWRITE_MAX_TEXT_LENGTH=2000` and `REWRITE_MAX_COMPLETION_TOKENS=4096`. These are starting settings for validation, not a guarantee that every rewrite will fit its output budget. Existing defaults remain unchanged. See the [deployment guide](docs/deployment-guide.md#worksheet-rewrite-profile).
+- For a worksheet recording workflow, explicitly configure `REWRITE_MAX_TEXT_LENGTH=2000` and `REWRITE_MAX_COMPLETION_TOKENS=4096`. These are starting settings for validation, not a guarantee that every rewrite will fit its output budget. Existing defaults remain unchanged. See the [deployment guide](docs/guides/deployment-guide.md#worksheet-rewrite-profile).
 - T2A input is capped by `T2A_MAX_TEXT_LENGTH` (default 200; configurable from 1 to 1,000). Integer settings above 1,000 clamp to 1,000; malformed, fractional, or non-positive settings fall back to 200. Unset or blank settings use 200.
 - Both input limits are application budget controls for usage and spending, not provider capability limits. They count Unicode code points after trimming surrounding whitespace. Raising the T2A ceiling adds operator flexibility while retaining an explicit cap; existing valid settings and the default remain unchanged.
 - T2A option ranges are validated server-side, so client apps should pre-validate where possible to give better UX.
 
 ### 5) Treat optional metadata as additive
 
-Rewrite may include optional `usage` and `artifacts`. T2A JSON mode includes provider metadata. Apps should rely on the stable core fields first:
+Rewrite may include optional `usage`. Internal provider artifacts are not exposed by the current rewrite response writer. T2A JSON mode includes provider metadata. Apps should rely on the stable core fields first:
 
 - Rewrite: `ok`, `result`
 - T2A JSON mode: `ok`, `audio`, `format`, `mime`/`contentType`, `size`
 
 ## Environment variables
 
-The canonical environment reference is `docs/env-reference.md`.
+The canonical environment reference is `docs/reference/env-reference.md`.
 
 Use canonical names from that document for new deployments. Deprecated aliases
 remain supported for one compatibility window and emit startup warnings when
@@ -250,7 +262,9 @@ Protected routes require **two trusted signals**:
 1. `X-Authenticated-Email`
 2. `X-Bridge-Auth`
 
-The backend trusts `X-Authenticated-Email` only when `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET` and the request comes from a trusted proxy source. If either signal is missing or invalid, protected routes return `401 AUTH_REQUIRED`.
+The route auth middleware checks the trimmed shared secret and a trimmed, lowercased email header. Missing email or a missing/wrong secret returns `401 AUTH_REQUIRED`; comma-separated email values return `401 AUTH_HEADER_INVALID`; a disallowed domain suffix returns `403 FORBIDDEN_DOMAIN`. It does not perform full email syntax validation.
+
+`BRIDGE_TRUSTED_PROXY_ADDRESSES` controls whether identity headers become a user-based rate-limit key; it is not an additional route authorization check. Keep the loopback-only listener and proxy header stripping in place. The bridge does not validate browser bearer tokens or OIDC sessions itself.
 
 Deployment requirements:
 
@@ -265,15 +279,16 @@ Canonical public namespace:
 
 - `POST /api/rewrite-bridge/rewrite`
 - `POST /api/rewrite-bridge/t2a`
+- `POST /api/rewrite-bridge/transcriptions` (opt-in proxy mapping)
 - `GET /api/rewrite-bridge/model-status`
 - `GET /api/rewrite-bridge/healthz`
 - `GET /api/rewrite-bridge/readyz`
 
 Internal loopback routes remain:
 
-- `POST /rewrite`
-- `POST /t2a`
-- `POST /api/t2a`
+- `POST /rewrite` and `POST /api/rewrite`
+- `POST /t2a` and `POST /api/t2a`
+- `POST /transcriptions` and `POST /api/transcriptions`
 - `GET /model-status`
 - `GET /healthz`
 - `GET /readyz`
@@ -284,7 +299,7 @@ Internal loopback routes remain:
 
 - `stream=false` or omitted returns JSON with `result`.
 - `stream=true` is supported only when the selected provider supports it and rewrite streaming env toggles resolve to enabled; otherwise the API returns `501 STREAMING_UNSUPPORTED`.
-- Downstream apps should branch on `ok` and treat `usage`/`artifacts` as optional.
+- Downstream apps should branch on `ok` and treat `usage` as optional.
 
 ### T2A
 
@@ -292,11 +307,17 @@ Internal loopback routes remain:
 - `response_mode=base64_json` returns JSON with base64 audio.
 - `stream=true` is rejected with `501 STREAMING_UNSUPPORTED` in v1.
 - The bridge does not write generated audio to disk.
+- MiniMax normalizes declared audio format and MIME, including nested response wrappers, and uses the requested format when metadata is absent. Binary filenames and JSON labels agree; contradictory or unsupported declarations return a controlled 502. Bytes are not transcoded. See the [T2A contract](docs/reference/api-reference.md#2-post-t2a).
 
 ## API and deployment docs
 
-- Environment reference: `docs/env-reference.md`
-- Exact endpoint contracts: `docs/api-reference.md`
-- Deployment guide: `docs/deployment-guide.md`
-- Auth validation runbook: `docs/runbooks/auth-matrix-manual-cli-checklist.md`
-- Browser rewrite widget notes: `public/rewrite-widget/README_rewrite_widget.md`
+- [Documentation index](docs/README.md)
+- [Environment reference](docs/reference/env-reference.md)
+- [Exact endpoint contracts](docs/reference/api-reference.md)
+- [Caller guide](docs/guides/rewrite-t2a-api-calling-reference.md)
+- [Deployment guide](docs/guides/deployment-guide.md)
+- [Transcription deployment runbook](docs/runbooks/transcription-deployment.md)
+- [Auth validation runbook](docs/runbooks/auth-matrix-manual-cli-checklist.md)
+- [Browser rewrite widget guide](docs/guides/rewrite-widget.md)
+- [Current runtime architecture](docs/architecture/runtime.md)
+- [Documentation review and decisions](docs/reviews/2026-10-06-documentation-review.md)

@@ -16,13 +16,13 @@ configuration. Credentials are read through Google Application Default Credentia
 | `TRANSCRIPTION_GOOGLE_PROJECT` | Required when enabled | Google Cloud project ID (not project number). |
 | `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | `us` or `eu`; endpoint and recognizer location always match. |
 | `TRANSCRIPTION_ALLOWED_ORIGINS` | Empty | Comma-separated exact worksheet HTTP(S) origins without paths/trailing slashes. Required for browser uploads with Origin headers; cross-site requests are rejected. Authenticated server-side calls without Origin remain supported. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | ADC default | Absolute path to a server-readable credential file; never commit the file. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | ADC discovery | Optional SDK credential-file path; use an absolute server-readable path for deployment and never commit the file. If unset, the SDK uses other ADC sources. |
 | `TRANSCRIPTION_TEMP_DIRECTORY` | OS temp directory + `rewrite-bridge-transcriptions` | Dedicated absolute, private service-owned directory; production recommendation `/var/lib/rewrite-bridge/transcriptions`. |
 | `TRANSCRIPTION_MAX_UPLOAD_BYTES` | `20971520` | Audio bytes; range 1,024–20 MiB, plus separate 64 KiB multipart allowance. |
 | `TRANSCRIPTION_MAX_AUDIO_SECONDS` | `60` | Decoded recording duration; range 1–60 s. |
 | `TRANSCRIPTION_MAX_CONCURRENCY` | `10` | Total admitted uploads/work; range 1–20. One active request per user is fixed. |
 | `TRANSCRIPTION_CONVERSION_CONCURRENCY` | `2` | Active conversion sequences; range 1–4. Each FFmpeg process uses one codec/filter thread. |
-| `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per-user request attempts per fixed minute window; range 1–60. |
+| `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per resolved user/IP request attempts per fixed minute window; range 1–60. The separate one-active-request lock uses authenticated email. |
 | `TRANSCRIPTION_UPLOAD_TIMEOUT_MS` | `120000` | Total upload receive deadline; range 1,000–120,000 ms. |
 | `TRANSCRIPTION_CONVERSION_TIMEOUT_MS` | `15000` | Probe/decode/encode time budget after obtaining a conversion slot; range 1,000–60,000 ms. |
 | `TRANSCRIPTION_GOOGLE_TIMEOUT_MS` | `60000` | Google RPC deadline; range 1,000–120,000 ms, bounded by remaining total deadline. |
@@ -32,7 +32,12 @@ configuration. Credentials are read through Google Application Default Credentia
 
 Model `chirp_3`, language `yue-Hant-HK`, and output mono 16 kHz FLAC are fixed to
 the reviewed/tested profile. `GOOGLE_SDK_NODE_LOGGING` must be empty/unset for
-privacy. See [deployment checkpoints](transcription-deployment.md), including
+privacy; any non-empty value, including `false` or `0`, blocks enabled startup.
+Unset numeric transcription settings use defaults, but empty/whitespace values
+coerce to zero and fail their positive bounds. The bridge validates transcription
+configuration at startup; it does not preflight ADC credentials or Google access.
+Credential initialization and recognition occur only when a request reaches the
+Google provider after upload/media validation. See [deployment checkpoints](../runbooks/transcription-deployment.md), including
 Google access verification and the separate rewrite limit profile.
 
 ## Naming Model
@@ -55,9 +60,9 @@ not silently fall back to another provider.
 |---|---:|---|
 | `BRIDGE_INTERNAL_AUTH_SECRET` | empty | Shared secret expected in `X-Bridge-Auth` for protected routes. |
 | `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` | `@hs.edu.hk` | Required suffix for `X-Authenticated-Email`. |
-| `BRIDGE_TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Proxy source addresses allowed to forward trusted identity headers. |
-| `BRIDGE_EXPRESS_TRUST_PROXY` | `loopback` | Express `trust proxy` setting for client IP derivation. Accepts `false`, `loopback`, or hop count. |
-| `BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT` | `false` | Enables provider raw/debug logging with sensitive fields redacted. |
+| `BRIDGE_TRUSTED_PROXY_ADDRESSES` | `127.0.0.1,::1` | Exact socket source addresses allowed to supply user-based limiter identity when the shared secret matches. Not a route authorization allowlist. |
+| `BRIDGE_EXPRESS_TRUST_PROXY` | `loopback` | Express `trust proxy` setting for client IP derivation. Accepts `false`/`0`, `loopback`, or integer hop count 1–32; invalid values fall back to `loopback`. |
+| `BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT` | `false` | Enables rewrite/T2A raw/debug logging. Credential-like keys are redacted; user text, prompts and provider audio payloads are not automatically removed. Keep disabled for normal operation. Does not enable Google transcription logging. |
 | `MINIMAX_API_KEY` | empty | Shared Minimax API key used by Minimax-backed rewrite and T2A paths. |
 
 ## Rewrite Service
@@ -66,7 +71,7 @@ not silently fall back to another provider.
 |---|---:|---|
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–4,000; invalid or out-of-range settings fall back to 200. Worksheet starting profile: 2,000. |
-| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192. Worksheet starting profile: 4,096. Tokens are not characters. |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192, invalid/out-of-range values fall back to 300. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
 | `REWRITE_COLD_INVOKE_TIMEOUT_MS` | `120000` | Provider invocation timeout during cold/warming rewrite phases. |
 | `REWRITE_STREAMING_ENABLED` | `false` | Service-level rewrite streaming toggle. |
@@ -180,17 +185,17 @@ only supported value. Unknown explicit values fail with controlled
 | `RATE_LIMIT_T2A_IP_MAX_REQUESTS` | `10` | T2A IP fallback budget. |
 | `RATE_LIMIT_OPS_WINDOW_SEC` | `60` | Health/readiness route window. |
 | `RATE_LIMIT_OPS_MAX_REQUESTS` | `1000` | Health/readiness route budget. |
-| `ADMISSION_MAX_CONCURRENCY` | `4` | Shared admission max concurrency. |
-| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Shared admission queue size. |
-| `ADMISSION_MAX_WAIT_MS` | `15000` | Shared admission max queue wait. |
-| `<PROVIDER>_MAX_CONCURRENCY` | unset | Provider-wide admission concurrency override, for example `OLLAMA_MAX_CONCURRENCY`. |
-| `<PROVIDER>_MAX_QUEUE_SIZE` | unset | Provider-wide admission queue override. |
-| `<PROVIDER>_MAX_WAIT_MS` | unset | Provider-wide admission wait override. |
+| `ADMISSION_MAX_CONCURRENCY` | `4` | Default concurrency for each rewrite/T2A provider pool (1–1,000), not an aggregate process cap. |
+| `ADMISSION_MAX_QUEUE_SIZE` | `100` | Default waiting queue size for each provider pool (0–10,000). |
+| `ADMISSION_MAX_WAIT_MS` | `15000` | Default maximum wait in each provider queue (0–600,000 ms). |
+| `<PROVIDER>_MAX_CONCURRENCY` | unset | Pool concurrency override for `OLLAMA` or `MINIMAX` (1–1,000), shared across services using that provider. |
+| `<PROVIDER>_MAX_QUEUE_SIZE` | unset | `OLLAMA` or `MINIMAX` queue override (0–10,000). |
+| `<PROVIDER>_MAX_WAIT_MS` | unset | `OLLAMA` or `MINIMAX` wait override (0–600,000 ms). |
 
 ## Deprecated Aliases
 
-Deprecated aliases still work for one compatibility window. Canonical names win
-when both are set.
+Deprecated aliases still work for one compatibility window. Valid preferred service/provider settings win over legacy values. See the
+resolution rules below for invalid preferred values and bridge-level aliases.
 
 | Deprecated alias | Canonical name |
 |---|---|
@@ -223,3 +228,52 @@ when both are set.
 | `MINIMAX_T2A_SPEED` | `T2A_MINIMAX_SPEED` |
 | `MINIMAX_T2A_VOLUME` | `T2A_MINIMAX_VOLUME` |
 | `MINIMAX_T2A_PITCH` | `T2A_MINIMAX_PITCH` |
+
+## Resolution and validation rules
+
+There are two configuration readers; precedence is not identical everywhere:
+
+- Rewrite/T2A service configuration selects the first non-empty preferred key in the order shown below. If that selected value is invalid, it checks the first non-empty legacy key, then uses the code default. It does not continue to another preferred alias after an invalid first choice.
+- Bridge/auth/lifecycle aliases handled by `lib/env-config.js` select a non-empty canonical value before deprecated aliases. Invalid numeric/boolean values fall back to the configured default; an invalid canonical value does not cause a legacy alias to win.
+- Rewrite provider values must be exactly `ollama` or `minimax`; unsupported values fail startup. T2A trims/lowercases its selector; unsupported values produce controlled request errors.
+- Rewrite streaming preference is `REWRITE_STREAMING_ENABLED` → `REWRITE_PROVIDER_STREAMING_ENABLED` → `REWRITE_<SELECTED_PROVIDER>_STREAMING_ENABLED`. The first non-empty value wins; these are alternatives, not independent switches combined with OR. Values accept `true`/`1` or `false`/`0` after trimming/lowercasing. Provider streaming capability must also be available.
+- Provider settings prefer `<SERVICE>_<PROVIDER>_<SETTING>` → `<SERVICE>_PROVIDER_<PROVIDER>_<SETTING>`. T2A additionally accepts `T2A_URL`, `T2A_MODEL`, `T2A_VOICE_ID`, `T2A_SPEED`, `T2A_VOLUME` and `T2A_PITCH` after those scoped names and before the corresponding `MINIMAX_T2A_*` legacy key.
+- `WARMUP_ON_START`, passive fail-open and provider debug flags also accept `yes`/`on` and `no`/`off`. Transcription has its own strict reader: `TRANSCRIPTION_ENABLED` accepts only `true`/`false`/`1`/`0` (case-insensitive, without whitespace trimming). An invalid enable flag fails startup even if other transcription settings would be unused.
+- Invalid rate-limit values fail startup. Enabled transcription settings fail startup when invalid. Most rewrite/T2A/lifecycle numeric values instead warn and fall back; the T2A input ceiling specifically clamps oversized positive integers.
+
+T2A environment voice defaults use the same ranges as raw request controls: speed 0.5–2, volume 0–10, pitch -12–12. Named `voice_choice` presets bypass those generic voice defaults; they introduce no environment variables. Audio rate, bitrate, format, mono channel, default language boost, zero additional effects and hex upstream output are code defaults, not configurable environment settings.
+
+### Lifecycle bounds and derived defaults
+
+| Setting | Accepted range / derived value |
+|---|---|
+| Rewrite ready invocation | 0–300,000 ms |
+| Rewrite cold invocation | 0–600,000 ms |
+| T2A invocation | 1,000–300,000 ms |
+| Ollama readiness cache | 0–30,000 ms |
+| Ollama readiness timeout | 0–10,000 ms |
+| Ollama warmup trigger timeout | 0–300,000 ms |
+| Ollama warmup retrigger window | 0–120,000 ms |
+| MiniMax passive ready grace | 0–86,400,000 ms |
+| MiniMax passive failure threshold | 1–100 |
+| MiniMax recovery cooldown | 0–600,000 ms |
+| Startup maximum wait | 0–900,000 ms |
+| Startup retry interval | 0–60,000 ms |
+| `WARMUP_RETRY_AFTER_SEC` | 1–30; otherwise `min(3, max(2, ceil(readinessCacheMs / 1000)))`, default 2 s |
+| `READY_REWRITE_STRICT_PROBE_MAX_AGE_MS` | 0–30,000 ms; default `min(1000, readinessCacheMs)` |
+| `MINIMAX_READINESS_TIMEOUT_MS` | 0–30,000 ms; parsed but passive readiness makes no network probe |
+
+Rate-limit windows accept 1–3,600 seconds; request budgets accept 1–100,000. The “global” policy is a baseline per identity across non-ops routes, not a single aggregate counter. Admission defaults apply independently to each provider pool. Rate counters and admission queues reset when the process restarts; transcription is separate from rewrite/T2A admission.
+
+## Standalone diagnostic-script settings
+
+The scripts in `scripts/` are optional diagnostics, not runtime configuration loaders. They can call billable providers directly and print provider responses or generated content. They are not run by `npm test`.
+
+| Script | Settings read / behavior |
+|---|---|
+| `transcription-smoke.js` | `BRIDGE_INTERNAL_AUTH_SECRET`, `TRANSCRIPTION_TEST_EMAIL`; sends one recording to the local bridge. Export these values before launching Node. `--show-transcript` explicitly prints the result. |
+| `minimax-t2a-smoke.js` | `MINIMAX_API_KEY` (or script-only `MINIMAX_GROUP_API_KEY`) and `MINIMAX_T2A_URL`, `_MODEL`, `_VOICE_ID`, `_SPEED`, `_VOLUME`, `_PITCH`. Direct provider call; writes an output file. Script defaults are `https://api.minimaxi.chat/v1/t2a_v2`, `speech-02-hd`, `female-tianmei`, not the bridge defaults. Canonical `T2A_MINIMAX_*` settings are not read. |
+| `minimax-anthropic-smoke.js` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`, `ANTHROPIC_SYSTEM`, `ANTHROPIC_MAX_TOKENS`; direct provider call. Defaults to `MiniMax-M2.5` and 512 output tokens. |
+| `minimax-anthropic-stream-smoke.js` | Same `ANTHROPIC_*` keys, direct streaming call; defaults to `MiniMax-M2.5` and 1,000 output tokens. |
+
+The `ANTHROPIC_*` and `MINIMAX_GROUP_API_KEY` names above are script-only. They do not configure the bridge's rewrite/T2A providers. Test-only `TEST_FFMPEG_PATH` and `TEST_FFPROBE_PATH` select binaries for `tests/transcription-media.test.js`, not production media processing.

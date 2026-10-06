@@ -1,7 +1,9 @@
 # Service/provider compatibility baseline
 
-Status: current-behavior baseline for abstraction PR 1, checked against `main`
-commit `2a453d040506b909ada41842eed3f7b2347dbf82` on 2026-10-06.
+Status: established by PR #128 and corrected by PR #129; reconciled with the
+repository documentation against main `31ce143878ef0f41627b95e8511ac268b67adba5` on
+2026-10-06. See the [documentation index](../README.md), [current runtime](runtime.md),
+and [API reference](../reference/api-reference.md).
 PR 1 established the tests/documentation baseline. The corrective PR stacked on
 PR #128 updates the two confirmed defects below. Provider abstraction and raw-ID
 retirement remain future work.
@@ -123,8 +125,9 @@ local mock upstreams; it does not contact paid services.
 PR 1 adds nine real-server HTTP cases, one admission-expiry case, and three
 transcription cases. Existing transcription assertions also cover exact success
 fields/timings, mapped errors/retry headers, and broader restart cleanup behavior.
-The pre-change suite had 203 tests. Local verification with Node.js 24 passed all
-216 tests, with zero failures or skips. Coverage remains deliberately bounded:
+The pre-PR1 suite had 203 tests; PR #128 passed 216. PR #129 expanded this to
+238 passing tests, with zero failures or skips, including nested audio-metadata
+coverage. These counts describe successive checkpoints, not competing baselines. Coverage remains deliberately bounded:
 
 - No live provider/model quality, real Google credentials, billing behavior, Apache
   OIDC deployment, or worksheet UI is certified by these local tests.

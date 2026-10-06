@@ -3,17 +3,17 @@
 This is an opt-in backend for completed worksheet recordings. The browser submits
 one recording to the authenticated bridge, receives a transcript, then calls the
 existing rewrite endpoint. The student reviews and edits before submitting.
-There is no Python daemon, job polling API, automatic rewrite or worksheet UI in
-this backend change. Keep the existing Whisper service stopped and disabled.
+The repository implements no Python daemon, job polling API, automatic rewrite
+or worksheet UI. The Google path does not require Whisper. A separate Whisper
+installation or its service state cannot be established from this repository.
+See the [API contract](../reference/api-reference.md#transcription) and
+[environment settings](../reference/env-reference.md#transcription).
 
 ## Reviewed configuration
 
 - Google Cloud Speech-to-Text **V2**, `chirp_3`, `us`, `yue-Hant-HK`.
-- The initial VPS experiment succeeded with mono 16 kHz FLAC. Every upload is
-  decoded and normalized to that format; declaring a MIME type does not bypass validation.
-- Google lists US/EU multi-regions; its current Chirp 3 guide marks Cantonese as
-  Preview. Actual project access must be checked before rollout. Google AI Studio
-  keys/credits are not used for this Google Cloud service.
+- `lib/transcription-media.js` decodes every accepted upload to mono 16 kHz FLAC; declaring a MIME type does not bypass validation. Synthetic-media tests verify this local path, not live Google recognition accuracy.
+- The code permits `us` or `eu` and fixes `chirp_3` / `yue-Hant-HK`. Confirm current Google model/language availability, project access and quota before rollout; the repository cannot establish these external facts. Google AI Studio keys/credits are not used by this Google Cloud SDK path.
 - Use Application Default Credentials (ADC) with the existing service account
   granted `roles/speech.client` on the configured project. Do not grant Owner or
   Editor. No bucket, named recognizer, or Google Files upload is required.
@@ -22,7 +22,7 @@ this backend change. Keep the existing Whisper service stopped and disabled.
   Remaining admitted requests wait for conversion, not for a serial transcription
   worker. Google quota and rewrite concurrency remain separate constraints.
 
-Official references, checked 2026-09-06:
+Official references (links retained from the earlier deployment guide; external content was not revalidated in the 2026-10-06 repository review):
 [Chirp 3 model and locations](https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3),
 [short audio recognition](https://docs.cloud.google.com/speech-to-text/docs/sync-recognize),
 [quotas](https://docs.cloud.google.com/speech-to-text/docs/quotas),
@@ -30,7 +30,7 @@ Official references, checked 2026-09-06:
 
 ## 1. Inspect and back up before deployment
 
-Use a reviewed checkout of this PR. Preserve the currently deployed program,
+Use a reviewed release commit that includes the transcription backend. Preserve the currently deployed program,
 package lock, environment file, systemd unit/drop-ins, and Apache configuration
 in a root-only backup directory. Record the current commit and service state.
 Do not switch a running production checkout to an unreviewed branch.
@@ -52,7 +52,7 @@ Keep OS FFmpeg security updates current and repeat media tests after upgrades.
 
 ## 2. Private runtime directory and credentials
 
-The following examples assume the existing service account is `rewrite-bridge`.
+The following examples use a service account named `rewrite-bridge`; the checked-in generic unit instead uses `hsadmin`.
 Adapt only after checking the live unit's User and Group:
 
 ```bash
@@ -73,9 +73,9 @@ Use `sudoedit /etc/default/rewrite-bridge` to add the following alongside the
 existing settings. Preserve current auth and provider values. Keep the file
 root-owned with mode 0600; systemd reads it before switching service identity.
 
-```bash
+```env
 TRANSCRIPTION_ENABLED=true
-TRANSCRIPTION_GOOGLE_PROJECT=worksheet-chirp-test
+TRANSCRIPTION_GOOGLE_PROJECT=your-google-project-id
 TRANSCRIPTION_GOOGLE_LOCATION=us
 TRANSCRIPTION_ALLOWED_ORIGINS=https://your-worksheet-host.example
 GOOGLE_APPLICATION_CREDENTIALS=/etc/rewrite-bridge/google-speech.json
@@ -94,7 +94,8 @@ smoke checks without an Origin header still require the usual bridge authenticat
 No CORS access is granted to other sites.
 
 Leave `GOOGLE_SDK_NODE_LOGGING` unset/empty. Enabling transcription with SDK
-payload logging enabled fails configuration validation. Do not enable gRPC or
+logging configured to any non-empty value (even `false` or `0`) fails configuration
+validation. Do not enable gRPC or
 HTTP payload tracing. The bridge's rewrite provider debug setting does not enable
 transcription logging. Do not log recordings or real transcripts in Apache, Node,
 or an external monitoring service.
@@ -102,7 +103,7 @@ or an external monitoring service.
 For the live systemd service, ensure `UMask=0077`. If its sandbox restricts writes,
 allow `/var/lib/rewrite-bridge/transcriptions`. Confirm it can read the credential
 path and execute FFmpeg/FFprobe. Preserve the existing loopback bind and unit
-settings; there is no need to modify Whisper's unit. After installing reviewed
+settings; no separate speech daemon is needed. After installing reviewed
 source and dependencies, reload the unit only if changed and restart the bridge.
 
 ## 4. Verify locally before exposing the route
@@ -112,8 +113,9 @@ source and dependencies, reload the unit only if changed and restart the bridge.
    prove Google connectivity.
 2. An unauthenticated `POST http://127.0.0.1:3001/transcriptions` must return 401.
 3. Run the explicit smoke helper with a non-sensitive test recording. It makes
-   **one billable request**. In a privileged shell, load the bridge's trusted
-   environment without printing it, set `TRANSCRIPTION_TEST_EMAIL` to an allowed
+   **one billable request**. In a privileged shell, export the required values from the bridge's trusted
+   environment without printing them (plain shell assignments are not inherited
+   by Node unless exported), set `TRANSCRIPTION_TEST_EMAIL` to an allowed
    test account, then execute:
 
 ```bash
@@ -133,8 +135,10 @@ when intentionally inspecting a non-sensitive transcript.
    transcription timings separately. Requests above the configured total limit
    receive `503 TRANSCRIPTION_BUSY`; same-user overlap receives 429.
 6. Verify the private directory is empty after completion, invalid uploads and
-   cancellation. Restart cleanup removes only matching job directories for dead
-   processes, and preserves live-process/unknown files. PID reuse can postpone
+   cancellation. If cleanup logs `TRANSCRIPTION_CLEANUP_FAILED` or storage is
+   unavailable, further requests are rejected until the process is restarted;
+   inspect leftover files and fix permissions/storage first. Restart cleanup removes
+   only matching job directories for dead processes, and preserves live-process/unknown files. PID reuse can postpone
    stale-file removal; inspect any survivors manually while the service is stopped.
 
 Tests use synthetic audio and a fake Google client; they establish local behavior,
@@ -183,11 +187,13 @@ school's external-processing and retention requirements before student rollout.
 To pause: set `TRANSCRIPTION_ENABLED=false` and restart the bridge. Existing
 rewrite/T2A remain available. Remove the new Apache mapping if appropriate.
 For rollback, restore the backed-up source and lockfile, run `npm ci --ignore-scripts`,
-restore previous rewrite-limit settings, and restart; the old code cannot use a
-2,000-character setting. Restore Apache/unit backups only if those were changed.
+restore environment settings compatible with the target commit, and restart.
+The current code supports a 2,000-character rewrite limit. Only commits predating
+the rewrite-limit expansion lack that setting; inspect the rollback target rather
+than assuming every older release rejects it. Restore Apache/unit backups only if those were changed.
 
 To remove permanently, first stop admission and wait for active requests to settle.
 Inspect the dedicated runtime directory before deleting leftover audio. Remove
 the dedicated credential copy and related env settings only after confirming
 they are not used elsewhere; revoke its Google key only when it is no longer
-needed by any test or service. Do not remove the independent Whisper installation.
+needed by any test or service. Manage any independent speech installation separately from this bridge.

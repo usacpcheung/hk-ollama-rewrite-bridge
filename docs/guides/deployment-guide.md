@@ -1,11 +1,11 @@
 # Deployment Guide (hk-ollama-rewrite-bridge)
 
-This guide documents production deployment for both implemented services:
+This guide documents deployment for the two JSON services:
 
 - **Rewrite** via `POST /rewrite`
 - **T2A** via `POST /t2a`
 
-It covers provider selection, environment configuration, reverse-proxy setup, and post-deploy validation.
+It covers provider selection, environment configuration, reverse-proxy setup, and post-deploy validation. The opt-in transcription backend is also implemented; use the separate [transcription runbook](../runbooks/transcription-deployment.md) for media tools, Google credentials and upload proxy settings. These are repository examples, not a record of the live deployment.
 
 ## 1) Prerequisites
 
@@ -27,6 +27,8 @@ node -v
 npm -v
 ```
 
+Confirm `node -v` is at least 22; distro packages may be older. Use a supported Node release before installing dependencies.
+
 ## 2) Clone and install
 
 Recommended location:
@@ -40,7 +42,7 @@ sudo mkdir -p /opt/hk-ollama-rewrite-bridge
 sudo chown -R "$USER":"$USER" /opt/hk-ollama-rewrite-bridge
 git clone <YOUR_GIT_REPO_URL> /opt/hk-ollama-rewrite-bridge
 cd /opt/hk-ollama-rewrite-bridge
-npm ci
+npm ci --ignore-scripts
 ```
 
 Optional sanity run:
@@ -97,7 +99,7 @@ that suffix in `REWRITE_MINIMAX_ANTHROPIC_BASE_URL`.
 
 ### T2A service
 
-The current T2A service resolves to a Minimax-compatible path even though it still exposes `T2A_PROVIDER` for service-scoped config consistency.
+`T2A_PROVIDER=minimax` is the only supported T2A selection. Unsupported explicit selections return `501 UNSUPPORTED_PROVIDER` on requests without falling back to MiniMax. They do not fail rewrite startup or make `/readyz` test T2A.
 
 Recommended T2A settings:
 
@@ -105,7 +107,7 @@ Recommended T2A settings:
 T2A_PROVIDER=minimax
 T2A_MINIMAX_API_URL=https://api.minimax.io/v1/t2a_v2
 T2A_MINIMAX_MODEL=speech-2.6-hd
-T2A_MINIMAX_VOICE_ID=Cantonese_ProfessionalHost（F)
+T2A_MINIMAX_VOICE_ID="Cantonese_ProfessionalHost（F)"
 T2A_MINIMAX_SPEED=1
 T2A_MINIMAX_VOLUME=1
 T2A_MINIMAX_PITCH=0
@@ -129,7 +131,7 @@ Then restart the bridge. Downstream applications do not need to be redeployed.
 
 Example `/etc/default/rewrite-bridge`:
 
-```bash
+```env
 REWRITE_PROVIDER=ollama
 REWRITE_OLLAMA_MODEL=qwen2.5:3b-instruct
 REWRITE_OLLAMA_URL=http://127.0.0.1:11434/api/generate
@@ -140,7 +142,7 @@ REWRITE_MAX_COMPLETION_TOKENS=300
 T2A_PROVIDER=minimax
 T2A_MINIMAX_API_URL=https://api.minimax.io/v1/t2a_v2
 T2A_MINIMAX_MODEL=speech-2.6-hd
-T2A_MINIMAX_VOICE_ID=Cantonese_ProfessionalHost（F)
+T2A_MINIMAX_VOICE_ID="Cantonese_ProfessionalHost（F)"
 T2A_MAX_TEXT_LENGTH=200
 T2A_INVOKE_TIMEOUT_MS=30000
 
@@ -152,10 +154,10 @@ BRIDGE_TRUSTED_PROXY_ADDRESSES=127.0.0.1,::1
 
 ### Worksheet rewrite profile
 
-For the planned record → transcribe → rewrite → student edit workflow, use these
+For a record → transcribe → rewrite → student edit workflow, use these
 explicit overrides in the existing bridge environment file:
 
-```bash
+```env
 REWRITE_MAX_TEXT_LENGTH=2000
 REWRITE_MAX_COMPLETION_TOKENS=4096
 ```
@@ -175,11 +177,11 @@ the configured backend limit before exposing longer input to students.
 Validate long mixed-language answers for preserved meaning, completion, latency
 and actual token usage before rollout. Keep the original transcript available
 if rewriting fails or is incomplete. This profile does not enable transcription;
-the Google provider and recording UI are separate implementation steps.
+enable the implemented Google backend separately using the [transcription runbook](../runbooks/transcription-deployment.md). The recording UI is outside this repository.
 
 ## 5) Environment reference
 
-The canonical environment reference is `docs/env-reference.md`.
+The canonical environment reference is [environment settings](../reference/env-reference.md).
 
 Use canonical names from that document for new deployments. Deprecated aliases
 remain supported for one compatibility window and emit startup warnings when
@@ -187,10 +189,11 @@ used.
 
 ## 6) systemd setup
 
-Use `systemd/rewrite-bridge.service` and ensure install paths match.
+Inspect `systemd/rewrite-bridge.service` before copying it: the checked-in example uses `User=hsadmin` and `/workspace/hk-ollama-rewrite-bridge` for `WorkingDirectory` and `ExecStart`. For the `/opt` installation above, edit the installed unit to the actual service account and paths. The repository template does not include FFmpeg sandbox access, `UMask=0077` or a transcription runtime directory; those are covered by the transcription runbook.
 
 ```bash
 sudo cp /opt/hk-ollama-rewrite-bridge/systemd/rewrite-bridge.service /etc/systemd/system/rewrite-bridge.service
+sudoedit /etc/systemd/system/rewrite-bridge.service
 sudo systemctl daemon-reload
 sudo systemctl enable rewrite-bridge
 sudo systemctl restart rewrite-bridge
@@ -212,14 +215,18 @@ sudo a2enmod proxy proxy_http headers auth_openidc
 sudo systemctl restart apache2
 ```
 
-Use `apache/proxy-snippet.conf` as the hardened baseline.
+Use `apache/proxy-snippet.conf` as the baseline and inspect it before installation. It maps rewrite and ops routes and comments out transcription; it currently omits T2A. Add the T2A mapping below to the deployed vhost. It also retains the protected legacy `/api/rewrite` public alias.
+
+The sample uses interactive `AuthType openid-connect`; the public curl examples use an authenticated session cookie jar. Bearer-token acceptance depends on separate gateway configuration.
 
 Important hardening rules:
 
 - Strip inbound trusted headers from callers.
 - Inject trusted headers only after successful OIDC/auth.
 - Keep backend on loopback only.
-- Protect both rewrite and T2A when they are exposed publicly.
+- Protect rewrite, T2A and enabled transcription when exposed publicly. The baseline protects the entire `/api/rewrite-bridge` namespace, including model status and health.
+- Strip caller-supplied `X-Forwarded-For`, `X-Forwarded-Proto` and `Forwarded` before forwarding so client-IP fallback uses the actual connection.
+- The backend has no OIDC flow or proxy-source authorization check; the trusted address setting controls limiter identity.
 
 ### Canonical route mapping
 
@@ -240,6 +247,9 @@ ProxyPassReverse /api/rewrite-bridge/readyz http://127.0.0.1:3001/readyz
     Require valid-user
 </Location>
 
+RequestHeader unset X-Forwarded-For
+RequestHeader unset X-Forwarded-Proto
+RequestHeader unset Forwarded
 RequestHeader unset X-Authenticated-Email
 RequestHeader unset X-Authenticated-User
 RequestHeader unset X-Authenticated-Subject
@@ -280,7 +290,7 @@ curl -i -sS http://127.0.0.1:3001/t2a   -H 'Content-Type: application/json'   -H
 Expected behavior:
 
 - `healthz` returns `200 {"ok":true}` while process is up.
-- `readyz` may return `503` during rewrite startup warmup.
+- `readyz` may return `503` during rewrite startup warmup or MiniMax recent-failure/missing-key states. It checks rewrite only; it does not verify T2A or Google.
 - Rewrite may return `202` while Ollama is warming.
 - T2A should return `200` when auth, rate limits, and provider config are valid.
 - `429 RATE_LIMITED` and `503 ADMISSION_OVERLOADED` remain possible on either protected route.
@@ -304,4 +314,4 @@ Expected behavior:
 
 - Confirm proxy strips inbound trusted headers.
 - Confirm proxy injects `X-Authenticated-Email` and `X-Bridge-Auth` after auth.
-- Re-run the manual auth matrix in `docs/runbooks/auth-matrix-manual-cli-checklist.md`.
+- Re-run the [manual auth matrix](../runbooks/auth-matrix-manual-cli-checklist.md).
