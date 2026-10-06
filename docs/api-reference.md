@@ -423,7 +423,9 @@ The headers above describe MP3. For WAV the MIME is `audio/wav` and filename is
 `speech.wav`; for PCM they are `audio/pcm` and `speech.pcm`. JSON success uses the
 same normalized `format`, `mime`, and `contentType`. MiniMax's `data.format`,
 `extra_info.audio_format`, and top-level/nested `content_type` declarations must
-agree when present; recognized MIME aliases are normalized. Declared format takes
+agree when present; recognized MIME aliases are normalized. For wrapped or
+array-nested audio, declarations are read along the selected audio ancestry,
+including its enclosing wrapper; unrelated sibling payloads are not mixed in. Declared format takes
 precedence over the request; absent declarations use the requested format (default
 MP3). Unsupported or contradictory metadata returns 502 `PROVIDER_ERROR` instead
 of potentially mislabeled audio. The bridge does not inspect codecs to independently

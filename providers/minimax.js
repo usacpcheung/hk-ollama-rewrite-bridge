@@ -204,7 +204,7 @@ function createMinimaxProvider({
         return failureResult(mapError(new Error(extractedAudio.reason), { kind: extractedAudio.reason }));
       }
 
-      const providerMeta = extractMinimaxT2AProviderMetadata(data, extractedAudio.sourcePath, body.audio_setting.format);
+      const providerMeta = extractMinimaxT2AProviderMetadata(data, extractedAudio.sourcePath, body.audio_setting.format, extractedAudio.metadataNodes);
       if (!providerMeta) {
         return failureResult(mapError(new Error('invalid_audio_metadata'), { kind: 'schema_drift' }));
       }
@@ -1116,13 +1116,15 @@ function extractMinimaxT2AAudio(payload) {
 
   for (const candidate of directCandidates) {
     if (isLikelyHexAudio(candidate.value)) {
-      return { ok: true, hexAudio: candidate.value, sourcePath: candidate.path, search: 'direct' };
+      return { ok: true, hexAudio: candidate.value, sourcePath: candidate.path, search: 'direct',
+        metadataNodes: candidate.path.startsWith('data.') ? [payload, payload.data]
+          : candidate.path.startsWith('base_resp.') ? [payload, payload.base_resp] : [payload] };
     }
   }
 
   const deepMatch = deepFindHexAudio(payload);
   if (deepMatch) {
-    return { ok: true, hexAudio: deepMatch.value, sourcePath: deepMatch.path, search: 'deep' };
+    return { ok: true, hexAudio: deepMatch.value, sourcePath: deepMatch.path, search: 'deep', metadataNodes: deepMatch.metadataNodes };
   }
 
   if (payload && typeof payload === 'object') {
@@ -1132,13 +1134,13 @@ function extractMinimaxT2AAudio(payload) {
   return { ok: false, reason: 'schema_drift' };
 }
 
-function deepFindHexAudio(node, path = 'root', seen = new WeakSet()) {
+function deepFindHexAudio(node, path = 'root', seen = new WeakSet(), metadataNodes = []) {
   if (node == null) {
     return null;
   }
 
   if (typeof node === 'string') {
-    return isLikelyHexAudio(node) ? { value: node, path } : null;
+    return isLikelyHexAudio(node) ? { value: node, path, metadataNodes } : null;
   }
 
   if (typeof node !== 'object') {
@@ -1149,10 +1151,11 @@ function deepFindHexAudio(node, path = 'root', seen = new WeakSet()) {
     return null;
   }
   seen.add(node);
+  const ancestors = Array.isArray(node) ? metadataNodes : [...metadataNodes, node];
 
   if (Array.isArray(node)) {
     for (let index = 0; index < node.length; index += 1) {
-      const found = deepFindHexAudio(node[index], `${path}[${index}]`, seen);
+      const found = deepFindHexAudio(node[index], `${path}[${index}]`, seen, ancestors);
       if (found) {
         return found;
       }
@@ -1161,7 +1164,7 @@ function deepFindHexAudio(node, path = 'root', seen = new WeakSet()) {
   }
 
   for (const [key, value] of Object.entries(node)) {
-    const found = deepFindHexAudio(value, path === 'root' ? key : `${path}.${key}`, seen);
+    const found = deepFindHexAudio(value, path === 'root' ? key : `${path}.${key}`, seen, ancestors);
     if (found) {
       return found;
     }
@@ -1174,13 +1177,13 @@ function isLikelyHexAudio(value) {
   return typeof value === 'string' && value.length > 64 && value.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(value);
 }
 
-function extractMinimaxT2AProviderMetadata(payload, sourcePath, requestedFormat) {
+function extractMinimaxT2AProviderMetadata(payload, sourcePath, requestedFormat, metadataNodes) {
   const baseResp = payload?.base_resp && typeof payload.base_resp === 'object' ? payload.base_resp : null;
   const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
   // Normalize recognized metadata once. Never copy an arbitrary upstream MIME
   // value into response headers or guess through contradictory declarations.
   const formats = [];
-  for (const value of [data?.format, payload?.extra_info?.audio_format]) {
+  for (const value of metadataNodes.flatMap(node => [node.format, node.extra_info?.audio_format])) {
     if (value == null) continue;
     if (typeof value !== 'string') return null;
     const format = value.trim().toLowerCase();
@@ -1189,7 +1192,7 @@ function extractMinimaxT2AProviderMetadata(payload, sourcePath, requestedFormat)
   }
   const mimeFormats = { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
     'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/pcm': 'pcm' };
-  for (const value of [payload?.content_type, data?.content_type]) {
+  for (const value of metadataNodes.map(node => node.content_type)) {
     if (value == null) continue;
     if (typeof value !== 'string') return null;
     const mime = value.split(';', 1)[0].trim().toLowerCase();

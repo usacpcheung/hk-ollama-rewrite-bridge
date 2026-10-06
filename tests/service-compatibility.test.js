@@ -340,7 +340,8 @@ test('compatibility: MiniMax rewrite and T2A share admission and streaming overl
 test('compatibility: MiniMax WAV bytes and public audio metadata agree', async t => {
   const f = await fixture(t, { handle: (req, res, body) => {
     if (req.url !== '/t2a') return false;
-    json(res, 200, { data: { audio: AUDIO.toString('hex'), format: body.audio_setting.format } });
+    json(res, 200, { output: { data: { audio: AUDIO.toString('hex') },
+      extra_info: { audio_format: body.audio_setting.format } } });
     return true;
   } });
   const binary = await f.request('/t2a', { body: { text: '測試', format: 'wav' } });

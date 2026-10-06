@@ -1247,3 +1247,31 @@ test('t2a normalizes declared audio metadata and falls back to the requested for
     });
   }
 });
+
+test('t2a reads metadata along the selected audio ancestry without mixing sibling payloads', async t => {
+  const audio = Buffer.from('nested audio bytes '.repeat(8));
+  const hex = audio.toString('hex');
+  const cases = [
+    ['wrapped format', { output: { data: { audio: hex }, extra_info: { audio_format: 'wav' } } }, 'wav', 'output.data.audio'],
+    ['array wrapper', { outputs: [{ content_type: 'audio/pcm', data: { audio: hex } }] }, 'pcm', 'outputs[0].data.audio'],
+    ['nested owner format', { output: { data: { audio: hex, format: 'wav' } } }, 'wav', 'output.data.audio'],
+    ['unrelated sibling', { output: { data: { audio: hex, format: 'wav' } }, other: { format: 'mp3' } }, 'wav', 'output.data.audio'],
+    ['direct candidate wins', { data: { audio: hex, format: 'mp3' }, output: { data: { audio: hex, format: 'wav' } } }, 'mp3', 'data.audio'],
+    ['ancestor conflict', { content_type: 'audio/mpeg', output: { data: { audio: hex, format: 'wav' } } }]
+  ];
+  for (const [name, payload, format, sourcePath] of cases) await t.test(name, async t => {
+    t.mock.method(global, 'fetch', async () => new Response(JSON.stringify(payload), { status: 200 }));
+    const provider = createMinimaxProvider({ apiUrl: 'http://minimax.test/t2a', model: 'speech-test', apiKey: 'test-key' });
+    const result = await provider.t2a({ text: 'test', audio: { format: 'mp3' }, timeoutMs: 1000 });
+    if (!format) {
+      assert.equal(result.ok, false);
+      assert.equal(result.error.status, 502);
+      return;
+    }
+    assert.equal(result.ok, true);
+    assert.equal(result.data.output.meta.format, format);
+    assert.equal(result.data.output.meta.contentType, { mp3: 'audio/mpeg', wav: 'audio/wav', pcm: 'audio/pcm' }[format]);
+    assert.equal(result.data.output.meta.provider.sourcePath, sourcePath);
+    assert.deepEqual(result.data.output.meta.audio, audio);
+  });
+});
