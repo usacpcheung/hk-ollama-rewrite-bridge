@@ -59,6 +59,12 @@ and [environment settings](docs/reference/env-reference.md#transcription) for de
 - Transcription aliases share header auth and the global rate limiter, with separate per-user rate limits, admission and conversion slots.
 - The bridge does not serve the widget assets; host `public/rewrite-widget/` on your web server. See the [widget guide](docs/guides/rewrite-widget.md).
 
+Rewrite/T2A construction now uses registered provider factories with capabilities
+scoped to each service. Existing provider/model/environment settings and public
+formats are unchanged. Google transcription retains its separate lifecycle; this
+is stage 2, not completion of provider interchangeability. See the
+[registry contract](docs/architecture/provider-registry.md).
+
 ## Requirements
 
 - Node.js 22+ (CI tests Node 22 and 24)

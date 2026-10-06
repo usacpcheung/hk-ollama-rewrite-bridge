@@ -1,12 +1,19 @@
 # Current runtime and request flows
 
-Reviewed against main `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Updated for the step-2 registry PR based on main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
 [`server.js`](../../server.js) creates an Express listener at the fixed address `127.0.0.1:3001`. It loads the rewrite/T2A definitions from [`services/index.js`](../../services/index.js), constructs their runtimes through [`lib/service-runtime.js`](../../lib/service-runtime.js), and independently creates transcription through [`services/transcription.js`](../../services/transcription.js).
 
 The rewrite/T2A runtimes contain the service, provider name, adapter, capabilities, timeouts and lifecycle. Rewrite defaults to Ollama; MiniMax can use legacy chat or the opt-in Anthropic Messages interface. T2A supports only MiniMax and defaults to `speech-2.6-hd`. Transcription is disabled unless explicitly enabled; its Google V2 profile is `chirp_3` / `yue-Hant-HK` in configured `us` or `eu`.
+
+Provider construction now resolves a `(provider, service)` registration in
+[`providers/index.js`](../../providers/index.js) through
+[`lib/provider-registry.js`](../../lib/provider-registry.js). The server supplies
+capabilities per service to configuration; MiniMax rewrite streaming no longer
+appears as a T2A capability. Configured service streaming remains the effective
+request toggle. See the [registry contract](provider-registry.md).
 
 Provider lifecycle wiring is implemented, but startup state and several provider-specific decisions remain in `server.js`. [ADR 0002](adr/0002-service-provider-runtime-boundary.md) records this partial boundary.
 
@@ -62,4 +69,4 @@ A deletion failure blocks further admission in that process. Failed final cleanu
 
 ## Validation evidence
 
-The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The original documentation review passed 203 tests; after PRs #128/#129 the suite contains 238 passing tests, including real FFmpeg normalization. The reconciled documentation tree passed all 238 tests with zero failures/skips. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.
+The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The original documentation review passed 203 tests; after PRs #128/#129 the suite contains 238 passing tests, including real FFmpeg normalization. That baseline passed all 238 tests with zero failures/skips. The step-2 registry change adds six registry cases and one HTTP case; its 245-test suite also passes without failures/skips. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.

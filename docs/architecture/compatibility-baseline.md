@@ -42,8 +42,9 @@ compatibility assessment rather than being incidental to structural refactoring.
 The [service invoker](../../lib/service-invoker.js),
 [provider lifecycle](../../providers/lifecycle.js), and
 [output writer](../../lib/service-output-writer.js) already separate parts of those
-paths. Provider construction, lifecycle policy, and some error/configuration details
-still depend on concrete integrations.
+paths. Provider construction now uses registered factories; service/provider capability
+maps come from those registrations. Lifecycle policy, service config allowlists,
+native factory options and route gates still depend on concrete integrations.
 
 [Transcription](../../services/transcription.js) has its own multipart upload,
 conversion, admission, cleanup, and HTTP response lifecycle. Its
@@ -161,3 +162,25 @@ Do not expand step 2 into transcription composition or startup-state extraction
 without closing the corresponding coverage gates above first.
 
 Development/deployment sequence is recorded in the [six-stage roadmap](provider-abstraction-roadmap.md). PR #130 does not implement step 2 or deploy the VPS.
+
+
+## Step-2 construction coverage
+
+The step-2 PR uses main `668e68e4e9ad72760b28bdc5b901e4d8659a249d` as its
+implementation base. Existing 238 baseline tests remain unchanged except for an
+additional HTTP case; new registry tests supplement them. Historical counts above
+remain the record for PRs #128/#129, not the total after later additions.
+
+- CFG-01/RW-03/T2A-01: existing configuration-resolution, provider-adapter, API and
+  T2A route tests continue through registered production factories.
+- New [registry tests](../../tests/provider-registry.test.js) cover lazy registration,
+  duplicate/invalid definitions, factory conformance, isolated service capabilities,
+  unchanged lifecycle selection, unsupported pairs without fallback, disabled
+  Google initialization and a fake adapter through runtime/validation/output.
+- New [HTTP coverage](../../tests/service-compatibility.test.js), “compatibility: unregistered Ollama T2A preserves validation order and does not affect rewrite”,
+  checks both aliases and proves rejected T2A work makes no upstream calls.
+- Transcription composition and startup-state branches are not moved. Their
+  previously recorded coverage gates still apply to later stages.
+
+See [registry boundaries and remaining work](provider-registry.md) before interpreting
+this construction refactor as complete env-driven provider interchangeability.
