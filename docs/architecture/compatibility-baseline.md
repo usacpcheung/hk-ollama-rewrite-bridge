@@ -152,10 +152,12 @@ documented compatibility decision and updated consumer guidance.
 
 ## Readiness decision after the merged-main audit
 
-The baseline is usable for the bounded [step 2 contract/capability work](provider-abstraction-step-2.md).
+The baseline is usable for the [step 2 provider registration and construction](provider-abstraction-step-2.md).
 The [fresh audit](../reviews/2026-10-06-main-baseline-audit.md) pins the merged-main
 commit, documents source/test checks, and distinguishes existing coverage from
 requirements to add before a later workflow migration. This is not evidence that
 all services are already interchangeable or that every refactoring scope is safe.
 Do not expand step 2 into transcription composition or startup-state extraction
 without closing the corresponding coverage gates above first.
+
+Development/deployment sequence is recorded in the [six-stage roadmap](provider-abstraction-roadmap.md). PR #130 does not implement step 2 or deploy the VPS.

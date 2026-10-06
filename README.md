@@ -321,4 +321,5 @@ Internal loopback routes remain:
 - [Browser rewrite widget guide](docs/guides/rewrite-widget.md)
 - [Current runtime architecture](docs/architecture/runtime.md)
 - [Current documentation audit and baseline readiness](docs/reviews/2026-10-06-main-baseline-audit.md)
+- [Refactor roadmap and deployment gates](docs/architecture/provider-abstraction-roadmap.md)
 - [Step 2 scope and acceptance gates](docs/architecture/provider-abstraction-step-2.md)

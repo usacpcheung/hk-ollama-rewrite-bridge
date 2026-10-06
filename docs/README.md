@@ -15,7 +15,8 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 | [Auth runbook](runbooks/auth-matrix-manual-cli-checklist.md) | Local auth/alias matrix and deployment gateway checks |
 | [Transcription runbook](runbooks/transcription-deployment.md) | Opt-in Google/media setup, validation, rollback and cleanup |
 | [Compatibility baseline](architecture/compatibility-baseline.md) | Code/test-backed contracts, legacy support, corrected defects and remaining coverage gaps |
-| [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Proposed next implementation scope, acceptance criteria and deferred migration gates |
+| [Refactor roadmap](architecture/provider-abstraction-roadmap.md) | Six stages, production baseline, VPS acceptance and rollback gates |
+| [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Working-code implementation scope, acceptance criteria and deferred migration gates |
 | [Runtime architecture](architecture/runtime.md) | Current request flows and actual service/provider boundaries |
 | [ADR 0001](architecture/adr/0001-internal-bridge-contract.md) | Accepted internal result/event contract |
 | [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented rewrite/T2A boundary and remaining limits |

@@ -1,10 +1,11 @@
 # Provider abstraction — step 2 scope and acceptance gates
 
-Status: proposed next implementation scope, not implemented by this document.
+Status: agreed implementation plan; implementation has not started.
 Based on merged main `a50c47d150724820080a8e7d7861070b7a0ecc51` (2026-10-06).
-The repository previously recorded the baseline and long-term goal but no explicit
-step-2 implementation scope. This document bounds the next PR; it does not claim
-that an earlier implementation or approval completed the abstraction.
+PR #130 updates documentation and the plan only. After its merge, the operator will
+update and verify the VPS, then record that exact commit as the production base.
+Do not create a step-2 implementation PR until separately instructed.
+See the [six-stage roadmap and deployment gates](provider-abstraction-roadmap.md).
 
 ## Target and current boundary
 
@@ -20,32 +21,36 @@ upload/conversion/cancellation/cleanup lifecycle. See [runtime](runtime.md) and
 [ADR 0002](adr/0002-service-provider-runtime-boundary.md). Output normalization
 already exists, but it is not proof of complete provider interchangeability.
 
-## Recommended next PR: explicit internal contracts and capabilities
+## Step 2: working provider registration and construction
 
-Define and test the extension boundary before moving route workflows:
+Implement the extension boundary and connect it to existing rewrite/T2A runtimes:
 
-1. Specify service/provider contracts for sync and optional streaming invocation,
-   normalized text/audio output, controlled errors, configuration ownership, and
-   optional lifecycle hooks. Reuse `lib/bridge-contract.js` and the existing adapter
-   where possible rather than creating a parallel result model.
-2. Define capabilities per service/provider pair. A provider's rewrite streaming
-   support must not imply T2A streaming. Distinguish invocation support, lifecycle
-   support, supported output formats and optional legacy voice controls. Avoid
-   requiring voice IDs, warmup, streaming or unrelated methods of every adapter.
-3. Describe existing integrations with testable definitions: Ollama rewrite;
-   MiniMax rewrite (legacy and Anthropic protocols) and T2A; Google transcription.
-   Describing Google must not yet reroute its production lifecycle through the
-   rewrite/T2A registry or initialize its client while transcription is disabled.
-4. Add contract/conformance tests using local fixtures or fake providers. Prove
-   supported and unsupported combinations explicitly. A fake new provider should
-   satisfy the intended contract without editing service validators/output writers.
-   This tests the proposed boundary, not a claim of production plugin discovery.
+1. Specify contracts for sync and optional streaming invocation, normalized output,
+   controlled errors, configuration ownership and optional lifecycle hooks. Reuse
+   `lib/bridge-contract.js` and the existing adapter where possible.
+2. Define capabilities per service/provider pair. Rewrite streaming must not imply
+   T2A streaming. Voice IDs, warmup and unrelated methods must not become universal
+   requirements for every future adapter.
+3. Replace hardcoded rewrite/T2A provider construction in `providers/index.js` with
+   registered provider factories and wire the existing runtime construction through
+   that registry. Preserve Ollama rewrite, both MiniMax rewrite protocols and
+   MiniMax T2A, including existing configuration resolution and lifecycle selection.
+4. Test registration, configuration precedence/defaults, unsupported selections,
+   capability selection and error timing. A fake additional adapter must be usable
+   through the same construction path without editing service validators or output
+   writers. Run existing HTTP contracts and add focused coverage where needed.
 
-Keep existing production dispatch and workflow behavior during this contract-first
-PR. Wiring the definitions into construction/configuration is a later, separately
-reviewed migration. Do not introduce new public env selectors until implemented
-and documented, change current unsupported-provider timing/status, or add fallback.
-This bounded start is intentionally smaller than completing the whole abstraction.
+The deliverable is production code using the registry, not unused definitions or
+another documentation-only preparation stage. The production VPS does not deploy
+it yet: development merges and production deployment are separate actions.
+
+Preserve current public behavior, environment names/defaults, voice presets and
+raw MiniMax controls. Do not change the providers, models, protocols or credential
+mechanisms selected by an existing configuration. Do not add automatic fallback.
+Google transcription remains on its current construction/workflow path in this
+stage and must not initialize when disabled. Service-workflow extraction and
+startup-state redesign are later stages; add their missing coverage before moving
+those boundaries. Design configuration/lifecycle interfaces now so later work fits.
 
 ## Acceptance criteria
 
@@ -68,13 +73,13 @@ This bounded start is intentionally smaller than completing the whole abstractio
 
 | Proposed later change | Evidence required before changing production flow |
 |---|---|
-| Provider factory/configuration wiring | Tests for existing configuration precedence/defaults, unsupported selections, disabled-service initialization, capability selection, and unchanged error timing; run the HTTP contracts. |
+| Step-2 rewrite/T2A factory wiring (required in this stage) | Tests for existing configuration precedence/defaults, unsupported selections, disabled-service initialization, capability selection, and unchanged error timing; run the HTTP contracts before completing step 2. |
 | Transcription composition or provider selection | Add an actual-server success path with fake recognition (no live cloud), complementing current component tests. Preserve upload/media bounds, separate capacity, cancellation ownership, late-result discard and cleanup-before-success/failure latching. |
 | Rewrite startup/lifecycle extraction | Add deterministic HTTP coverage of the `MODEL_WARMUP_STARTED` startup branch and relevant state transitions, supplementing existing on-demand/degraded/passive tests. |
 | New T2A provider or raw-control policy | Specify supported formats, preset mappings and exact unsupported-control status/code/validation order. Keep current MiniMax consumers working; never silently substitute a voice. |
 | Raw-ID retirement | Separate consumer migration evidence and explicit removal decision; no date or removal is implied here. |
 
-The baseline is ready to support this bounded step 2. It does not clear the later
+The baseline is ready to support this working-code step 2 with its required wiring tests. It does not clear the later
 migrations automatically. Use the [baseline](compatibility-baseline.md) and
 [current audit](../reviews/2026-10-06-main-baseline-audit.md) as evidence; a future
 PR that expands this scope must satisfy the relevant gate first.

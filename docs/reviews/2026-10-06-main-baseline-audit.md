@@ -10,7 +10,7 @@ configuration and example assets were inspected as evidence; only Markdown chang
 are proposed. No live provider, deployed gateway or external consumer was inspected.
 
 Current behavior and the corrected baseline agree, subject to the documentation
-corrections below. The baseline is ready for the bounded contract/capability step
+corrections below. The baseline is ready for the provider-registration/construction step
 in [step 2](../architecture/provider-abstraction-step-2.md). It is not sufficient to
 unconditionally approve transcription or startup-workflow extraction: the baseline
 already identifies missing integration coverage for those changes.
@@ -43,7 +43,7 @@ stated scope, not a guarantee about live deployments or all possible inputs.
 
 The only retired implementation plan is already under `docs/past/plans/`.
 No still-valid ADR or operational runbook should be archived simply because it is
-old. The new step-2 scope is active proposed work under `architecture/`, explicitly
+old. The new step-2 scope is agreed future work under `architecture/`, explicitly
 separated from implemented behavior. There is no need for another folder shuffle.
 
 ## Baseline checks and practical limits
@@ -62,10 +62,11 @@ separated from implemented behavior. There is no need for another folder shuffle
 - Existing workflow runs `npm test` on Node 22/24, with serial test files and FFmpeg
   installed. Passing counts alone do not establish exhaustive branch coverage.
 
-There was no checked-in step-2 scope. The new scoped proposal starts with internal
-contracts/capabilities and conformance tests, preserving current production dispatch.
-Later wiring, transcription composition, startup extraction and voice retirement
-have explicit prerequisites. This prevents “baseline ready” from being mistaken
+There was no checked-in step-2 scope. The revised step-2 plan implements registered provider factories and wires existing
+rewrite/T2A runtimes through them, with configuration/capability/conformance tests
+and unchanged public behavior. Transcription composition, startup extraction and
+voice retirement have explicit prerequisites. The six-stage roadmap separates
+development merges from deployment; PR #130 itself remains documentation-only. This prevents “baseline ready” from being mistaken
 for “all provider abstraction completed” or permission to move uncovered workflows.
 
 ## Validation record
@@ -75,7 +76,7 @@ results are recorded below. The reviewed source
 commit above is immutable; the documentation-only PR naturally has a different SHA.
 
 - `npm test`: 238 passed, zero failures/skips on Node 24; real FFmpeg tests ran.
-- 227 local Markdown links/heading targets and 19 exact baseline test titles passed.
+- 234 local Markdown links/heading targets and 19 exact baseline test titles passed.
 - 32 shell examples passed `bash -n`; operational/deployment commands were not run.
 - Archived plan body and LICENSE are unchanged; all non-Markdown Git objects/modes
   match the reviewed main. No source, test, dependency, workflow or configuration edit.
