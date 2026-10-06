@@ -86,6 +86,13 @@ matching abandoned job directories for dead processes. No job history is stored.
 
 ### Error envelope
 
+The global JSON parser accepts at most 16 KiB before authentication and route
+middleware. Oversized JSON returns **413 `PAYLOAD_TOO_LARGE`** (corrected from 500
+`INTERNAL_ERROR`); malformed JSON remains 400 `INVALID_JSON`. This parser limit
+is separate from text-character limits and transcription multipart upload limits.
+Clients should reduce oversized requests, not retry the same body. Early parser
+errors do not carry transcription request IDs or its route-level no-store header.
+
 All JSON error responses use this shape:
 
 ```json
@@ -410,7 +417,23 @@ Typical headers:
 - `Content-Length: <bytes>`
 - `Content-Disposition: inline; filename="speech.mp3"`
 
-Body: raw audio bytes.
+Body: raw audio bytes, unchanged by the bridge (no transcoding).
+
+The headers above describe MP3. For WAV the MIME is `audio/wav` and filename is
+`speech.wav`; for PCM they are `audio/pcm` and `speech.pcm`. JSON success uses the
+same normalized `format`, `mime`, and `contentType`. MiniMax's `data.format`,
+`extra_info.audio_format`, and top-level/nested `content_type` declarations must
+agree when present; recognized MIME aliases are normalized. For wrapped or
+array-nested audio, declarations are read along the selected audio ancestry,
+including its enclosing wrapper; unrelated sibling payloads are not mixed in. Declared format takes
+precedence over the request; absent declarations use the requested format (default
+MP3). Unsupported or contradictory metadata returns 502 `PROVIDER_ERROR` instead
+of potentially mislabeled audio. The bridge does not inspect codecs to independently
+verify provider declarations.
+
+This corrects the former hardcoded MP3 label. Clients requesting WAV/PCM should
+honor returned metadata and must not assume a `.mp3` extension. Response field names
+and binary/base64 response modes are unchanged.
 
 ### JSON success (`response_mode=base64_json`)
 
