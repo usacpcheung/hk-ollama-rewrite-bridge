@@ -115,3 +115,28 @@ test('provider queue accounting is isolated across providers', async () => {
   admittedOllama.release();
   admittedMinimax.release();
 });
+
+test('expired admission requests free queue space and cannot consume a later ticket', async () => {
+  let expire;
+  const controller = createAdmissionController({
+    globalLimits: { maxConcurrency: 1, maxQueueSize: 1, maxWaitMs: 50 },
+    setTimer: callback => { expire = callback; return 1; },
+    clearTimer: () => {}
+  });
+  const active = await controller.acquire({ providerName: 'minimax' });
+  const queued = controller.acquire({ providerName: 'minimax' });
+  const rejected = assert.rejects(queued, error => {
+    assert.equal(error.status, 503);
+    assert.equal(error.code, 'ADMISSION_OVERLOADED');
+    assert.equal(error.reason, 'wait_timeout');
+    return true;
+  });
+  expire();
+  await rejected;
+  const replacement = controller.acquire({ providerName: 'minimax' });
+  active.release();
+  const admitted = await replacement;
+  admitted.release();
+  const following = await controller.acquire({ providerName: 'minimax' });
+  following.release();
+});
