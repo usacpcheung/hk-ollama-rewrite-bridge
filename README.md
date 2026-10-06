@@ -233,8 +233,8 @@ Rewrite may include optional `usage`. Internal provider artifacts are not expose
 The canonical environment reference is `docs/reference/env-reference.md`.
 
 Use canonical names from that document for new deployments. Deprecated aliases
-remain supported for one compatibility window and emit startup warnings when
-used. The docs intentionally avoid duplicating the full env table here so that
+remain supported and emit startup warnings when used. The code defines no
+removal date or release window; retirement needs a separate migration decision. The docs intentionally avoid duplicating the full env table here so that
 operators have one source of truth.
 
 ### Opt-in MiniMax M3 rewrite
@@ -320,4 +320,5 @@ Internal loopback routes remain:
 - [Auth validation runbook](docs/runbooks/auth-matrix-manual-cli-checklist.md)
 - [Browser rewrite widget guide](docs/guides/rewrite-widget.md)
 - [Current runtime architecture](docs/architecture/runtime.md)
-- [Documentation review and decisions](docs/reviews/2026-10-06-documentation-review.md)
+- [Current documentation audit and baseline readiness](docs/reviews/2026-10-06-main-baseline-audit.md)
+- [Step 2 scope and acceptance gates](docs/architecture/provider-abstraction-step-2.md)

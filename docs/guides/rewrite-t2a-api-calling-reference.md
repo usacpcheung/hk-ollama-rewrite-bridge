@@ -221,7 +221,7 @@ with an invalid choice returns 413. See the [exact validation order and legacy c
 - HTTP status: `200`
 - Response body: raw audio bytes
 - Response headers include:
-  - `Content-Type`: provider content type (fallback `audio/mpeg`)
+  - `Content-Type`: normalized `audio/mpeg`, `audio/wav`, or `audio/pcm`; missing declarations use the requested format, not an unconditional MP3 fallback
   - `Content-Length`
   - `Content-Disposition: inline; filename="speech.mp3"` (MP3; WAV uses `speech.wav`, PCM uses `speech.pcm`)
 
