@@ -22,8 +22,14 @@ Use these classifications when reviewing later changes:
 - **Q — observed quirk:** record and test today's behavior without making it a design
   goal. Changing it needs an explicit compatibility decision, separate from a refactor.
 
-Classification does not authorize removal. A refactor must keep C, L, and Q behavior
-unless its scope explicitly includes and documents the relevant migration.
+Characterization tests describe current behavior; they do not make defects permanent
+contracts. Oversized JSON returning 500 (Q-01) and WAV audio carrying MP3 labels
+(Q-02) are confirmed defects scheduled for a corrective PR before abstraction work.
+That PR should replace those assertions with the corrected behavior and document
+client impact. The absence of `Retry-After` on admission overload is a separate
+policy decision, not a confirmed defect: no reliable queue-availability estimate
+is currently provided. Other behavior changes still need an explicit scope and
+compatibility assessment rather than being incidental to structural refactoring.
 
 ## What is implemented today
 
