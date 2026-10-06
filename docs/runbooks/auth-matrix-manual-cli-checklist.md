@@ -1,242 +1,126 @@
-# Manual CLI Auth Matrix Validation (Post-Extraction)
+# Manual CLI Auth Matrix Validation
 
-This runbook verifies backend auth behavior and reverse-proxy hardening for **both protected routes**:
+Use this runbook to verify shared backend auth and reverse-proxy behavior for rewrite, T2A and transcription, including their internal aliases. Transcription is protected even when disabled. The checked-in Apache sample uses OIDC session authentication; a bearer-token gateway requires its own configuration.
 
-1. `POST /rewrite`
-2. `POST /t2a`
+These are manual deployment checks, not evidence that a live server has been tested. Prefer an isolated instance with provider mocks for valid rewrite/T2A probes. Real valid requests can incur provider charges. The transcription auth probe below deliberately uses an unsupported request body so it never reaches Google.
 
-Use this before rollout. Block rollout if local backend auth expectations fail, if hardened external behavior is not observed, or if gateway/OIDC controls are bypassed.
+## 1) Expected backend behavior
 
-## 1) Security notes
+The shared gate checks a trimmed `X-Bridge-Auth` matching the configured secret and a trimmed/lowercased non-empty `X-Authenticated-Email` without commas and with the allowed domain suffix. It does not fully validate email syntax or check the socket address against `BRIDGE_TRUSTED_PROXY_ADDRESSES`. That address setting gates rate-limit identity extraction.
 
-- Do not paste real secrets or tokens into shell history.
-- Use environment variables and placeholders only.
-- The examples below intentionally use placeholders such as `<INTERNAL_SHARED_SECRET>` and `<OIDC_ACCESS_TOKEN>`.
+| Scenario | Headers | HTTP / code |
+|---|---|---|
+| Missing bridge auth | Valid email only | `401 AUTH_REQUIRED` |
+| Wrong bridge auth | Wrong secret + valid email | `401 AUTH_REQUIRED` |
+| Missing email | Valid secret only | `401 AUTH_REQUIRED` |
+| Comma-separated emails | Valid secret + multiple values | `401 AUTH_HEADER_INVALID` |
+| Disallowed domain | Valid secret + outside-domain email | `403 FORBIDDEN_DOMAIN` |
+| Valid headers | Matching secret + allowed suffix | Passes auth; later validation, provider or capacity errors remain possible |
 
-## 2) Expected auth contract baseline
+The global limiter precedes auth on all routes. Rewrite/T2A route limiters also precede auth; enabled transcription's service limiter follows it. Keep test attempts within budgets or wait for their windows so a 429 does not mask the auth result. Loopback binding, gateway authentication and stripping spoofed headers remain part of the deployment boundary.
 
-Protected local backend requests require:
+## 2) Setup
 
-- valid `X-Bridge-Auth`
-- valid `X-Authenticated-Email`
-
-The same auth envelope applies to both `/rewrite` and `/t2a`.
-
-| Scenario | Required headers | Expected HTTP | Expected `error.code` |
-|---|---|---:|---|
-| Missing `X-Bridge-Auth` | valid email only | 401 | `AUTH_REQUIRED` |
-| Wrong `X-Bridge-Auth` | wrong secret + valid email | 401 | `AUTH_REQUIRED` |
-| Missing `X-Authenticated-Email` | valid secret only | 401 | `AUTH_REQUIRED` |
-| Malformed multi-value email | valid secret + comma-separated values | 401 | `AUTH_HEADER_INVALID` |
-| Non-allowed email domain | valid secret + email outside `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` | 403 | `FORBIDDEN_DOMAIN` |
-| Valid auth headers | valid secret + email inside `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` | not blocked by auth layer | N/A |
-
-## 3) One-time environment setup
+Load the shared secret into an environment variable from your secure operator environment without printing it. Do not paste real secrets/tokens into commands or shell history. Replace the example allowed account/domain to match the deployment.
 
 ```bash
 export LOCAL_BASE_URL="http://127.0.0.1:3001"
 export EXTERNAL_BASE_URL="https://<YOUR_PUBLIC_BRIDGE_HOST>"
 export BRIDGE_AUTH_SECRET="<INTERNAL_SHARED_SECRET>"
-export OIDC_TOKEN="<OIDC_ACCESS_TOKEN>"
-
+export TEST_EMAIL="tester@hs.edu.hk"
 export REWRITE_PAYLOAD='{"text":"測試文字"}'
 export T2A_PAYLOAD='{"text":"測試語音","response_mode":"base64_json"}'
+
+# Choose the authentication method configured by your gateway.
+GATEWAY_AUTH_ARGS=(--cookie "/path/to/private-authenticated-cookie-jar")
+# For a gateway explicitly configured for bearer tokens, use instead:
+# GATEWAY_AUTH_ARGS=(-H "Authorization: Bearer ${OIDC_TOKEN}")
 ```
 
-## 4) Helper functions
+## 3) Local helpers
 
 ```bash
-call_local_rewrite() {
-  local tag="$1"
+call_local() {
+  local route="$1"
   shift
-  echo "\n===== LOCAL REWRITE :: ${tag} ====="
-  curl -sS -i -X POST "${LOCAL_BASE_URL}/rewrite" \
-    -H 'Content-Type: application/json' \
-    "$@" \
-    --data "${REWRITE_PAYLOAD}"
-}
-
-call_local_t2a() {
-  local tag="$1"
-  shift
-  echo "\n===== LOCAL T2A :: ${tag} ====="
-  curl -sS -i -X POST "${LOCAL_BASE_URL}/t2a" \
-    -H 'Content-Type: application/json' \
-    "$@" \
-    --data "${T2A_PAYLOAD}"
-}
-
-call_external_rewrite() {
-  local tag="$1"
-  shift
-  echo "\n===== EXTERNAL REWRITE :: ${tag} ====="
-  curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${OIDC_TOKEN}" \
-    "$@" \
-    --data "${REWRITE_PAYLOAD}"
-}
-
-call_external_t2a() {
-  local tag="$1"
-  shift
-  echo "\n===== EXTERNAL T2A :: ${tag} ====="
-  curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/t2a" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer ${OIDC_TOKEN}" \
-    "$@" \
-    --data "${T2A_PAYLOAD}"
+  case "$route" in
+    /rewrite|/api/rewrite)
+      curl -sS -i "${LOCAL_BASE_URL}${route}" \
+        -H 'Content-Type: application/json' "$@" --data "${REWRITE_PAYLOAD}"
+      ;;
+    /t2a|/api/t2a)
+      curl -sS -i "${LOCAL_BASE_URL}${route}" \
+        -H 'Content-Type: application/json' "$@" --data "${T2A_PAYLOAD}"
+      ;;
+    /transcriptions|/api/transcriptions)
+      curl -sS -i "${LOCAL_BASE_URL}${route}" \
+        -H 'Content-Type: application/octet-stream' "$@" --data-binary 'auth-only probe'
+      ;;
+  esac
 }
 ```
 
-## 5) Local backend auth matrix
-
-Run the same matrix against both services.
-
-### A. Missing `X-Bridge-Auth`
+## 4) Run each local scenario on all aliases
 
 ```bash
-call_local_rewrite "missing bridge auth" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
+for route in /rewrite /api/rewrite /t2a /api/t2a /transcriptions /api/transcriptions; do
+  # 401 AUTH_REQUIRED
+  call_local "$route" -H "X-Authenticated-Email: ${TEST_EMAIL}"
+  call_local "$route" -H 'X-Bridge-Auth: wrong-secret' \
+    -H "X-Authenticated-Email: ${TEST_EMAIL}"
+  call_local "$route" -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}"
 
-call_local_t2a "missing bridge auth" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
+  # 401 AUTH_HEADER_INVALID
+  call_local "$route" -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
+    -H "X-Authenticated-Email: ${TEST_EMAIL},other@hs.edu.hk"
+
+  # 403 FORBIDDEN_DOMAIN (choose a domain outside your configured allowlist)
+  call_local "$route" -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
+    -H 'X-Authenticated-Email: tester@example.com'
+
+  # Auth passes; valid rewrite/T2A bodies can call their configured providers.
+  call_local "$route" -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
+    -H "X-Authenticated-Email: ${TEST_EMAIL}"
+done
 ```
 
-Expected: `401 AUTH_REQUIRED`
+With valid transcription auth, the deliberately unsupported body returns `415 UNSUPPORTED_MEDIA_TYPE` when enabled and available, or `503 TRANSCRIPTION_DISABLED` when disabled. Storage unavailability may also return 503. It must not return an auth-specific 401/403. Use the [transcription deployment runbook](transcription-deployment.md) for an actual multipart success check.
 
-### B. Wrong `X-Bridge-Auth`
+## 5) Gateway and header-hygiene checks
+
+Run on exposed public routes. Include transcription only after its proxy mapping is enabled. The checked-in snippet omits T2A; add its mapping as described in the [deployment guide](../guides/deployment-guide.md) before expecting an external T2A success path.
+
+For each route, make a request without cookies/tokens. A protected interactive OIDC gateway may redirect to login; a configured API token gateway may return 401/403. Do not follow redirects when inspecting this check. The request must not reach a paid provider operation. Repeat with an invalid/expired credential for the gateway's actual authentication mode; do not assume it accepts bearer tokens because an OIDC module is installed.
 
 ```bash
-call_local_rewrite "wrong bridge auth" \
-  -H 'X-Bridge-Auth: wrong-secret' \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
-
-call_local_t2a "wrong bridge auth" \
-  -H 'X-Bridge-Auth: wrong-secret' \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
+curl -sS -i "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
+  -H 'Content-Type: application/json' --data "${REWRITE_PAYLOAD}"
+curl -sS -i "${EXTERNAL_BASE_URL}/api/rewrite-bridge/t2a" \
+  -H 'Content-Type: application/json' --data "${T2A_PAYLOAD}"
+curl -sS -i "${EXTERNAL_BASE_URL}/api/rewrite-bridge/transcriptions" \
+  -H 'Content-Type: application/octet-stream' --data-binary 'auth-only probe'
 ```
 
-Expected: `401 AUTH_REQUIRED`
-
-### C. Missing `X-Authenticated-Email`
+With an authenticated allowed-domain gateway session, send spoofed trusted headers. The proxy must remove/overwrite them and use its authenticated identity:
 
 ```bash
-call_local_rewrite "missing authenticated email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}"
-
-call_local_t2a "missing authenticated email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}"
-```
-
-Expected: `401 AUTH_REQUIRED`
-
-### D. Malformed multi-value email
-
-```bash
-call_local_rewrite "malformed multi email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk,other@hs.edu.hk'
-
-call_local_t2a "malformed multi email" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk,other@hs.edu.hk'
-```
-
-Expected: `401 AUTH_HEADER_INVALID`
-
-### E. Non-allowed email domain
-
-```bash
-call_local_rewrite "forbidden domain" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@example.com'
-
-call_local_t2a "forbidden domain" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@example.com'
-```
-
-Expected: `403 FORBIDDEN_DOMAIN`
-
-### F. Valid auth headers
-
-```bash
-call_local_rewrite "valid headers" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
-
-call_local_t2a "valid headers" \
-  -H "X-Bridge-Auth: ${BRIDGE_AUTH_SECRET}" \
-  -H 'X-Authenticated-Email: tester@hs.edu.hk'
-```
-
-Expected:
-- request is accepted by the auth layer
-- downstream provider errors are possible, but auth-specific `401/403` results above must not occur
-
-## 6) External OIDC + proxy-hardening checks
-
-### G. Missing OIDC bearer token
-
-```bash
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
-  -H 'Content-Type: application/json' \
+curl -sS -i "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
+  "${GATEWAY_AUTH_ARGS[@]}" -H 'Content-Type: application/json' \
+  -H 'X-Bridge-Auth: wrong-secret' -H 'X-Authenticated-Email: attacker@example.com' \
+  -H 'X-Authenticated-User: attacker' -H 'X-Authenticated-Subject: attacker' \
   --data "${REWRITE_PAYLOAD}"
-
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/t2a" \
-  -H 'Content-Type: application/json' \
-  --data "${T2A_PAYLOAD}"
 ```
 
-Expected: rejected by the gateway.
+Repeat for T2A with its JSON body and transcription with the unsupported body above. Check deployed forwarding-header stripping (`X-Forwarded-For`, `X-Forwarded-Proto`, `Forwarded`) as well as all four identity/secret headers. The backend's address list alone does not authorize/reject a request.
 
-### H. Invalid or expired OIDC token
+## 6) Deployment checklist
 
-```bash
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/rewrite" \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer invalid-or-expired-token' \
-  --data "${REWRITE_PAYLOAD}"
+- [ ] Rewrite local matrix passes on both aliases.
+- [ ] T2A local matrix passes on both aliases.
+- [ ] Transcription local matrix passes on both aliases, including disabled mode.
+- [ ] Unauthenticated and expired-credential requests are stopped at the gateway for every exposed service.
+- [ ] Spoofed identity/secret headers do not change the gateway-derived backend identity.
+- [ ] Forwarding headers are reconstructed from actual connection metadata.
+- [ ] Loopback listener and configured trusted-proxy identity behavior match the deployment.
 
-curl -sS -i -X POST "${EXTERNAL_BASE_URL}/api/rewrite-bridge/t2a" \
-  -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer invalid-or-expired-token' \
-  --data "${T2A_PAYLOAD}"
-```
-
-Expected: rejected by the gateway.
-
-### I. Spoofed trusted headers must not influence external outcome
-
-```bash
-call_external_rewrite "spoofed trusted headers" \
-  -H 'X-Bridge-Auth: wrong-secret' \
-  -H 'X-Authenticated-Email: attacker@example.com'
-
-call_external_t2a "spoofed trusted headers" \
-  -H 'X-Bridge-Auth: wrong-secret' \
-  -H 'X-Authenticated-Email: attacker@example.com'
-```
-
-Expected:
-- proxy strips or overwrites caller-supplied trusted headers
-- result must reflect gateway-injected trusted identity, not spoofed inbound values
-
-## 7) Rollout gate
-
-Block rollout if any of the following is true:
-
-- any local backend scenario fails the documented auth contract
-- external no-token or invalid-token calls are not rejected at the gateway boundary
-- spoofed trusted headers affect backend auth decisions
-
-Minimal checklist:
-
-```text
-[ ] Rewrite local auth matrix passed
-[ ] T2A local auth matrix passed
-[ ] Rewrite external gateway checks passed
-[ ] T2A external gateway checks passed
-[ ] Spoofed trusted headers are neutralized by proxy
-```
+Investigate mismatches before rollout; do not interpret a gateway redirect, limiter rejection or provider failure as proof that the backend auth case passed.

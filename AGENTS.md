@@ -3,7 +3,8 @@
 ## Purpose and Scope
 This repository implements an Express-based rewrite bridge that converts Hong Kong colloquial Cantonese into formal Traditional Chinese. The codebase includes:
 - Core bridge routes and request handling.
-- Provider integrations (for example Ollama and Minimax) behind a compatible provider interface.
+- Provider integrations (Ollama and Minimax for rewrite, Minimax for T2A) behind a compatible provider interface.
+- Opt-in completed-recording transcription through Google Cloud Speech-to-Text V2, with an independent upload/conversion/admission lifecycle.
 - Related frontend/widget integration surfaces used by consumers of the rewrite API.
 
 This `AGENTS.md` applies to the full repository tree unless a deeper nested `AGENTS.md` defines stricter local rules.
@@ -50,7 +51,9 @@ When adding new services or providers:
 ## Documentation Sync
 If environment variables, API endpoints, or request/response contracts change, update both of the following in the same change:
 - `README.md`
-- `docs/api-reference.md`
+- `docs/reference/api-reference.md`
+
+Keep environment changes synchronized with `docs/reference/env-reference.md`. Use `docs/README.md` for document locations; completed/superseded plans belong under `docs/past/` with an archive notice and links to current documentation. Historical plan instructions do not override this file.
 
 ## Review Checklist Before Finalizing
 - Input validation remains intact for modified request paths.

@@ -4,7 +4,7 @@ This document is a caller-focused reference for integrating with the bridge APIs
 All request/response contracts below are based on the current server and service code.
 
 - Service bind address (default): `http://127.0.0.1:3001`
-- JSON parser limit: `16kb` request body size
+- JSON parser limit: `16kb` request body size (oversize JSON currently maps to `500 INTERNAL_ERROR`; text budgets independently return `413 TOO_LONG`)
 - Protected endpoints: both Rewrite and T2A require trusted auth headers
 
 ---
@@ -13,12 +13,12 @@ All request/response contracts below are based on the current server and service
 
 Both Rewrite and T2A routes are protected by the same header-based gate:
 
-- `X-Bridge-Auth`: must exactly match server env `BRIDGE_INTERNAL_AUTH_SECRET`
-- `X-Authenticated-Email`: must be a single email ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` (default `@hs.edu.hk`)
+- `X-Bridge-Auth`: must match `BRIDGE_INTERNAL_AUTH_SECRET` after trimming surrounding whitespace
+- `X-Authenticated-Email`: trimmed and lowercased, non-empty, without commas, and ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` (default `@hs.edu.hk`). The bridge checks this suffix, not full email syntax.
 
 If authentication fails, responses are:
 
-- `401 AUTH_REQUIRED` (missing/invalid auth)
+- `401 AUTH_REQUIRED` (missing email or missing/wrong shared secret)
 - `401 AUTH_HEADER_INVALID` (invalid email header format, e.g. comma-separated)
 - `403 FORBIDDEN_DOMAIN` (email domain does not match `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN`)
 
@@ -30,7 +30,11 @@ These protected API paths are designed to be exposed publicly **through a truste
 - Reverse proxy should perform user authentication, inject trusted headers server-side, and strip any client-supplied versions of these headers.
 - Keep the bridge service internal/private (default bind is localhost) and only publish proxy routes.
 
-### Minimal working request headers
+`BRIDGE_TRUSTED_PROXY_ADDRESSES` controls user-based limiter identity, not route authorization. Backend auth does not enforce a proxy source-address allowlist. The global and service rate limiters run before rewrite/T2A auth, so 429 can precede an auth error.
+
+Public callers send their gateway session cookie or bearer token only when the gateway supports it. The sample Apache OIDC configuration uses `AuthType openid-connect` and does not by itself establish a bearer-token API.
+
+### Minimal working local backend request headers
 
 ```http
 Content-Type: application/json
@@ -190,7 +194,7 @@ Both routes are equivalent.
 }
 ```
 
-Use a stable ID from the [voice catalogue](api-reference.md#stable-voice-choices). Each ID includes the language and full voice tuning; the bridge translates it to the selected provider's native settings. The initial catalogue has seven Cantonese choices plus Putonghua and English female narration. No provider or model change is implied.
+Use a stable ID from the [voice catalogue](../reference/api-reference.md#stable-voice-choices). Each ID includes the language and full voice tuning; the bridge translates it to the selected provider's native settings. The initial catalogue has seven Cantonese choices plus Putonghua and English female narration. No provider or model change is implied.
 
 When using `voice_choice`, omit `voice_id`, `language_boost`, `speed`, `volume` and `pitch`. Supplying any of them, including null, returns `400 INVALID_INPUT`. Choice IDs are trimmed but case-sensitive; null, empty, non-string and unknown choices also return `400 INVALID_INPUT`. Output format/rate/bitrate and response mode keep their current defaults and validation.
 
@@ -205,8 +209,7 @@ Without `voice_choice`, all existing raw settings and omitted-field environment 
   - If `stream` is requested, server returns `501 STREAMING_UNSUPPORTED`.
 - If provider is Minimax and `MINIMAX_API_KEY` is missing, server returns:
   - `503 MINIMAX_API_KEY_MISSING`
-- Output audio returned by this bridge is currently normalized to MP3 metadata in the provider layer.
-  - Even when `format` is accepted in request validation, callers should treat the returned payload as MP3-compatible output.
+- `format` is forwarded to MiniMax and returned bytes are not transcoded. The adapter currently labels output `format` as `mp3` and binary filenames as `speech.mp3` even for WAV/PCM requests; MIME values may reflect upstream metadata. Use MP3 for consistent metadata. Do not assume a WAV/PCM request returned MP3 bytes based on the filename. See the [metadata limitation](../reference/api-reference.md#current-audio-format-metadata-limitation).
 
 ### 3.5 Success response when `response_mode=binary` (default)
 
@@ -241,7 +244,7 @@ Without `voice_choice`, all existing raw settings and omitted-field environment 
 #### Binary audio (default)
 
 ```bash
-curl -i -sS 'http://127.0.0.1:3001/t2a' \
+curl -sS 'http://127.0.0.1:3001/t2a' \
   -H 'Content-Type: application/json' \
   -H 'X-Bridge-Auth: <bridge-secret>' \
   -H 'X-Authenticated-Email: user@hs.edu.hk' \
@@ -262,7 +265,7 @@ curl -i -sS 'http://127.0.0.1:3001/api/t2a' \
 #### Parameterized request
 
 ```bash
-curl -i -sS 'http://127.0.0.1:3001/t2a' \
+curl -sS 'http://127.0.0.1:3001/t2a' \
   -H 'Content-Type: application/json' \
   -H 'X-Bridge-Auth: <bridge-secret>' \
   -H 'X-Authenticated-Email: user@hs.edu.hk' \
@@ -302,7 +305,7 @@ Some errors include additional fields like `retryAfterSec`, `reason`, `limit`, o
 
 ## 5) Practical integration checklist
 
-1. Always send both trusted headers from your reverse proxy (never from untrusted client traffic directly).
+1. Have the proxy inject both trusted headers after gateway authentication. Public clients must not know the bridge shared secret.
 2. Validate text length client-side before sending.
 3. For T2A, choose one response path:
    - binary download (`response_mode` omitted), or

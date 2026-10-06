@@ -10,9 +10,9 @@ That means:
 
 - the widget calls `POST /api/rewrite-bridge/rewrite`
 - the widget polls `GET /api/rewrite-bridge/model-status`
-- it does not call `POST /api/rewrite-bridge/t2a`
+- it does not call T2A or transcription endpoints
 
-If you are building an app that needs T2A, use the documented API contracts in `README.md` and `docs/api-reference.md` directly from your own frontend or backend integration layer.
+If you are building an app that needs T2A, use the [project README](../../README.md) and [API reference](../reference/api-reference.md) directly from your own frontend or backend integration layer.
 
 ## What the widget provides
 
@@ -29,24 +29,28 @@ public/
   rewrite-widget/
     rewrite-widget.js
     example.html
-    README_rewrite_widget.md
+docs/
+  guides/
+    rewrite-widget.md
 ```
 
 ## Quick start
 
 ### 1. Serve the widget statically
 
-Add to your server:
+`server.js` does not register `express.static` or a `/rewrite-widget` route.
+Serve `public/rewrite-widget/` using the frontend web server. For Apache, add a
+static alias to the deployed repository path (adjust it to your checkout):
 
-```js
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-app.use("/rewrite-widget", express.static(path.join(__dirname, "public/rewrite-widget")));
+```apache
+Alias /rewrite-widget/ /opt/hk-ollama-rewrite-bridge/public/rewrite-widget/
+<Directory "/opt/hk-ollama-rewrite-bridge/public/rewrite-widget/">
+    Require all granted
+</Directory>
 ```
+
+Apply your site's OIDC policy to the widget page and API namespace. No change to
+the bridge server is required to serve these assets.
 
 ### 2. Open the example page
 
@@ -74,8 +78,10 @@ https://<YOUR_DOMAIN>/rewrite-widget/example.html
 Optional config:
 
 - `statusPollIntervalMs` (number, minimum 1000)
-- `pollModelStatus` (boolean, default `true`)
+- `pollModelStatus` (boolean, default `true`): controls the extra initial poll only; subscribing still starts the shared periodic poller
 - `loginPageUrl` for manual sign-in flows when `reloadOnLoginRequired: false`
+- `streamEnabledByDefault` (boolean): initial streaming-checkbox state; the backend must independently enable rewrite streaming
+- `maxChars` (number, default `100`): widget limit; it is not read from the backend. Counts JavaScript UTF-16 code units, while the backend counts trimmed Unicode code points. Align it with `REWRITE_MAX_TEXT_LENGTH` for the intended workflow.
 
 ## Multiple widgets on one page
 
@@ -94,7 +100,20 @@ Each widget has its own editor state but shares one model-status poller.
 
 ## Widget API
 
-`RewriteWidget.mount(config)` returns an instance with:
+`RewriteWidget.mount(config)` is asynchronous and returns a Promise for the instance. Await it before calling instance methods:
+
+```js
+async function initializeWidget() {
+  const widget = await RewriteWidget.mount({ containerSelector: "#rw", apiBase: "" });
+  widget.onRewriteComplete(({ success, after }) => {
+    if (success) console.log(after); // use only non-sensitive demo text
+  });
+  return widget;
+}
+initializeWidget();
+```
+
+The resolved instance provides:
 
 - `rewrite()`
 - `undo()`
@@ -138,7 +157,9 @@ Behavior:
 Typical deployment pattern:
 
 - protected: `POST /api/rewrite-bridge/rewrite`
-- often public or less restricted: `GET /api/rewrite-bridge/model-status`
+- protected by the checked-in proxy namespace: `GET /api/rewrite-bridge/model-status`
+
+The backend does not header-authenticate model status. Its public access policy comes from the proxy; the supplied `apache/proxy-snippet.conf` protects the entire API namespace.
 
 The widget uses:
 
@@ -184,15 +205,20 @@ Replace placeholder values wrapped in `<...>`. Never commit real secrets.
   OIDCRemoteUserClaim email
   OIDCClaimPrefix "OIDC_CLAIM_"
 
-  <Location "/api/rewrite-bridge/rewrite">
+  RequestHeader unset X-Forwarded-For
+  RequestHeader unset X-Forwarded-Proto
+  RequestHeader unset Forwarded
+
+  <Location "/api/rewrite-bridge">
     AuthType openid-connect
     Require valid-user
 
     RequestHeader unset X-Authenticated-Email
     RequestHeader unset X-Authenticated-User
+    RequestHeader unset X-Authenticated-Subject
     RequestHeader unset X-Bridge-Auth
 
-    RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e"
+    RequestHeader set X-Authenticated-Email "%{OIDC_CLAIM_email}e" env=OIDC_CLAIM_email
     RequestHeader set X-Authenticated-User "%{REMOTE_USER}e"
     RequestHeader set X-Bridge-Auth "<INTERNAL_SHARED_SECRET>"
   </Location>
@@ -203,8 +229,14 @@ Replace placeholder values wrapped in `<...>`. Never commit real secrets.
   ProxyPass        /api/rewrite-bridge/model-status  http://127.0.0.1:3001/model-status
   ProxyPassReverse /api/rewrite-bridge/model-status  http://127.0.0.1:3001/model-status
 
-  ProxyPass        /rewrite-widget/  http://127.0.0.1:3001/rewrite-widget/
-  ProxyPassReverse /rewrite-widget/  http://127.0.0.1:3001/rewrite-widget/
+  Alias /rewrite-widget/ /opt/hk-ollama-rewrite-bridge/public/rewrite-widget/
+  <Directory "/opt/hk-ollama-rewrite-bridge/public/rewrite-widget/">
+    Require all granted
+  </Directory>
+  <Location "/rewrite-widget">
+    AuthType openid-connect
+    Require valid-user
+  </Location>
 </VirtualHost>
 ```
 

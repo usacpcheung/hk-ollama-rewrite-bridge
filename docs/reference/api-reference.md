@@ -49,7 +49,10 @@ Google credentials, provider payloads, original filenames and audio are not retu
 
 Defaults: up to 10 admitted requests across users, including uploads and work
 waiting for either of 2 conversion slots. One active request per user. Six requests
-per user per minute, plus the existing global limiter. Google calls run concurrently.
+per resolved user/IP per minute, plus the existing global limiter. With the
+normal trusted-proxy identity configuration this is per user; an IP fallback
+shares a rate-limit bucket among callers at that IP. The active-request lock
+always uses the authenticated email. Google calls run concurrently.
 No automatic retries: ambiguous failures can already have incurred charges.
 
 | Status | Error code | Meaning |
@@ -72,21 +75,25 @@ No automatic retries: ambiguous failures can already have incurred charges.
 | 502 | `TRANSCRIPTION_FAILED` | Other provider failure; internal details are suppressed. |
 
 Errors use `{ ok: false, error: { code, message } }`, with `requestId` where assigned.
-429/503 handler responses include `Retry-After: 10`; request-rate limiting uses
-its window's remaining time. Upload rejection can close the connection.
+Enabled-handler 429/503 responses include `Retry-After: 10`; disabled-mode 503
+does not set that header. Request-rate limiting uses its window's remaining time.
+Upload rejection can close the connection.
 
 Disconnecting cancels local upload/conversion work. If Google has already received
 the RPC, it may still finish and be charged; its result is discarded, and capacity
 is released only after settlement. The total deadline can return 504 while such
-a call is still settling. Audio is deleted on success/failure/cancellation; only
-an in-flight request holds the transcript in memory. Startup cleanup removes
+a call is still settling. Audio deletion is attempted on success/failure/cancellation.
+A deletion failure disables further admission in that process; failed final
+cleanup logs `TRANSCRIPTION_CLEANUP_FAILED` and can leave files for operator
+cleanup. Success is returned only after audio deletion succeeds. Only an in-flight
+request holds the transcript in memory. Startup cleanup removes
 matching abandoned job directories for dead processes. No job history is stored.
 
 ## Global conventions
 
 ### Error envelope
 
-All JSON error responses use this shape:
+Route JSON errors use this envelope (rate-limit errors may also include `error.reason`):
 
 ```json
 {
@@ -98,16 +105,18 @@ All JSON error responses use this shape:
 }
 ```
 
-Extra top-level fields may be included for retry or diagnostic purposes, for example `retryAfterSec`, `limit`, `reason`, `serviceState`, or `admission`.
+Extra top-level fields may be included for retry or diagnostic purposes, for example `retryAfterSec`, `limit`, `reason`, `serviceState`, `admission`, or transcription `requestId`. `/readyz` uses a separate readiness response with `ok`, `serviceState` and `reason`, rather than this error envelope.
 
 ### Authentication trust model
 
 Protected routes require trusted proxy auth headers:
 
-- `X-Authenticated-Email`: normalized authenticated user email ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN`
+- `X-Authenticated-Email`: non-empty after trimming, lowercased, without commas, and ending with configured `BRIDGE_AUTH_ALLOWED_EMAIL_DOMAIN` (normalized with a leading `@`)
 - `X-Bridge-Auth`: shared secret matching backend `BRIDGE_INTERNAL_AUTH_SECRET`
 
-Requests missing either trusted signal are rejected with `401 AUTH_REQUIRED`.
+Missing email or a missing/wrong shared secret returns `401 AUTH_REQUIRED`. Comma-separated email values return `401 AUTH_HEADER_INVALID`; a disallowed suffix returns `403 FORBIDDEN_DOMAIN`. The middleware checks these conditions, not full email syntax.
+
+The route auth middleware does not check proxy source addresses; `BRIDGE_TRUSTED_PROXY_ADDRESSES` gates trusted identity extraction for rate limiting. Loopback binding and proxy header hygiene are part of the deployment trust boundary. Bearer tokens/cookies are handled by the gateway, not the bridge.
 
 Reverse proxy must strip these headers from inbound client traffic and set them server-side only after successful auth.
 
@@ -118,7 +127,7 @@ Reverse proxy must strip these headers from inbound client traffic and set them 
 1. `user:<value>` only when:
    - source address is in `BRIDGE_TRUSTED_PROXY_ADDRESSES`
    - `X-Bridge-Auth` matches `BRIDGE_INTERNAL_AUTH_SECRET`
-   - first non-empty trusted identity header exists in this order:
+   - first non-empty, non-comma-separated trusted identity header exists in this order (trimmed and lowercased):
      1. `X-Authenticated-Email`
      2. `X-Authenticated-User`
      3. `X-Authenticated-Subject`
@@ -130,19 +139,28 @@ With `BRIDGE_EXPRESS_TRUST_PROXY=loopback` or a numeric hop count, Express-deriv
 
 Rate limiting uses fixed-window policies:
 
-- Global baseline for non-ops routes via `RATE_LIMIT_GLOBAL_*`
+- Baseline for non-ops routes via `RATE_LIMIT_GLOBAL_*`, including `/model-status`, keyed per resolved user/IP rather than a single process-wide request counter
 - Rewrite route limiter via `RATE_LIMIT_REWRITE_*`
 - T2A route limiter via `RATE_LIMIT_T2A_*`
 - Ops limiter for `/healthz` and `/readyz` via `RATE_LIMIT_OPS_*`
+- Enabled transcription per-user limiter via `TRANSCRIPTION_REQUESTS_PER_MINUTE`, after shared auth
 
-T2A shares the same admission-controller execution path as rewrite, so concurrency and queue limits are still driven by the shared admission settings.
+Rewrite and T2A use one admission controller with separate counters/queues per provider. They share capacity when both select MiniMax; Ollama and MiniMax have independent pools. `ADMISSION_*` supplies defaults for each pool and `OLLAMA_*` / `MINIMAX_*` admission overrides replace those defaults. This is not an aggregate process-wide concurrency cap. Transcription has independent admission/conversion limits.
 
-For the canonical env reference and defaults, see `docs/env-reference.md`.
+For rewrite/T2A, the global limiter runs before the route limiter, then auth; exhausted limits can therefore return 429 before an auth error. Transcription runs global limiting, auth, then its enabled-service limiter. Counters and queues are process-local.
+
+For the canonical env reference and defaults, see [environment settings](env-reference.md).
 
 ## Configuration reference
 
-Environment variables are documented centrally in `docs/env-reference.md`.
+Environment variables are documented centrally in [environment settings](env-reference.md).
 This API reference only describes request and response contracts.
+
+Rewrite/T2A JSON parsing has a separate 16 KiB body limit. The current generic
+error middleware maps parser-size failures to `500 INTERNAL_ERROR`; this differs
+from a validated over-budget `text`, which returns `413 TOO_LONG`. Malformed JSON
+returns `400 INVALID_JSON`. Do not assume every request-level failure reaches
+service validation or header auth.
 
 ## 1) `POST /rewrite`
 
@@ -151,6 +169,7 @@ Rewrite Hong Kong colloquial Cantonese into formal Traditional Chinese.
 ### Routes
 
 - Internal: `POST /rewrite`
+- Internal alternate: `POST /api/rewrite`
 - Typical public route: `POST /api/rewrite-bridge/rewrite`
 
 ### Request body
@@ -193,13 +212,6 @@ curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
 {
   "ok": true,
   "result": "我今天身體不適，想請半天假。",
-  "artifacts": [
-    {
-      "kind": "provider_trace",
-      "encoding": "base64",
-      "data": "eyJwcm92aWRlciI6Im1pbmltYXgifQ=="
-    }
-  ],
   "usage": {
     "prompt_eval_count": 18,
     "eval_count": 24
@@ -207,7 +219,7 @@ curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
 }
 ```
 
-`artifacts` and `usage` are optional additive metadata.
+`usage` is optional and provider-specific. The current HTTP writer exposes `ok`, `result` and optional `usage`; internal `output.artifacts` / `output.meta` are not serialized into rewrite responses. Output is converted to Traditional Chinese (HK variant) by the rewrite service.
 
 ### Success (`stream=true`)
 
@@ -220,8 +232,13 @@ curl -i -sS https://<your-domain>/api/rewrite-bridge/rewrite \
 {"response":"","done":true,"done_reason":"stop","usage":{"total_tokens":42}}
 ```
 
-Stream chunks may carry text in either `response` (canonical) or `result` (compatibility) fields.
-Clients should accept both and append whichever field is present.
+The server emits text in `response` and applies HK Traditional Chinese conversion per chunk. The shipped widget also accepts a legacy `result` field for compatibility, but this server does not emit it. After streaming headers are sent, failures are terminal NDJSON objects, not a new HTTP error status:
+
+```json
+{"done":true,"error":{"code":"PROVIDER_ERROR","message":"...","status":502}}
+```
+
+Read until the terminal `done` event; `done_reason` and `usage` are optional.
 
 ### Warming/startup responses
 
@@ -251,6 +268,7 @@ A similar `202` contract may also use `MODEL_WARMUP_STARTED`.
 - `429 RATE_LIMITED`
 - `429 MINIMAX_RECOVERY_COOLDOWN`
 - `501 STREAMING_UNSUPPORTED`
+- `503 MINIMAX_API_KEY_MISSING`
 - `503 MODEL_STARTUP_DEGRADED`
 - `503 ADMISSION_OVERLOADED`
 - provider-mapped failures such as `OLLAMA_ERROR`, `PROVIDER_ERROR`, `PROVIDER_AUTH_ERROR`
@@ -315,6 +333,14 @@ Generate speech audio from validated text input using the T2A service definition
 | `format` | string | No | `mp3`, `wav`, or `pcm`. Defaults to `mp3`. |
 | `stream` | boolean/string/number | No | If truthy in the supported forms, request is rejected with `501 STREAMING_UNSUPPORTED`. |
 
+Raw numeric controls are converted with `Number(...)`; numeric strings can be
+accepted when in range (integer controls must resolve to integers). For legacy
+requests, null numeric controls and empty strings use defaults; null `voice_id`
+or `language_boost` also uses defaults. `format` and `response_mode` strings are
+trimmed/lowercased; null or empty response mode defaults to binary. Prefer the
+JSON types in the table for callers. When `voice_choice` is present, the mere
+presence of a conflicting raw voice field is invalid even if its value is null.
+
 ### Stable voice choices
 
 Send `voice_choice` to select a complete, provider-independent preset:
@@ -353,7 +379,7 @@ When `voice_choice` is absent, raw voice settings, omitted-field defaults and ex
 
 ### Effective server-side defaults
 
-Without `voice_choice`, if optional fields are omitted, T2A resolves to:
+Without `voice_choice` or environment overrides, omitted optional fields resolve to these code defaults. Voice ID, speed, volume and pitch may be changed by environment configuration:
 
 ```json
 {
@@ -382,7 +408,7 @@ Without `voice_choice`, the caller may override `language_boost`; the other valu
 #### Binary response for playback/download
 
 ```bash
-curl -i -sS http://127.0.0.1:3001/t2a \
+curl -sS http://127.0.0.1:3001/t2a \
   -H 'Content-Type: application/json' \
   -H 'X-Bridge-Auth: <shared-secret>' \
   -H 'X-Authenticated-Email: user@hs.edu.hk' \
@@ -393,11 +419,11 @@ curl -i -sS http://127.0.0.1:3001/t2a \
 #### JSON response for apps that want a single JSON payload
 
 ```bash
-curl -i -sS http://127.0.0.1:3001/t2a \
+curl -sS http://127.0.0.1:3001/t2a \
   -H 'Content-Type: application/json' \
   -H 'X-Bridge-Auth: <shared-secret>' \
   -H 'X-Authenticated-Email: user@hs.edu.hk' \
-  --data '{"text":"Hello, welcome","response_mode":"base64_json","voice_id":"English_expressive_narrator","language_boost":"English","speed":1.1,"sample_rate":32000,"bitrate":128000,"format":"mp3"}'
+  --data '{"text":"Hello, welcome","response_mode":"base64_json","voice_choice":"english_narrator_female","sample_rate":32000,"bitrate":128000,"format":"mp3"}'
 ```
 
 ### Binary success (`response_mode=binary` or omitted)
@@ -411,6 +437,10 @@ Typical headers:
 - `Content-Disposition: inline; filename="speech.mp3"`
 
 Body: raw audio bytes.
+
+### Current audio-format metadata limitation
+
+`format` accepts `mp3`, `wav` and `pcm` and is forwarded to MiniMax. The adapter returns the extracted bytes unchanged; it does not transcode them. It currently sets output `format` to `mp3` for every request, so binary filenames remain `speech.mp3` and JSON `format` remains `mp3`. `Content-Type`, `mime` and `contentType` can reflect upstream content-type/format metadata, falling back to `audio/mpeg`. Do not infer MP3 bytes solely from the filename or JSON format field for non-MP3 requests. Use `format: "mp3"` for consistent current metadata.
 
 ### JSON success (`response_mode=base64_json`)
 
@@ -456,7 +486,7 @@ Body: raw audio bytes.
 
 ## 3) `GET /model-status`
 
-Diagnostics endpoint for frontend polling and operator troubleshooting.
+Rewrite diagnostics endpoint for frontend polling and operator troubleshooting. Like `/healthz` and `/readyz`, it has no backend header-auth middleware; protect public access at the proxy. `/model-status` uses the non-ops global limiter, while the health/readiness routes use the ops limiter.
 
 ### Routes
 
@@ -503,7 +533,7 @@ Process liveness check.
 
 ## 5) `GET /readyz`
 
-Traffic-readiness gate.
+Rewrite-readiness gate. T2A configuration and Google transcription connectivity are not checked. Neither T2A nor transcription handlers consult `/readyz` before processing requests.
 
 ### Success
 

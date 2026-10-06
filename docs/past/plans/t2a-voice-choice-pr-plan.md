@@ -1,5 +1,18 @@
 # PR plan: abstract T2A voice choices
 
+> **Archived on 2026-10-06: completed implementation plan.** Main
+> `2a453d040506b909ada41842eed3f7b2347dbf82` already contains the catalogue in
+> `lib/t2a-voice-choices.js`, resolution in `services/t2a.js`, and HTTP coverage in
+> `tests/t2a-routes.test.js`. The original plan and its 2026-09-29 validation record
+> below are preserved as historical evidence, not current work instructions or
+> authorization. Its checkout, external-consumer and live-deployment statements
+> are historical and were not revalidated. Use the current
+> [voice API contract](../../reference/api-reference.md#stable-voice-choices),
+> [caller guide](../../guides/rewrite-t2a-api-calling-reference.md) and
+> [review decisions](../../reviews/2026-10-06-documentation-review.md).
+> Repository tests establish mappings and contracts; live voice quality remains
+> unverified by this documentation review.
+
 Status: implementation and PR publication authorized on 2026-09-29, limited to this repository. Deployment is outside scope. The rules below record the implementation contract.
 
 ## Problem and intended outcome
