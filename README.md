@@ -79,6 +79,11 @@ The server listens on `http://127.0.0.1:3001`.
 
 All automated tests live under `tests/`.
 
+Before changing service/provider boundaries, use the
+[compatibility baseline](docs/architecture/compatibility-baseline.md). It maps
+current behavior to code and tests, distinguishes portable contracts from legacy
+provider behavior and observed quirks, and records verification limits.
+
 - `tests/rewrite-validation.test.js`: rewrite request validation.
 - `tests/rewrite-auth-parity.test.js`: auth/domain enforcement behavior.
 - `tests/providers/ollama.test.js`: Ollama parsing and error handling.
