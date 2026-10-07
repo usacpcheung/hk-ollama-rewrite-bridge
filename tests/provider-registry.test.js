@@ -141,3 +141,26 @@ test('registry discovery and disabled transcription never initialize the Google 
   `], { cwd: require('node:path').resolve(__dirname, '..'), encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
 });
+
+
+test('class and frozen factory adapters preserve prototype methods and private state', async () => {
+  class Provider {
+    #name = 'fixture';
+    get services() { return { t2a: { sync: async () => successResult({ response: this.#name }) } }; }
+    getInfo() { return { provider: this.#name }; }
+    mapError() { return { code: this.#name }; }
+    checkReadiness() { return { ready: this.#name === 'fixture' }; }
+    triggerWarmup() { return { ok: this.#name === 'fixture' }; }
+    close() { return this.#name; }
+  }
+  const registry = createProviderRegistry([definition({ create: () => Object.freeze(new Provider()) })]);
+  const provider = registry.create({ serviceConfig: { id: 't2a', provider: { selected: 'fixture' } } });
+  const adapter = createProviderAdapter(provider);
+  assert.deepEqual(adapter.getInfo(), { provider: 'fixture' });
+  assert.equal(adapter.mapError(new Error()).code, 'fixture');
+  assert.equal(adapter.checkReadiness({}).ready, true);
+  assert.equal(adapter.triggerWarmup({}).ok, true);
+  assert.equal((await adapter.invokeSync({ serviceId: 't2a' })).data.response, 'fixture');
+  assert.equal(provider.close(), 'fixture');
+  assert.equal(provider.capabilities.streaming, false);
+});

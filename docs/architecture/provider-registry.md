@@ -40,6 +40,9 @@ A constructed adapter must expose `services[serviceId].sync`, a stream handler
 exactly when declared, and `mapError`. Existing result/event shapes come from
 `lib/bridge-contract.js`. Async invocation returns that result; stream callbacks use
 its events. A malformed registration/factory fails as an internal programming error.
+Factory adapters may be plain objects or class instances, including frozen objects.
+The registry forwards interface methods bound to the original adapter so prototype
+methods, getters and private state survive construction.
 Voice IDs and lifecycle methods are not required of every factory. Active-probe
 implementations still need the methods consumed by the existing lifecycle factory.
 
@@ -82,8 +85,8 @@ operator's separately planned acceptance; this PR does not establish VPS state.
 
 ## Verification for this PR
 
-The full local suite passes 245 tests with zero failures/skips (238 existing,
-six registry cases, one additional HTTP case). Actual-server curl smoke checks
+The full local suite passes 246 tests with zero failures/skips (238 existing,
+seven registry cases, one additional HTTP case). Actual-server curl smoke checks
 verify rewrite JSON, oversized JSON on all six aliases, and MP3/WAV/PCM binary
 and JSON output on both T2A aliases. Local upstreams and synthetic credentials
 are used; these checks neither deploy nor call paid providers. Documentation
