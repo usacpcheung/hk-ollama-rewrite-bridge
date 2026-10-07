@@ -80,7 +80,8 @@ literal prompt replacement sequences, phrase conversion across streaming boundar
 empty Ollama stream success, widget terminal handling, widget body-read deadlines,
 malformed MiniMax text, and widget Unicode counts. The second pass also corrected
 model-status/widget readiness precedence when the process is live but the model is
-warming or its probe is unavailable. No authentication, transcription ownership or
+warming or its probe is unavailable, and a reentrant widget start callback that could
+launch duplicate rewrites. No authentication, transcription ownership or
 provider selection changes are introduced.
 
 `tests/whole-branch-regressions.test.js` covers actual-server reproductions and every

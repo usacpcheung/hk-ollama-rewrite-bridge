@@ -51,7 +51,7 @@ test('widget request cleanup and caller cancellation abort unread bodies', async
   const next = await w.fetchWithTimeout('http://fixture.invalid', { signal: controller.signal }, 1000);
   controller.abort(); assert.equal(signal.aborted, true); next.finishRequest();
 });
-test('mounted widget counts Unicode characters consistently with backend', async () => {
+test('mounted widget counts Unicode characters and prevents reentrant rewrite callbacks', async () => {
   class Element {
     constructor() { this.children = []; this.value = ''; this.textContent = ''; this.classList = { remove() {}, add() {}, toggle() {} }; }
     appendChild(e) { this.children.push(e); e.parentElement = this; return e; }
@@ -59,14 +59,22 @@ test('mounted widget counts Unicode characters consistently with backend', async
     querySelector() { return this.appendChild(new Element()); }
   }
   const root = new Element();
+  let rewriteRequests = 0;
   const w = widget({ window: { location: { pathname: '/', href: 'http://fixture.invalid/' } },
     document: { querySelector: () => root, getElementById: () => true, createElement: () => new Element() },
     sessionStorage: { getItem: () => '😀'.repeat(101), setItem() {} }, setInterval: () => 1, clearInterval() {},
-    fetch: async () => new Response('{"status":"ready","serviceState":"ready"}') });
+    fetch: async (_url, options) => {
+      if (options.method === 'POST') { rewriteRequests++; return new Response('{"ok":true,"result":"正式"}'); }
+      return new Response('{"status":"ready","serviceState":"ready"}');
+    } });
   const mounted = await w.mount({ containerSelector: '#widget', maxChars: 200 });
   await new Promise(resolve => setTimeout(resolve, 0));
   const flat = e => [e, ...e.children.flatMap(flat)];
   assert.equal(flat(root).find(e => e.textContent === 'Rewrite').disabled, false);
+  let callbackRan = false;
+  mounted.onRewriteStart(() => { if (!callbackRan) { callbackRan = true; void mounted.rewrite(); } });
+  await mounted.rewrite();
+  assert.equal(rewriteRequests, 1);
   mounted.destroy();
 });
 

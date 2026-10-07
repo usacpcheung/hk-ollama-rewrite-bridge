@@ -665,9 +665,8 @@
       let success = false;
       let errorMessage = "";
       let restoreTextOnError = "";
-      rewriteStart.emit({ text: before });
-
       inFlight = true;
+      rewriteStart.emit({ text: before });
       lastOriginalText = original;
       ui.ta.disabled = true;
 
