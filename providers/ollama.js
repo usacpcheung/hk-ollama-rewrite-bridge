@@ -68,7 +68,7 @@ function createOllamaProvider({
     });
   }
 
-  async function rewrite({ requestId, prompt, timeoutMs, signal }) {
+  async function rewrite({ requestId, prompt, timeoutMs, signal, maxTokens = maxCompletionTokens }) {
     return generate({
       requestId,
       prompt,
@@ -76,12 +76,12 @@ function createOllamaProvider({
       signal,
       options: {
         temperature: 0.15,
-        num_predict: maxCompletionTokens
+        num_predict: maxTokens
       }
     });
   }
 
-  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk, signal }) {
+  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk, signal, maxTokens = maxCompletionTokens }) {
     return generateStream({
       requestId,
       prompt,
@@ -89,7 +89,7 @@ function createOllamaProvider({
       signal,
       options: {
         temperature: 0.15,
-        num_predict: maxCompletionTokens
+        num_predict: maxTokens
       },
       onChunk
     });

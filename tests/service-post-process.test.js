@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createRewriteServiceDefinition } = require('../services/rewrite');
+const { createRewriteServiceDefinition } = require('../configuration/services');
 const { createServiceRegistry } = require('../services');
 
 function parseBounded(rawValue, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {

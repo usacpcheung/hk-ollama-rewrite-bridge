@@ -415,6 +415,12 @@ Send `voice_choice` to select a complete, provider-independent preset:
 
 The choice includes its language, voice identity, speed, volume, pitch and additional effects. Do not combine it with `voice_id`, `language_boost`, `speed`, `volume` or `pitch`, even with null values; mixed requests return `400 INVALID_INPUT`. Output settings remain independent. IDs are case-sensitive after surrounding whitespace is trimmed. Null, empty, non-string and unknown choices return `400 INVALID_INPUT` without a provider call.
 
+The stable intent includes language and speaker sex. Provider authors must document
+how they realize that intent; native voice IDs and tuning stay in the adapter.
+Different providers may use descriptive prompts and need not produce identical
+timbre. The current MiniMax mappings are unchanged; actual sound requires listening
+acceptance. See the [service/provider design](../architecture/provider-abstraction-step-3.md#t2a).
+
 MiniMax mappings:
 
 | `voice_choice` | Intended character | MiniMax `voice_id` | Speed | Pitch | Language |

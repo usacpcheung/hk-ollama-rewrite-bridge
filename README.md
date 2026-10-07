@@ -47,7 +47,7 @@ and [environment settings](docs/reference/env-reference.md#transcription) for de
 ### Runtime architecture
 
 - Express server bound to `127.0.0.1:3001` only.
-- Service registry in `services/` resolves service-scoped configuration for both rewrite and T2A.
+- Service registry in `services/` composes rewrite/T2A definitions using the readers in `configuration/`.
 - Transcription has an independent upload/conversion lifecycle and admission limits in `services/transcription.js`, using the shared provider adapter with `providers/google-speech.js`.
 - Provider adapters normalize upstream behavior so route handlers can keep a stable API contract.
 - Protected JSON routes (`/rewrite`, `/api/rewrite`, `/t2a`, `/api/t2a`) share:
@@ -62,7 +62,9 @@ and [environment settings](docs/reference/env-reference.md#transcription) for de
 Rewrite/T2A construction now uses registered provider factories with capabilities
 scoped to each service. Existing provider/model/environment settings and public
 formats are unchanged. Google transcription retains its separate lifecycle; this
-is stage 2, not completion of provider interchangeability. See the
+implements step-3 rewrite/T2A request separation, not completion of provider interchangeability.
+See the [step-3 contracts](docs/architecture/provider-abstraction-step-3.md) for
+provider-owned native payloads/voice mappings and transcription contract design. See the
 [registry contract](docs/architecture/provider-registry.md).
 
 ## Requirements

@@ -82,7 +82,7 @@ function createMinimaxProvider({
     return successResult({ response: '', usage: null });
   }
 
-  async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, signal }) {
+  async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, signal, maxTokens = maxCompletionTokens }) {
     if (apiFormat === 'anthropic') {
       return generateAnthropic({
         requestId,
@@ -91,7 +91,7 @@ function createMinimaxProvider({
         userContent,
         timeoutMs,
         signal,
-        maxTokens: maxCompletionTokens
+        maxTokens
       });
     }
 
@@ -102,11 +102,11 @@ function createMinimaxProvider({
       userContent,
       timeoutMs,
       signal,
-      maxTokens: maxCompletionTokens
+      maxTokens
     });
   }
 
-  async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk, signal }) {
+  async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk, signal, maxTokens = maxCompletionTokens }) {
     if (apiFormat === 'anthropic') {
       return generateAnthropicStream({
         requestId,
@@ -115,7 +115,7 @@ function createMinimaxProvider({
         userContent,
         timeoutMs,
         signal,
-        maxTokens: maxCompletionTokens,
+        maxTokens,
         onChunk
       });
     }
@@ -127,7 +127,7 @@ function createMinimaxProvider({
       userContent,
       timeoutMs,
       signal,
-      maxTokens: maxCompletionTokens,
+      maxTokens,
       onChunk
     });
   }

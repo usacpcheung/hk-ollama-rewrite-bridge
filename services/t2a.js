@@ -1,100 +1,4 @@
-const { resolveT2AVoiceChoice } = require('../lib/t2a-voice-choices');
-
-const DEFAULT_MAX_TEXT_LENGTH = 200;
-const ABSOLUTE_MAX_TEXT_LENGTH = 1000;
-const DEFAULT_AUDIO_SAMPLE_RATE = 32000;
-const DEFAULT_AUDIO_BITRATE = 128000;
-const DEFAULT_AUDIO_FORMAT = 'mp3';
-const DEFAULT_MINIMAX_API_URL = 'https://api.minimax.io/v1/t2a_v2';
-const DEFAULT_MINIMAX_MODEL = 'speech-2.6-hd';
-const DEFAULT_MINIMAX_VOICE_ID = 'Cantonese_ProfessionalHost（F)';
-const DEFAULT_MINIMAX_SPEED = 1;
-const DEFAULT_MINIMAX_VOLUME = 1;
-const DEFAULT_MINIMAX_PITCH = 0;
-const DEFAULT_AUDIO_CHANNEL = 1;
-const DEFAULT_LANGUAGE_BOOST = 'Chinese,Yue';
-const DEFAULT_VOICE_MODIFY = Object.freeze({
-  pitch: 0,
-  intensity: 0,
-  timbre: 0
-});
-const DEFAULT_OUTPUT_FORMAT = 'hex';
-const SUPPORTED_T2A_PROVIDERS = new Set(['minimax']);
-
-function countUnicodeCharacters(value) {
-  return [...value].length;
-}
-
-function readPreferredEnv(env, keys = []) {
-  for (const key of keys) {
-    const raw = env[key];
-    if (raw != null && raw.trim() !== '') {
-      return { key, value: raw };
-    }
-  }
-  return null;
-}
-
-function readWithLegacyFallback({
-  env,
-  preferredKeys,
-  legacyKeys,
-  parse,
-  defaultValue,
-  warnLegacyUsage,
-  warningLabel
-}) {
-  const parseWithValidity = (raw) => {
-    const invalidMarker = Symbol('invalid-env-value');
-    const parsed = parse(raw, invalidMarker);
-
-    return {
-      isValid: parsed !== invalidMarker,
-      value: parsed
-    };
-  };
-
-  const preferred = readPreferredEnv(env, preferredKeys);
-  if (preferred) {
-    const preferredParsed = parseWithValidity(preferred.value);
-    if (preferredParsed.isValid) {
-      return {
-        value: preferredParsed.value,
-        source: { type: 'preferred', key: preferred.key }
-      };
-    }
-  }
-
-  const legacy = readPreferredEnv(env, legacyKeys);
-  if (legacy) {
-    const legacyParsed = parseWithValidity(legacy.value);
-    if (legacyParsed.isValid) {
-      warnLegacyUsage({
-        legacyKey: legacy.key,
-        preferredKeys,
-        warningLabel
-      });
-      return {
-        value: legacyParsed.value,
-        source: { type: 'legacy', key: legacy.key }
-      };
-    }
-  }
-
-  return {
-    value: defaultValue,
-    source: { type: 'default', key: null }
-  };
-}
-
-function parseFiniteNumber(raw, fallback, { min = -Infinity, max = Infinity } = {}) {
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
-    return fallback;
-  }
-  return parsed;
-}
-
+const { validateVoiceChoice } = require('../lib/t2a-voice-choices');
 function parseResponseMode(value) {
   if (value == null || value === '') {
     return 'binary';
@@ -114,19 +18,6 @@ function parseResponseMode(value) {
   }
 
   return null;
-}
-
-function parseOptionalFiniteNumber(value, { min = -Infinity, max = Infinity } = {}) {
-  if (value == null || value === '') {
-    return undefined;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
-    return null;
-  }
-
-  return parsed;
 }
 
 function parseOptionalBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
@@ -155,215 +46,9 @@ function parseOptionalEnum(value, allowedValues = []) {
   return allowedValues.includes(normalized) ? normalized : null;
 }
 
-function resolveT2AConfig({
-  env = process.env,
-  parseEnvBoundedInteger,
-  parseEnvMilliseconds,
-  providerCapabilities = {}
-}) {
-  const serviceId = 'T2A';
-
-  const warnLegacyUsage = ({ legacyKey, preferredKeys, warningLabel }) => {
-    if (!preferredKeys.length) {
-      return;
-    }
-
-    console.warn(
-      JSON.stringify({
-        level: 'warn',
-        msg: `${warningLabel} uses legacy env key`,
-        legacyKey,
-        preferredKeys,
-        service: 't2a'
-      })
-    );
-  };
-
-  const providerResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_PROVIDER`],
-    legacyKeys: [],
-    parse: (raw, fallback) => String(raw || '').trim().toLowerCase() || fallback,
-    defaultValue: 'minimax',
-    warnLegacyUsage,
-    warningLabel: 'provider'
-  });
-
-  const maxTextLengthResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MAX_TEXT_LENGTH`],
-    legacyKeys: [],
-    parse: (raw, fallback) => {
-      const value = Number(raw);
-      if (Number.isInteger(value) && value > ABSOLUTE_MAX_TEXT_LENGTH) {
-        return ABSOLUTE_MAX_TEXT_LENGTH;
-      }
-      return parseEnvBoundedInteger(raw, fallback, {
-        min: 1,
-        max: ABSOLUTE_MAX_TEXT_LENGTH
-      });
-    },
-    defaultValue: DEFAULT_MAX_TEXT_LENGTH,
-    warnLegacyUsage,
-    warningLabel: 'maxTextLength'
-  });
-
-  const invokeTimeoutResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_INVOKE_TIMEOUT_MS`],
-    legacyKeys: [],
-    parse: (raw, fallback) => parseEnvMilliseconds(raw, fallback, {
-      min: 1_000,
-      max: 300_000
-    }),
-    defaultValue: 30_000,
-    warnLegacyUsage,
-    warningLabel: 'invokeTimeoutMs'
-  });
-
-  const minimaxApiUrlResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_API_URL`, `${serviceId}_PROVIDER_MINIMAX_API_URL`, `${serviceId}_URL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_API_URL. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_URL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: DEFAULT_MINIMAX_API_URL,
-    warnLegacyUsage,
-    warningLabel: 'minimaxApiUrl'
-  });
-
-  const minimaxModelResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_MODEL`, `${serviceId}_PROVIDER_MINIMAX_MODEL`, `${serviceId}_MODEL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_MODEL. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_MODEL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: DEFAULT_MINIMAX_MODEL,
-    warnLegacyUsage,
-    warningLabel: 'minimaxModel'
-  });
-
-  const voiceIdResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_VOICE_ID`, `${serviceId}_PROVIDER_MINIMAX_VOICE_ID`, `${serviceId}_VOICE_ID`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_VOICE_ID. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_VOICE_ID'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: DEFAULT_MINIMAX_VOICE_ID,
-    warnLegacyUsage,
-    warningLabel: 'voiceId'
-  });
-
-  const speedResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_SPEED`, `${serviceId}_PROVIDER_MINIMAX_SPEED`, `${serviceId}_SPEED`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_SPEED. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_SPEED'],
-    parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: 0.5, max: 2 }),
-    defaultValue: DEFAULT_MINIMAX_SPEED,
-    warnLegacyUsage,
-    warningLabel: 'speed'
-  });
-
-  const volumeResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_VOLUME`, `${serviceId}_PROVIDER_MINIMAX_VOLUME`, `${serviceId}_VOLUME`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_VOLUME. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_VOLUME'],
-    parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: 0, max: 10 }),
-    defaultValue: DEFAULT_MINIMAX_VOLUME,
-    warnLegacyUsage,
-    warningLabel: 'volume'
-  });
-
-  const pitchResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_PITCH`, `${serviceId}_PROVIDER_MINIMAX_PITCH`, `${serviceId}_PITCH`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer T2A_MINIMAX_PITCH. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_T2A_PITCH'],
-    parse: (raw, fallback) => parseFiniteNumber(raw, fallback, { min: -12, max: 12 }),
-    defaultValue: DEFAULT_MINIMAX_PITCH,
-    warnLegacyUsage,
-    warningLabel: 'pitch'
-  });
-
-  const provider = providerResolution.value;
-  const providerSupported = SUPPORTED_T2A_PROVIDERS.has(provider);
-  const selectedProviderCapabilities = providerCapabilities[provider] || { streaming: false };
-
-  return {
-    provider,
-    providerSupported,
-    maxTextLength: maxTextLengthResolution.value,
-    timeouts: {
-      invokeMs: invokeTimeoutResolution.value
-    },
-    providers: {
-      minimax: {
-        apiUrl: minimaxApiUrlResolution.value,
-        model: minimaxModelResolution.value,
-        defaults: {
-          voiceId: voiceIdResolution.value,
-          speed: speedResolution.value,
-          volume: volumeResolution.value,
-          pitch: pitchResolution.value,
-          audioSetting: {
-            sampleRate: DEFAULT_AUDIO_SAMPLE_RATE,
-            bitrate: DEFAULT_AUDIO_BITRATE,
-            format: DEFAULT_AUDIO_FORMAT,
-            channel: DEFAULT_AUDIO_CHANNEL
-          },
-          languageBoost: DEFAULT_LANGUAGE_BOOST,
-          voiceModify: {
-            ...DEFAULT_VOICE_MODIFY
-          },
-          outputFormat: DEFAULT_OUTPUT_FORMAT
-        },
-        capabilities: providerCapabilities.minimax || { streaming: false }
-      }
-    },
-    selectedProviderCapabilities,
-    selectedProviderStreamingEnabled: false,
-    sources: {
-      provider: providerResolution.source,
-      maxTextLength: maxTextLengthResolution.source,
-      invokeTimeoutMs: invokeTimeoutResolution.source,
-      minimaxApiUrl: minimaxApiUrlResolution.source,
-      minimaxModel: minimaxModelResolution.source,
-      voiceId: voiceIdResolution.source,
-      speed: speedResolution.source,
-      volume: volumeResolution.source,
-      pitch: pitchResolution.source,
-      audioSampleRate: { type: 'default', key: null },
-      audioBitrate: { type: 'default', key: null },
-      audioFormat: { type: 'default', key: null },
-      audioChannel: { type: 'default', key: null },
-      languageBoost: { type: 'default', key: null },
-      voiceModify: { type: 'default', key: null },
-      outputFormat: { type: 'default', key: null },
-      streamingEnabled: { type: 'default', key: null }
-    }
-  };
-}
-
-function createT2AServiceDefinition({
-  parseEnvBoundedInteger,
-  parseEnvMilliseconds,
-  providerCapabilities = {}
-}) {
-  const resolvedConfig = resolveT2AConfig({
-    parseEnvBoundedInteger,
-    parseEnvMilliseconds,
-    providerCapabilities
-  });
+function createT2AServiceDefinition({ config: resolvedConfig, requestPolicy }) {
   const maxTextLength = resolvedConfig.maxTextLength;
-  const providerDefaults = resolvedConfig.providers.minimax.defaults;
+  const audioDefaults = { sampleRate: 32000, bitrate: 128000, format: 'mp3', channel: 1 };
 
   return {
     id: 't2a',
@@ -387,9 +72,7 @@ function createT2AServiceDefinition({
     },
     capabilities: {
       streaming: false,
-      byProvider: {
-        minimax: resolvedConfig.providers.minimax.capabilities
-      }
+      byProvider: Object.fromEntries(Object.entries(resolvedConfig.providers).map(([id, value]) => [id, value.capabilities]))
     },
     limits: {
       maxTextLength
@@ -397,15 +80,11 @@ function createT2AServiceDefinition({
     timeouts: {
       invokeMs: resolvedConfig.timeouts.invokeMs
     },
+    buildRequest: ({ trimmedText, voiceSelection, audio }) => ({ text: trimmedText, voiceSelection, audio }),
     validateRequest: ({ body }) => {
       const {
         text,
         stream,
-        voice_id: voiceId,
-        language_boost: languageBoost,
-        speed,
-        volume,
-        pitch,
         response_mode: rawResponseMode,
         sample_rate: sampleRate,
         bitrate,
@@ -427,7 +106,7 @@ function createT2AServiceDefinition({
       }
 
       const trimmedText = text.trim();
-      const inputCharCount = countUnicodeCharacters(trimmedText);
+      const inputCharCount = [...trimmedText].length;
       if (!trimmedText) {
         return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'text is required' };
       }
@@ -436,28 +115,8 @@ function createT2AServiceDefinition({
         return { ok: false, status: 413, code: 'TOO_LONG', message: `Max ${maxTextLength} characters` };
       }
 
-      if (voiceId != null && (typeof voiceId !== 'string' || voiceId.trim() === '')) {
-        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'voice_id must be a non-empty string' };
-      }
-
-      if (languageBoost != null && (typeof languageBoost !== 'string' || languageBoost.trim() === '')) {
-        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'language_boost must be a non-empty string' };
-      }
-
-      const parsedSpeed = parseOptionalFiniteNumber(speed, { min: 0.5, max: 2 });
-      if (parsedSpeed === null) {
-        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'speed must be a number between 0.5 and 2' };
-      }
-
-      const parsedVolume = parseOptionalFiniteNumber(volume, { min: 0, max: 10 });
-      if (parsedVolume === null) {
-        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'volume must be a number between 0 and 10' };
-      }
-
-      const parsedPitch = parseOptionalFiniteNumber(pitch, { min: -12, max: 12 });
-      if (parsedPitch === null) {
-        return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'pitch must be a number between -12 and 12' };
-      }
+      const controls = requestPolicy.validateControls(body);
+      if (!controls.ok) return controls;
 
       const responseMode = parseResponseMode(rawResponseMode);
       if (!responseMode) {
@@ -481,7 +140,7 @@ function createT2AServiceDefinition({
 
       let selectedChoice = null;
       if (Object.hasOwn(body || {}, 'voice_choice')) {
-        const conflictingField = ['voice_id', 'language_boost', 'speed', 'volume', 'pitch']
+        const conflictingField = requestPolicy.legacyFields
           .find((field) => Object.hasOwn(body, field));
         if (conflictingField) {
           return {
@@ -491,18 +150,13 @@ function createT2AServiceDefinition({
             message: 'voice_choice cannot be combined with ' + conflictingField
           };
         }
-        const choiceResult = resolveT2AVoiceChoice({ choice: body.voice_choice, provider: resolvedConfig.provider });
-        if (!choiceResult.ok) {
-          // Unsupported service providers keep their existing route error.
-          if (choiceResult.code === 'VOICE_CHOICE_UNSUPPORTED' && !resolvedConfig.providerSupported) {
-            return {
-              ok: false,
-              status: 501,
-              code: 'UNSUPPORTED_PROVIDER',
-              message: 'Provider "' + resolvedConfig.provider + '" is not supported for t2a'
-            };
-          }
-          return choiceResult;
+        const choiceResult = validateVoiceChoice(body.voice_choice);
+        if (!choiceResult.ok) return choiceResult;
+        if (!requestPolicy.supportsVoiceChoice(choiceResult.value.id)) {
+          return { ok: false, status: resolvedConfig.providerSupported ? 422 : 501,
+            code: resolvedConfig.providerSupported ? 'VOICE_CHOICE_UNSUPPORTED' : 'UNSUPPORTED_PROVIDER',
+            message: resolvedConfig.providerSupported ? 'voice_choice is not supported by the selected t2a provider'
+              : 'Provider "' + resolvedConfig.provider + '" is not supported for t2a' };
         }
         selectedChoice = choiceResult.value;
       }
@@ -514,30 +168,18 @@ function createT2AServiceDefinition({
           inputCharCount,
           streamRequested: false,
           responseMode,
-          voice: selectedChoice ? selectedChoice.voice : {
-            voiceId: typeof voiceId === 'string' ? voiceId.trim() : providerDefaults.voiceId,
-            speed: parsedSpeed === undefined ? providerDefaults.speed : parsedSpeed,
-            volume: parsedVolume === undefined ? providerDefaults.volume : parsedVolume,
-            pitch: parsedPitch === undefined ? providerDefaults.pitch : parsedPitch
-          },
+          voiceSelection: selectedChoice ? { kind: 'preset', id: selectedChoice.id }
+            : Object.keys(controls.value).length ? { kind: 'legacy', controls: controls.value } : { kind: 'default' },
           audio: {
-            sampleRate: parsedSampleRate === undefined ? providerDefaults.audioSetting.sampleRate : parsedSampleRate,
-            bitrate: parsedBitrate === undefined ? providerDefaults.audioSetting.bitrate : parsedBitrate,
-            format: parsedFormat === undefined ? providerDefaults.audioSetting.format : parsedFormat,
-            channel: providerDefaults.audioSetting.channel
-          },
-          languageBoost: selectedChoice ? selectedChoice.languageBoost : (typeof languageBoost === 'string' ? languageBoost.trim() : providerDefaults.languageBoost),
-          voiceModify: {
-            ...(selectedChoice ? selectedChoice.voiceModify : providerDefaults.voiceModify)
-          },
-          outputFormat: providerDefaults.outputFormat
+            sampleRate: parsedSampleRate === undefined ? audioDefaults.sampleRate : parsedSampleRate,
+            bitrate: parsedBitrate === undefined ? audioDefaults.bitrate : parsedBitrate,
+            format: parsedFormat === undefined ? audioDefaults.format : parsedFormat,
+            channel: audioDefaults.channel
+          }
         }
       };
     }
   };
 }
 
-module.exports = {
-  createT2AServiceDefinition,
-  resolveT2AConfig
-};
+module.exports = { createT2AServiceDefinition };
