@@ -109,6 +109,12 @@ Run the full suite:
 npm test
 ```
 
+Media integration tests require FFmpeg and FFprobe. Install both or set
+`TEST_FFMPEG_PATH` and `TEST_FFPROBE_PATH` to their executables. Tests that need
+unavailable tools report explicit skips; mocked media and upload-timeout tests
+still run. Check skip counts: full transcription/media verification requires
+zero skips, as in CI where both tools are installed.
+
 ## API corrections before provider refactoring
 
 JSON bodies exceeding the 16 KiB parser limit return **413 `PAYLOAD_TOO_LARGE`**

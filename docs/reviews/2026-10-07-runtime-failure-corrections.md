@@ -51,3 +51,17 @@ historical checkpoint, not the count for this corrective branch.
 Local simulations do not certify real OIDC/Apache sessions, provider permissions,
 production proxy settings, speech quality, billing cancellation, or long-duration
 production load. The planned VPS acceptance remains a separate operator action.
+
+
+## Review follow-up: optional media tooling
+
+The FFmpeg composition tests now share availability detection with the existing
+real-media suite and honor `TEST_FFMPEG_PATH` / `TEST_FFPROBE_PATH`. Selected paths
+are passed explicitly to the server child, so discovery and execution agree.
+Success and Google-error cases skip with installation guidance if either tool is
+unavailable. The denied-FFmpeg case requires only FFprobe; upload-timeout and
+mocked media tests still run without either tool. Tool detection checks successful
+`-version` exit status and bounds the probe duration.
+
+CI continues installing both tools and must retain zero skipped tests. A passing
+local run with media skips is not full transcription/media verification.
