@@ -39,6 +39,8 @@ When adding new services or providers:
 - Make unsupported service/provider combinations fail with explicit controlled errors.
 
 ## Refactor Safety Rules
+
+- Before creating any refactor or corrective PR, follow the standing [PR stacking and acceptance sequence](docs/architecture/provider-abstraction-roadmap.md#development-and-testing-sequence): base it on the latest open PR branch, keep the stack unmerged until maintenance-window VPS acceptance and explicit operator approval, and ask if the intended base is unclear. Verify branch ancestry and the GitHub base; do not default to main.
 - Before separating service/provider runtime code, preserve current route behavior with HTTP-level contract tests from request to response.
 - Internal contracts may evolve, but public contracts must remain stable.
 - Refactors should move hardcoded provider logic into service/provider lifecycle or adapter layers without changing observable API behavior.
