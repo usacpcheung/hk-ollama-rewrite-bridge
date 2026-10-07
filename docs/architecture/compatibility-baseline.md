@@ -115,6 +115,17 @@ the implementing PR. This is target behavior, not a claim about current support.
 Retirement requires a separate consumer migration and removal decision; no date or
 removal is introduced here. Portable workflows must not require raw IDs internally.
 
+## Runtime defect corrections after the audit
+
+The [2026-10-07 correction review](../reviews/2026-10-07-runtime-failure-corrections.md)
+records explicitly authorized fixes to cancellation, streaming completion/backpressure,
+JSON-read timeout classification and T2A upstream-auth classification. These defects
+are not compatibility requirements. Preserve the corrected behavior in later refactors,
+using the new [HTTP fault tests](../../tests/runtime-failures-http.test.js) and
+[provider stream fault tests](../../tests/provider-stream-faults.test.js).
+The registry/class-method correction is separately reviewed in PR #131; this runtime
+correction branch is based on main and does not introduce the registry refactor.
+
 ## Verification limits and the next refactor gate
 
 Run `npm test` with Node.js 22 or 24. The suite serializes test files because real
@@ -185,13 +196,3 @@ remain the record for PRs #128/#129, not the total after later additions.
 
 See [registry boundaries and remaining work](provider-registry.md) before interpreting
 this construction refactor as complete env-driven provider interchangeability.
-## Runtime defect corrections after the audit
-
-The [2026-10-07 correction review](../reviews/2026-10-07-runtime-failure-corrections.md)
-records explicitly authorized fixes to cancellation, streaming completion/backpressure,
-JSON-read timeout classification and T2A upstream-auth classification. These defects
-are not compatibility requirements. Preserve the corrected behavior in later refactors,
-using the new [HTTP fault tests](../../tests/runtime-failures-http.test.js) and
-[provider stream fault tests](../../tests/provider-stream-faults.test.js).
-The registry/class-method correction is separately reviewed in PR #131; this runtime
-correction branch is based on main and does not introduce the registry refactor.
