@@ -1,10 +1,16 @@
 # Runtime failure corrections — 2026-10-07
 
-This corrective branch is based on main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
-It fixes existing defects reproduced on main and step-2 PR #131. The registry's
-prototype-method copying defect is fixed separately in #131; the six runtime
-corrections here can be reviewed without the registry implementation. No deployment
-or live-provider verification is implied.
+PR #132 is stacked on the open step-2 PR #131 (`codex/provider-registry-step2`,
+parent commit `1761bcc11c7aeeeea39d85522386b03c5ce5b2f4`). The review sequence is
+`main → #131 → #132`; both PRs remain open for testing. The #132 diff contains the
+runtime corrections and their tests/documentation; its assembled branch also includes
+#131's registry implementation and prototype-method fix.
+
+The runtime defects were reproduced on main and step-2 PR #131. After acceptance,
+merge #131 first, then retarget #132 to the updated main if needed and recheck its
+diff and CI before merging. Do not change this stack or deploy as part of this
+review. Confirm the intended base before creating a later PR if it is unclear.
+No deployment or live-provider verification is implied.
 
 ## Corrected behavior
 

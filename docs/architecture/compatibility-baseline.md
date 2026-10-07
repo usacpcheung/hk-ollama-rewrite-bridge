@@ -123,8 +123,10 @@ JSON-read timeout classification and T2A upstream-auth classification. These def
 are not compatibility requirements. Preserve the corrected behavior in later refactors,
 using the new [HTTP fault tests](../../tests/runtime-failures-http.test.js) and
 [provider stream fault tests](../../tests/provider-stream-faults.test.js).
-The registry/class-method correction is separately reviewed in PR #131; this runtime
-correction branch is based on main and does not introduce the registry refactor.
+The registry/class-method correction is reviewed in parent PR #131. Runtime correction
+PR #132 is stacked on `codex/provider-registry-step2`: its branch includes the registry,
+while its diff against #131 contains the runtime corrections. Both remain open for testing;
+the intended sequence is `main → #131 → #132`.
 
 ## Verification limits and the next refactor gate
 
