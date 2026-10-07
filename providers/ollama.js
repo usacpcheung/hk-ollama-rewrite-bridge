@@ -1,3 +1,4 @@
+const { createInvocationAbort } = require('../lib/invocation-abort');
 const {
   successResult,
   failureResult,
@@ -19,9 +20,8 @@ function createOllamaProvider({
   maxCompletionTokens = 300,
   debugLog
 }) {
-  async function checkReadiness({ timeoutMs }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  async function checkReadiness({ timeoutMs, signal }) {
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     try {
       const response = await fetch(psUrl, { signal: controller.signal });
@@ -32,7 +32,8 @@ function createOllamaProvider({
       let psJson;
       try {
         psJson = await response.json();
-      } catch (_err) {
+      } catch (err) {
+        if (controller.signal.aborted) throw controller.signal.reason;
         return { ready: null, error: 'ps_invalid_json' };
       }
 
@@ -51,14 +52,15 @@ function createOllamaProvider({
       }
       return { ready: null, error: 'ps_fetch_failed' };
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
-  async function triggerWarmup({ timeoutMs }) {
+  async function triggerWarmup({ timeoutMs, signal }) {
     return generate({
       prompt: 'hi',
       timeoutMs,
+      signal,
       options: {
         temperature: 0,
         num_predict: 1
@@ -66,11 +68,12 @@ function createOllamaProvider({
     });
   }
 
-  async function rewrite({ requestId, prompt, timeoutMs }) {
+  async function rewrite({ requestId, prompt, timeoutMs, signal }) {
     return generate({
       requestId,
       prompt,
       timeoutMs,
+      signal,
       options: {
         temperature: 0.15,
         num_predict: maxCompletionTokens
@@ -78,11 +81,12 @@ function createOllamaProvider({
     });
   }
 
-  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk }) {
+  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk, signal }) {
     return generateStream({
       requestId,
       prompt,
       timeoutMs,
+      signal,
       options: {
         temperature: 0.15,
         num_predict: maxCompletionTokens
@@ -91,9 +95,8 @@ function createOllamaProvider({
     });
   }
 
-  async function generate({ requestId, prompt, timeoutMs, options }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  async function generate({ requestId, prompt, timeoutMs, options, signal }) {
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     try {
       const headers = { 'Content-Type': 'application/json' };
@@ -126,8 +129,9 @@ function createOllamaProvider({
       let data;
       try {
         data = await response.json();
-      } catch (_err) {
-        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
+      } catch (err) {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return failureResult(mapError(err, { kind: 'invalid_json' }));
       }
 
       const normalized = normalizeProviderSyncResponse({ provider: 'ollama', payload: data });
@@ -139,17 +143,16 @@ function createOllamaProvider({
     } catch (err) {
       return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
-  async function generateStream({ requestId, prompt, timeoutMs, options, onChunk }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  async function generateStream({ requestId, prompt, timeoutMs, options, onChunk, signal }) {
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     const emit = async (event) => {
       if (typeof onChunk === 'function') {
-        await onChunk(event);
+        await onChunk(event, { signal: controller.signal });
       }
     };
 
@@ -199,7 +202,7 @@ function createOllamaProvider({
 
       const processLine = async (line) => {
         const trimmed = line.trim();
-        if (!trimmed) {
+        if (lastChunk?.done || !trimmed) {
           return;
         }
 
@@ -218,6 +221,7 @@ function createOllamaProvider({
         }
 
         if (payload?.done) {
+          if (!responseText.trim()) throw invalidChunkError();
           const terminal = normalizeProviderStreamTerminal({
             provider: 'ollama',
             payload,
@@ -233,13 +237,14 @@ function createOllamaProvider({
         }
       };
 
-      while (true) {
+      while (!lastChunk?.done) {
         const { value, done } = await reader.read();
         if (done) {
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
+        if (Buffer.byteLength(buffer) > 1024 * 1024) throw invalidChunkError();
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() || '';
         for (const line of lines) {
@@ -248,7 +253,7 @@ function createOllamaProvider({
       }
 
       buffer += decoder.decode();
-      if (buffer.trim()) {
+      if (!lastChunk?.done && buffer.trim()) {
         await processLine(buffer);
       }
 
@@ -256,6 +261,7 @@ function createOllamaProvider({
         throw invalidChunkError();
       }
 
+      await reader.cancel();
       const terminal = normalizeProviderStreamTerminal({
         provider: 'ollama',
         payload: lastChunk,
@@ -279,7 +285,7 @@ function createOllamaProvider({
 
       return failureResult(mappedError);
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 

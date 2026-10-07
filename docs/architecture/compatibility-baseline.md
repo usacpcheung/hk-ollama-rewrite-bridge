@@ -115,6 +115,19 @@ the implementing PR. This is target behavior, not a claim about current support.
 Retirement requires a separate consumer migration and removal decision; no date or
 removal is introduced here. Portable workflows must not require raw IDs internally.
 
+## Runtime defect corrections after the audit
+
+The [2026-10-07 correction review](../reviews/2026-10-07-runtime-failure-corrections.md)
+records explicitly authorized fixes to cancellation, streaming completion/backpressure,
+JSON-read timeout classification and T2A upstream-auth classification. These defects
+are not compatibility requirements. Preserve the corrected behavior in later refactors,
+using the new [HTTP fault tests](../../tests/runtime-failures-http.test.js) and
+[provider stream fault tests](../../tests/provider-stream-faults.test.js).
+The registry/class-method correction is reviewed in parent PR #131. Runtime correction
+PR #132 is stacked on `codex/provider-registry-step2`: its branch includes the registry,
+while its diff against #131 contains the runtime corrections. Both remain open for testing;
+the intended sequence is `main → #131 → #132`.
+
 ## Verification limits and the next refactor gate
 
 Run `npm test` with Node.js 22 or 24. The suite serializes test files because real
@@ -132,15 +145,16 @@ coverage. These counts describe successive checkpoints, not competing baselines.
 
 - No live provider/model quality, real Google credentials, billing behavior, Apache
   OIDC deployment, or worksheet UI is certified by these local tests.
-- Transcription success/error/media lifecycle tests exercise the service mounted in
-  a test Express app with injected Google/media fixtures. Actual `server.js` tests
-  cover auth, parsing, limiter ordering, and pre-provider rejection. Before moving
-  transcription composition, extend coverage across the full server-to-recognition
-  success boundary without introducing live cloud dependencies.
-- Warmup tests cover on-demand recovery and exhausted startup, not every scheduling
-  interleaving or the HTTP `MODEL_WARMUP_STARTED` variant during startup. Add targeted
-  coverage before altering that branch. Queue expiry is deterministic unit coverage;
-  it is not a load/stress test.
+- Transcription component tests still cover injected lifecycle/error/media cases.
+  [Actual-server composition tests](../../tests/transcription-composition.test.js)
+  now run both successful aliases with real FFmpeg and a preloaded fake Google SDK,
+  including Google permission/quota/deadline errors, executable permission failure,
+  upload timeout and cleanup. No live credentials are used.
+- [Startup composition tests](../../tests/warmup-composition.test.js) now cover HTTP
+  `MODEL_WARMUP_STARTED` and `Retry-After` on both aliases while T2A remains available.
+  These close the previously named composition/startup examples, not every possible
+  scheduling interleaving. [Runtime failure tests](../../tests/runtime-failure-units.test.js)
+  add cancellation/timeout/release races and slow-output ownership checks.
 - Provider wire fixtures and exact preset mappings are integration compatibility
   checks, not requirements to expose those native structures to service consumers.
 
@@ -184,3 +198,20 @@ remain the record for PRs #128/#129, not the total after later additions.
 
 See [registry boundaries and remaining work](provider-registry.md) before interpreting
 this construction refactor as complete env-driven provider interchangeability.
+
+## Whole-branch correction gate in PR #132
+
+The assembled branch also corrects inherited defects found during its full review.
+Literal prompt text must survive template insertion; unavailable readiness must not
+reuse stale health; malformed provider text and empty Ollama streams must fail.
+T2A provider failures and unrelated hexadecimal metadata cannot become audio success.
+Streaming conversion must preserve whole-text OpenCC results across chunk boundaries;
+public chunk fields and terminal metadata remain unchanged, but chunk count is not
+fixed. The widget must require completion, honor body-read deadlines, count Unicode
+code points, and distinguish model readiness from process availability.
+
+Evidence: [whole-branch regressions](../../tests/whole-branch-regressions.test.js),
+[widget regressions](../../tests/widget-regressions.test.js), and the existing
+[HTTP contracts](../../tests/api-contract.test.js). The OpenCC parity check covers
+every loaded dictionary entry split into UTF-16 units. Existing baseline counts above
+are historical checkpoints; PR #132 records the final full-suite/CI results.
