@@ -415,6 +415,12 @@ Send `voice_choice` to select a complete, provider-independent preset:
 
 The choice includes its language, voice identity, speed, volume, pitch and additional effects. Do not combine it with `voice_id`, `language_boost`, `speed`, `volume` or `pitch`, even with null values; mixed requests return `400 INVALID_INPUT`. Output settings remain independent. IDs are case-sensitive after surrounding whitespace is trimmed. Null, empty, non-string and unknown choices return `400 INVALID_INPUT` without a provider call.
 
+The stable intent includes language and speaker sex. Provider authors must document
+how they realize that intent; native voice IDs and tuning stay in the adapter.
+Different providers may use descriptive prompts and need not produce identical
+timbre. The current MiniMax mappings are unchanged; actual sound requires listening
+acceptance. See the [service/provider design](../architecture/provider-abstraction-step-3.md#t2a).
+
 MiniMax mappings:
 
 | `voice_choice` | Intended character | MiniMax `voice_id` | Speed | Pitch | Language |
@@ -499,6 +505,10 @@ Typical headers:
 Body: raw audio bytes, unchanged by the bridge (no transcoding).
 
 ### Audio-format metadata
+
+The shared output writer takes audio labels from the selected audio artifact,
+not another artifact such as a transcript. Unsupported or contradictory internal
+audio declarations fail with 502 `PROVIDER_ERROR` before response headers are written.
 
 The headers above describe MP3. For WAV the MIME is `audio/wav` and filename is
 `speech.wav`; for PCM they are `audio/pcm` and `speech.pcm`. JSON success uses the
@@ -665,3 +675,19 @@ are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
 `data.wrapper.payload` variant is retained. Existing direct response candidates remain
 supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
 fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.
+
+
+### Malformed input and upstream stream fields
+
+Malformed numeric T2A values that cannot be converted, such as
+`{"speed":{"toString":"bad"}}`, return 400 `INVALID_INPUT` with the relevant field
+message. This applies to speed, volume, pitch, sample rate and bitrate on both
+aliases; no provider call is made. Existing accepted numeric strings and bounds
+are unchanged.
+
+Rewrite adapters reject malformed text-bearing stream fields and completion
+metadata rather than silently discarding content and reporting success. After
+streaming headers have been sent, the HTTP status remains 200 and the terminal
+NDJSON `error` contains status 502. Callers must check terminal errors even when
+earlier chunks contained valid text. Valid role/metadata/reasoning events remain
+supported; they are not treated as rewritten text.

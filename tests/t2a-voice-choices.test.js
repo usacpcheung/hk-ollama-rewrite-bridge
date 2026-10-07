@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { resolveT2AVoiceChoice } = require('../lib/t2a-voice-choices');
+const { resolveT2AVoiceChoice } = require('../providers/minimax-voices');
 
 test('a valid voice choice without a provider mapping fails explicitly', () => {
   for (const provider of ['google', 'missing-provider', '__proto__', 'constructor']) {

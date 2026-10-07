@@ -1,6 +1,6 @@
 # Current runtime and request flows
 
-Updated for the step-2 registry PR based on main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Updated for the step-3 service/provider separation branch stacked on PR #132. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
@@ -11,7 +11,7 @@ The rewrite/T2A runtimes contain the service, provider name, adapter, capabiliti
 Provider construction now resolves a `(provider, service)` registration in
 [`providers/index.js`](../../providers/index.js) through
 [`lib/provider-registry.js`](../../lib/provider-registry.js). The server supplies
-capabilities per service to configuration; MiniMax rewrite streaming no longer
+capabilities per service to the readers in `configuration/`; MiniMax rewrite streaming no longer
 appears as a T2A capability. Configured service streaming remains the effective
 request toggle. See the [registry contract](provider-registry.md).
 
@@ -29,7 +29,7 @@ The “global” request policy is a baseline per resolved identity, not an aggr
 
 Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 
-1. [`services/rewrite.js`](../../services/rewrite.js) trims and validates text, counts Unicode code points, selects streaming capability and builds provider prompts.
+1. [`services/rewrite.js`](../../services/rewrite.js) trims and validates text, counts Unicode code points, selects streaming capability and builds `{ text, instructions, outputBudget }`. Provider-owned request translation assembles native prompts.
 2. `server.js` applies rewrite readiness/warmup/recovery gates and selects ready/cold timeout. Ollama uses active readiness probes and warmup; MiniMax uses passive state based on API-key presence and observed requests, without synthetic paid probes.
 3. [`lib/service-invoker.js`](../../lib/service-invoker.js) acquires admission by provider, invokes the adapter's sync/stream handler, and records lifecycle success/failure.
 4. [`providers/ollama.js`](../../providers/ollama.js) or [`providers/minimax.js`](../../providers/minimax.js) parses transport responses into the [internal contract](adr/0001-internal-bridge-contract.md).
@@ -39,7 +39,7 @@ Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 
 ## T2A
 
-Both `/t2a` and `/api/t2a` run the T2A limiter and shared auth. [`services/t2a.js`](../../services/t2a.js) rejects streaming, trims/validates text and controls, and resolves either raw voice settings or the complete preset from [`lib/t2a-voice-choices.js`](../../lib/t2a-voice-choices.js). A choice cannot be mixed with raw voice controls, even null ones.
+Both `/t2a` and `/api/t2a` run the T2A limiter and shared auth. [`services/t2a.js`](../../services/t2a.js) rejects streaming, trims/validates text and output options, and uses an injected pure policy for legacy control validation. It emits a default, legacy or stable preset selection from [`lib/t2a-voice-choices.js`](../../lib/t2a-voice-choices.js). MiniMax defaults and native preset mapping are applied in [`providers/minimax-t2a-compatibility.js`](../../providers/minimax-t2a-compatibility.js) and [`providers/minimax-voices.js`](../../providers/minimax-voices.js). A choice cannot be mixed with raw voice controls, even null ones.
 
 The route checks supported provider/key, invokes through the shared admission/invocation path, and writes raw bytes or base64 JSON. T2A's lifecycle is a no-op; it does not consult rewrite readiness before invocation. The MiniMax adapter sends native settings, not `voice_choice`, and does not write audio to disk.
 
@@ -70,3 +70,9 @@ A deletion failure blocks further admission in that process. Failed final cleanu
 ## Validation evidence
 
 The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The original documentation review passed 203 tests; after PRs #128/#129 the suite contains 238 passing tests, including real FFmpeg normalization. That baseline passed all 238 tests with zero failures/skips. The step-2 registry change adds seven registry cases and one HTTP case; its 246-test suite also passes without failures/skips. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.
+
+Step 3 separates rewrite/T2A request intent from native payloads and defines the
+transcription input contract without migrating its production workflow. See the
+[step-3 design and gates](provider-abstraction-step-3.md) for current boundaries,
+extension proofs and remaining steps. PR #132 recorded 306 passing tests before
+this increment; earlier counts above are historical checkpoints.

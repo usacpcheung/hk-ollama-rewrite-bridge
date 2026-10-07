@@ -369,8 +369,6 @@ const serviceRuntimes = createServiceRuntimes({
     ollamaPsUrl: OLLAMA_PS_URL,
     ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
     minimaxApiKey: MINIMAX_API_KEY,
-    minimaxSystemPrompt: rewriteServiceDefinition?.prompts?.minimaxSystemPrompt,
-    minimaxUserTemplate: rewriteServiceDefinition?.prompts?.minimaxUserTemplate,
     debugLog
   }),
   createLifecycleOptions: () => ({
@@ -862,7 +860,7 @@ app.post(
       return errorResponse(res, validationResult.status, validationResult.code, validationResult.message);
     }
 
-    const { trimmedText, streamRequested, inputCharCount } = validationResult.value;
+    const { streamRequested, inputCharCount } = validationResult.value;
     inputLength = inputCharCount;
 
     if (streamRequested && !rewriteService.capabilities.streaming) {
@@ -874,7 +872,7 @@ app.post(
       );
     }
 
-    const { prompt, systemPrompt, userContent } = rewriteService.buildPrompt({ text: trimmedText, isMinimax });
+    const requestPayload = rewriteService.buildRequest(validationResult.value);
 
     const nowMs = Date.now();
     const probeAgeMs = lastProbeAtMs ? Math.max(0, nowMs - lastProbeAtMs) : Number.POSITIVE_INFINITY;
@@ -1025,11 +1023,7 @@ app.post(
           runtime: rewriteRuntime,
         signal: cancellation.signal,
           requestId,
-          payload: {
-            prompt,
-            systemPrompt,
-            userContent
-          },
+          payload: requestPayload,
           timeoutMs: selectedTimeoutMs,
           executeWithAdmission,
           onChunk: async (event, { signal } = {}) => {
@@ -1118,11 +1112,7 @@ app.post(
         runtime: rewriteRuntime,
         signal: cancellation.signal,
         requestId,
-        payload: {
-          prompt,
-          systemPrompt,
-          userContent
-        },
+        payload: requestPayload,
         timeoutMs: selectedTimeoutMs,
         executeWithAdmission
       });
@@ -1202,7 +1192,7 @@ app.post(
         return errorResponse(res, validationResult.status, validationResult.code, validationResult.message);
       }
 
-      const { trimmedText, responseMode, voice, audio } = validationResult.value;
+      const { responseMode } = validationResult.value;
 
       if (validationResult.value.streamRequested) {
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
@@ -1232,14 +1222,7 @@ app.post(
           runtime: t2aRuntime,
           signal: cancellation.signal,
           requestId,
-          payload: {
-            text: trimmedText,
-            voice,
-            audio,
-            languageBoost: validationResult.value.languageBoost,
-            voiceModify: validationResult.value.voiceModify,
-            outputFormat: validationResult.value.outputFormat
-          },
+          payload: t2aService.buildRequest(validationResult.value),
           timeoutMs: t2aService.timeouts.invokeMs,
           executeWithAdmission
         });

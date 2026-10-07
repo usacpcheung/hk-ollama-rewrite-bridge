@@ -68,7 +68,7 @@ function createOllamaProvider({
     });
   }
 
-  async function rewrite({ requestId, prompt, timeoutMs, signal }) {
+  async function rewrite({ requestId, prompt, timeoutMs, signal, maxTokens = maxCompletionTokens }) {
     return generate({
       requestId,
       prompt,
@@ -76,12 +76,12 @@ function createOllamaProvider({
       signal,
       options: {
         temperature: 0.15,
-        num_predict: maxCompletionTokens
+        num_predict: maxTokens
       }
     });
   }
 
-  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk, signal }) {
+  async function rewriteStream({ requestId, prompt, timeoutMs, onChunk, signal, maxTokens = maxCompletionTokens }) {
     return generateStream({
       requestId,
       prompt,
@@ -89,7 +89,7 @@ function createOllamaProvider({
       signal,
       options: {
         temperature: 0.15,
-        num_predict: maxCompletionTokens
+        num_predict: maxTokens
       },
       onChunk
     });
@@ -213,6 +213,12 @@ function createOllamaProvider({
           throw invalidChunkError();
         }
 
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+            (Object.hasOwn(payload, 'response') && typeof payload.response !== 'string') ||
+            (Object.hasOwn(payload, 'done') && typeof payload.done !== 'boolean') ||
+            (payload.done_reason != null && typeof payload.done_reason !== 'string')) {
+          throw invalidChunkError();
+        }
         lastChunk = payload;
         const token = payload?.response;
         if (typeof token === 'string' && token.length > 0) {
