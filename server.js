@@ -1,6 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
-const { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES } = require('./providers');
+const { createProvider, createProviderLifecycle, providerRegistry } = require('./providers');
 const { createProviderAdapter } = require('./lib/provider-adapter');
 const { createServiceRuntimes } = require('./lib/service-runtime');
 const { createServiceRegistry } = require('./services');
@@ -349,7 +349,7 @@ const serviceRegistry = createServiceRegistry({
     parseRawBoundedInteger(rawValue, fallback, bounds, envName),
   parseEnvMilliseconds: (rawValue, fallback, bounds = {}, envName = 'value') =>
     parseRawMilliseconds(rawValue, fallback, bounds, envName),
-  providerCapabilities: PROVIDER_CAPABILITIES
+  providerCapabilitiesForService: providerRegistry.capabilitiesFor
 });
 const rewriteServiceDefinition = serviceRegistry.get('rewrite');
 

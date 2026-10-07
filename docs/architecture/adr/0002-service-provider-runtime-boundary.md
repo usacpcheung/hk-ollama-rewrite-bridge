@@ -2,7 +2,7 @@
 
 - Status: Implemented for rewrite/T2A; broader route orchestration remains partial
 - Date: 2026-05-07
-- Implementation reviewed: 2026-10-06 against main `a50c47d150724820080a8e7d7861070b7a0ecc51`
+- Implementation updated: step-2 PR based on main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`
 
 ## Context
 
@@ -23,9 +23,14 @@ The original proposal called for routes to use a service runtime instead of asse
 }
 ```
 
-Rewrite and T2A select providers independently. [`providers/index.js`](../../../providers/index.js) constructs providers from service-scoped runtime configuration, and [`lib/provider-adapter.js`](../../../lib/provider-adapter.js) dispatches `services[serviceId].sync` / `.stream`, retaining rewrite compatibility shims.
+Rewrite and T2A select providers independently. [`providers/index.js`](../../../providers/index.js) uses registered service/provider factories from service-scoped runtime configuration, and [`lib/provider-adapter.js`](../../../lib/provider-adapter.js) dispatches `services[serviceId].sync` / `.stream`, retaining rewrite compatibility shims.
 
 [`lib/service-invoker.js`](../../../lib/service-invoker.js) wraps invocation with admission and lifecycle success/failure recording. [`providers/lifecycle.js`](../../../providers/lifecycle.js) owns active Ollama readiness/warmup, passive MiniMax rewrite readiness/recovery and the no-op lifecycle used by T2A. [`lib/service-output-writer.js`](../../../lib/service-output-writer.js) translates internal output into the public rewrite and audio responses.
+
+The [provider registry](../provider-registry.md) supplies per-service capabilities
+and validates factory handler declarations. Runtime capabilities combine that
+descriptor with existing configured service capabilities. Lifecycle descriptors
+are informational in this stage; the existing lifecycle factory still selects policy.
 
 ## Current limits of the boundary
 

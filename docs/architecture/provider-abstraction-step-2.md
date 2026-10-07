@@ -1,11 +1,11 @@
 # Provider abstraction — step 2 scope and acceptance gates
 
-Status: agreed implementation plan; implementation has not started.
-Based on merged main `a50c47d150724820080a8e7d7861070b7a0ecc51` (2026-10-06).
-PR #130 updates documentation and the plan only. After its merge, the operator will
-update and verify the VPS, then record that exact commit as the production base.
-Do not create a step-2 implementation PR until separately instructed.
-See the [six-stage roadmap and deployment gates](provider-abstraction-roadmap.md).
+Status: implemented in this step-2 PR; pending review/merge, not deployed.
+Implementation base: main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
+The operator's VPS deployment state has not been inspected. This PR does not
+change the production pin or authorize deployment or later refactor stages.
+See the [six-stage roadmap and deployment gates](provider-abstraction-roadmap.md)
+and [registry implementation/extension contract](provider-registry.md).
 
 ## Target and current boundary
 
@@ -15,15 +15,15 @@ handling and response normalization. Existing output contracts remain the consum
 boundary. Selecting an implemented provider/model should eventually use documented
 environment settings plus restart; a new upstream protocol still needs adapter code.
 
-Today rewrite/T2A have a service registry, hardcoded provider factory and shared
-invoker/output writer. Transcription constructs Google independently and owns its
+Rewrite/T2A now use registered factories and per-service provider capabilities
+with their existing service registry and shared invoker/output writer. Transcription constructs Google independently and owns its
 upload/conversion/cancellation/cleanup lifecycle. See [runtime](runtime.md) and
 [ADR 0002](adr/0002-service-provider-runtime-boundary.md). Output normalization
 already exists, but it is not proof of complete provider interchangeability.
 
 ## Step 2: working provider registration and construction
 
-Implement the extension boundary and connect it to existing rewrite/T2A runtimes:
+The implementation covers the following agreed scope:
 
 1. Specify contracts for sync and optional streaming invocation, normalized output,
    controlled errors, configuration ownership and optional lifecycle hooks. Reuse
