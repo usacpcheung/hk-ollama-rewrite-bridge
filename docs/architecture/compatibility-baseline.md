@@ -132,15 +132,16 @@ coverage. These counts describe successive checkpoints, not competing baselines.
 
 - No live provider/model quality, real Google credentials, billing behavior, Apache
   OIDC deployment, or worksheet UI is certified by these local tests.
-- Transcription success/error/media lifecycle tests exercise the service mounted in
-  a test Express app with injected Google/media fixtures. Actual `server.js` tests
-  cover auth, parsing, limiter ordering, and pre-provider rejection. Before moving
-  transcription composition, extend coverage across the full server-to-recognition
-  success boundary without introducing live cloud dependencies.
-- Warmup tests cover on-demand recovery and exhausted startup, not every scheduling
-  interleaving or the HTTP `MODEL_WARMUP_STARTED` variant during startup. Add targeted
-  coverage before altering that branch. Queue expiry is deterministic unit coverage;
-  it is not a load/stress test.
+- Transcription component tests still cover injected lifecycle/error/media cases.
+  [Actual-server composition tests](../../tests/transcription-composition.test.js)
+  now run both successful aliases with real FFmpeg and a preloaded fake Google SDK,
+  including Google permission/quota/deadline errors, executable permission failure,
+  upload timeout and cleanup. No live credentials are used.
+- [Startup composition tests](../../tests/warmup-composition.test.js) now cover HTTP
+  `MODEL_WARMUP_STARTED` and `Retry-After` on both aliases while T2A remains available.
+  These close the previously named composition/startup examples, not every possible
+  scheduling interleaving. [Runtime failure tests](../../tests/runtime-failure-units.test.js)
+  add cancellation/timeout/release races and slow-output ownership checks.
 - Provider wire fixtures and exact preset mappings are integration compatibility
   checks, not requirements to expose those native structures to service consumers.
 
@@ -184,3 +185,13 @@ remain the record for PRs #128/#129, not the total after later additions.
 
 See [registry boundaries and remaining work](provider-registry.md) before interpreting
 this construction refactor as complete env-driven provider interchangeability.
+## Runtime defect corrections after the audit
+
+The [2026-10-07 correction review](../reviews/2026-10-07-runtime-failure-corrections.md)
+records explicitly authorized fixes to cancellation, streaming completion/backpressure,
+JSON-read timeout classification and T2A upstream-auth classification. These defects
+are not compatibility requirements. Preserve the corrected behavior in later refactors,
+using the new [HTTP fault tests](../../tests/runtime-failures-http.test.js) and
+[provider stream fault tests](../../tests/provider-stream-faults.test.js).
+The registry/class-method correction is separately reviewed in PR #131; this runtime
+correction branch is based on main and does not introduce the registry refactor.

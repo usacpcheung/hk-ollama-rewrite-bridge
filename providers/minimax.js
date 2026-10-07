@@ -1,3 +1,4 @@
+const { createInvocationAbort } = require('../lib/invocation-abort');
 const { randomUUID } = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
 
@@ -33,7 +34,7 @@ function createMinimaxProvider({
     includeTemperature: false
   });
 
-  async function checkReadiness({ timeoutMs }) {
+  async function checkReadiness({ timeoutMs, signal }) {
     if (!apiKey) {
       return { ready: false, error: 'minimax_api_key_missing' };
     }
@@ -42,8 +43,7 @@ function createMinimaxProvider({
       return { ready: true, error: null };
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     try {
       const response = await fetch(apiUrl, {
@@ -74,15 +74,15 @@ function createMinimaxProvider({
 
       return { ready: false, error: 'minimax_readiness_fetch_failed' };
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
-  async function triggerWarmup({ timeoutMs }) {
+  async function triggerWarmup({ timeoutMs, signal }) {
     return successResult({ response: '', usage: null });
   }
 
-  async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs }) {
+  async function rewrite({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, signal }) {
     if (apiFormat === 'anthropic') {
       return generateAnthropic({
         requestId,
@@ -90,6 +90,7 @@ function createMinimaxProvider({
         systemPrompt: runtimeSystemPrompt,
         userContent,
         timeoutMs,
+        signal,
         maxTokens: maxCompletionTokens
       });
     }
@@ -100,11 +101,12 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
+      signal,
       maxTokens: maxCompletionTokens
     });
   }
 
-  async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk }) {
+  async function rewriteStream({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, onChunk, signal }) {
     if (apiFormat === 'anthropic') {
       return generateAnthropicStream({
         requestId,
@@ -112,6 +114,7 @@ function createMinimaxProvider({
         systemPrompt: runtimeSystemPrompt,
         userContent,
         timeoutMs,
+        signal,
         maxTokens: maxCompletionTokens,
         onChunk
       });
@@ -123,14 +126,14 @@ function createMinimaxProvider({
       systemPrompt: runtimeSystemPrompt,
       userContent,
       timeoutMs,
+      signal,
       maxTokens: maxCompletionTokens,
       onChunk
     });
   }
 
-  async function t2a({ requestId, text, voice, audio, languageBoost, voiceModify, outputFormat, timeoutMs }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  async function t2a({ requestId, text, voice, audio, languageBoost, voiceModify, outputFormat, timeoutMs, signal }) {
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     try {
       const headers = {
@@ -176,11 +179,16 @@ function createMinimaxProvider({
         signal: controller.signal
       });
 
+      if (!response.ok) {
+        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
+      }
+
       let data;
       try {
         data = await response.json();
-      } catch (_err) {
-        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
+      } catch (err) {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return failureResult(mapError(err, { kind: 'invalid_json' }));
       }
 
       debugLog?.({
@@ -194,10 +202,6 @@ function createMinimaxProvider({
           response: data
         }
       });
-
-      if (!response.ok) {
-        return failureResult(mapError(new Error('request_failed'), { kind: 'http', status: response.status }));
-      }
 
       const extractedAudio = extractMinimaxT2AAudio(data);
       if (!extractedAudio.ok) {
@@ -235,13 +239,12 @@ function createMinimaxProvider({
     } catch (err) {
       return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
-  async function generate({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  async function generate({ requestId, prompt, systemPrompt: runtimeSystemPrompt, userContent, timeoutMs, maxTokens, signal }) {
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     try {
       const headers = {
@@ -280,8 +283,9 @@ function createMinimaxProvider({
       let data;
       try {
         data = await response.json();
-      } catch (_err) {
-        return failureResult(mapError(new Error('invalid_json'), { kind: 'invalid_json' }));
+      } catch (err) {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        return failureResult(mapError(err, { kind: 'invalid_json' }));
       }
 
       debugLog?.({
@@ -316,7 +320,7 @@ function createMinimaxProvider({
     } catch (err) {
       return failureResult(mapError(err, { kind: 'fetch' }));
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
@@ -326,15 +330,15 @@ function createMinimaxProvider({
     systemPrompt: runtimeSystemPrompt,
     userContent,
     timeoutMs,
+    signal,
     maxTokens,
     onChunk
   }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
 
     const emit = async (event) => {
       if (typeof onChunk === 'function') {
-        await onChunk(event);
+        await onChunk(event, { signal: controller.signal });
       }
     };
 
@@ -379,6 +383,7 @@ function createMinimaxProvider({
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
+      const invalidChunk = () => Object.assign(new Error('invalid_stream'), { code: 'INVALID_JSON_CHUNK' });
       let streamedText = '';
       let doneEventEmitted = false;
       let doneReason = 'stop';
@@ -423,7 +428,7 @@ function createMinimaxProvider({
 
       const processSseFrame = async (frame) => {
         const trimmed = frame.trim();
-        if (!trimmed) {
+        if (doneEventEmitted || !trimmed) {
           return;
         }
 
@@ -439,14 +444,17 @@ function createMinimaxProvider({
         }
 
         if (payload === '[DONE]') {
+          if (!(streamedText || finalMessageContent).trim()) throw invalidChunk();
+          if (!streamedText && finalMessageContent) {
+            await emitMappedChunk(buildMappedChunk({ id: streamId, model, response: finalMessageContent, done: false }));
+            streamedText = finalMessageContent;
+          }
           await emitDone();
           return;
         }
 
         const parsedFrame = parseMinimaxSseFrame(payload);
-        if (!parsedFrame) {
-          return;
-        }
+        if (!parsedFrame) throw invalidChunk();
 
         if (parsedFrame.providerFailure) {
           const error = mapError(new Error('provider_error'), {
@@ -460,8 +468,8 @@ function createMinimaxProvider({
           });
         }
 
-        if (parsedFrame.completion) {
-          finalCompletionEvent = parsedFrame.completion;
+        if (parsedFrame.completion || parsedFrame.terminalPayload) {
+          finalCompletionEvent = parsedFrame.completion || parsedFrame.terminalPayload;
         }
 
         if (typeof parsedFrame.finalMessageContent === 'string' && parsedFrame.finalMessageContent.length > 0) {
@@ -481,13 +489,12 @@ function createMinimaxProvider({
           }
 
           await emitMappedChunk(chunk);
-          return;
+          if (!parsedFrame.terminalReason) return;
         }
 
-        if (parsedFrame.chunk?.done) {
-          if (parsedFrame.chunk.done_reason && !authoritativeDoneReason) {
-            authoritativeDoneReason = parsedFrame.chunk.done_reason;
-          }
+        if (parsedFrame.chunk?.done || parsedFrame.terminalReason) {
+          const reason = parsedFrame.terminalReason || parsedFrame.chunk?.done_reason;
+          if (reason && !authoritativeDoneReason) authoritativeDoneReason = reason;
 
           if (!streamedText && finalMessageContent) {
             await emitMappedChunk(
@@ -501,17 +508,19 @@ function createMinimaxProvider({
             streamedText += finalMessageContent;
           }
 
-          await emitDone(parsedFrame.chunk.done_reason);
+          if (!(streamedText || finalMessageContent).trim()) throw invalidChunk();
+          await emitDone(reason);
         }
       };
 
-      while (true) {
+      while (!doneEventEmitted) {
         const { value, done } = await reader.read();
         if (done) {
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
+        if (Buffer.byteLength(buffer) > 1024 * 1024) throw invalidChunk();
 
         const frames = buffer.split(/\r?\n\r?\n/);
         buffer = frames.pop() || '';
@@ -522,9 +531,9 @@ function createMinimaxProvider({
       }
 
       buffer += decoder.decode();
-      if (buffer.trim()) {
-        await processSseFrame(buffer);
-      }
+      if (!doneEventEmitted && buffer.trim()) await processSseFrame(buffer);
+      if (!doneEventEmitted) throw invalidChunk();
+      await reader.cancel();
 
       const finalTerminal = normalizeProviderStreamTerminal({
         provider: 'minimax',
@@ -570,7 +579,7 @@ function createMinimaxProvider({
       }
       return failureResult(mappedError);
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
@@ -618,10 +627,10 @@ function createMinimaxProvider({
     systemPrompt: runtimeSystemPrompt,
     userContent,
     timeoutMs,
+    signal,
     maxTokens
   }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
     const body = buildAnthropicRequest({
       prompt,
       systemPrompt: runtimeSystemPrompt,
@@ -671,7 +680,7 @@ function createMinimaxProvider({
     } catch (err) {
       return failureResult(mapAnthropicError(err));
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
@@ -681,11 +690,11 @@ function createMinimaxProvider({
     systemPrompt: runtimeSystemPrompt,
     userContent,
     timeoutMs,
+    signal,
     maxTokens,
     onChunk
   }) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const { controller, dispose } = createInvocationAbort(signal, timeoutMs);
     const body = buildAnthropicRequest({
       prompt,
       systemPrompt: runtimeSystemPrompt,
@@ -695,7 +704,7 @@ function createMinimaxProvider({
     });
     const emit = async (event) => {
       if (typeof onChunk === 'function') {
-        await onChunk(event);
+        await onChunk(event, { signal: controller.signal });
       }
     };
 
@@ -764,6 +773,7 @@ function createMinimaxProvider({
 
         if (event.type === 'message_stop') {
           sawMessageStop = true;
+          break;
         }
       }
 
@@ -805,7 +815,7 @@ function createMinimaxProvider({
       await emit(streamErrorEvent({ error: mappedError }));
       return failureResult(mappedError);
     } finally {
-      clearTimeout(timeout);
+      dispose();
     }
   }
 
@@ -970,6 +980,8 @@ function parseMinimaxSseFrame(payload) {
   if (providerFailure) {
     return {
       completion,
+      terminalReason: finishReason,
+      terminalPayload: finishReason ? eventData : null,
       finalMessageContent: '',
       chunk: null,
       providerFailure
@@ -979,6 +991,8 @@ function parseMinimaxSseFrame(payload) {
   if (typeof deltaText === 'string' && deltaText.length > 0) {
     return {
       completion,
+      terminalReason: finishReason,
+      terminalPayload: finishReason ? eventData : null,
       finalMessageContent,
       chunk: buildMappedChunk({ response: deltaText, done: false }),
       providerFailure: null
@@ -988,6 +1002,8 @@ function parseMinimaxSseFrame(payload) {
   if (finishReason) {
     return {
       completion,
+      terminalReason: finishReason,
+      terminalPayload: finishReason ? eventData : null,
       finalMessageContent,
       chunk: buildMappedChunk({ response: '', done: true, doneReason: finishReason, usage: eventData?.usage || null }),
       providerFailure: null
@@ -997,6 +1013,8 @@ function parseMinimaxSseFrame(payload) {
   if (typeof finalMessageContent === 'string' && finalMessageContent.length > 0) {
     return {
       completion,
+      terminalReason: finishReason,
+      terminalPayload: finishReason ? eventData : null,
       finalMessageContent,
       chunk: null,
       providerFailure: null

@@ -10,6 +10,7 @@ const { createClientIdentityResolver } = require('./auth/client-identity');
 const { createRateLimitMiddlewares } = require('./middleware/rate-limit');
 const { createDebugLogger } = require('./providers/debug-logger');
 const { createAdmissionController, isAdmissionOverloadError } = require('./lib/admission-controller');
+const { createRequestCancellation } = require('./lib/invocation-abort');
 const { readEnvWithDeprecatedAliases } = require('./lib/env-config');
 const {
   invokeServiceSync,
@@ -444,9 +445,10 @@ function admissionOverloadResponse(res, overloadError) {
   );
 }
 
-async function executeWithAdmission({ providerName, requestId, execute }) {
-  const ticket = await admissionController.acquire({ providerName, requestId });
+async function executeWithAdmission({ providerName, requestId, signal, execute }) {
+  const ticket = await admissionController.acquire({ providerName, requestId, signal });
   try {
+    signal?.throwIfAborted();
     return await execute({ waitMs: ticket.waitMs });
   } finally {
     ticket.release();
@@ -842,8 +844,9 @@ app.post(
   [rewriteService.routes.legacyPath, rewriteService.routes.futureApiPath],
   rewriteLimiter,
   rewriteHeaderAuth,
-  async (req, res) => {
+  async (req, res, next) => {
   const requestId = crypto.randomUUID();
+  const cancellation = createRequestCancellation(req, res);
   const startedAt = Date.now();
   let email = null;
   let inputLength = 0;
@@ -1023,12 +1026,13 @@ app.post(
       let streamDoneReason = 'stop';
       let finalUsage = null;
 
-      const streamWriter = createStreamWriter(res);
+      const streamWriter = createStreamWriter(res, { signal: cancellation.signal });
 
       let rewriteResult;
       try {
         rewriteResult = await invokeServiceStream({
           runtime: rewriteRuntime,
+        signal: cancellation.signal,
           requestId,
           payload: {
             prompt,
@@ -1037,20 +1041,21 @@ app.post(
           },
           timeoutMs: selectedTimeoutMs,
           executeWithAdmission,
-          onChunk: async (event) => {
+          onChunk: async (event, { signal } = {}) => {
+            if (cancellation.signal.aborted || res.destroyed) return;
             if (!event || typeof event !== 'object') {
               return;
             }
 
             if (event.type === 'error' && event.error && typeof event.error === 'object') {
-              writeRewriteStreamError({ streamWriter, error: event.error });
+              await writeRewriteStreamError({ streamWriter, error: event.error });
               return;
             }
 
             if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
               streamedText += event.text;
               streamedChunkEmitted = true;
-              writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text });
+              await writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text, signal });
               return;
             }
 
@@ -1061,13 +1066,13 @@ app.post(
               }
               streamDoneReason = event.reason || streamDoneReason;
               streamDoneEmitted = true;
-              writeRewriteStreamDone({ streamWriter, doneReason: streamDoneReason });
+              await writeRewriteStreamDone({ streamWriter, doneReason: streamDoneReason, signal });
             }
           }
         });
       } catch (error) {
         if (isAdmissionOverloadError(error)) {
-          streamWriter.writeError({
+          await streamWriter.writeError({
             code: error.code,
             message: error.message,
             status: error.status || 503,
@@ -1083,7 +1088,7 @@ app.post(
       if (!rewriteResult.ok) {
         const mappedError = rewriteResult.error;
         setLastError(mappedError.code, mappedError.message);
-        writeRewriteStreamError({ streamWriter, error: mappedError, defaultStatus: 502 });
+        await writeRewriteStreamError({ streamWriter, error: mappedError, defaultStatus: 502 });
         return res.end();
       }
 
@@ -1102,11 +1107,11 @@ app.post(
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
-        writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse });
+        await writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse });
       }
 
       if (!streamDoneEmitted) {
-        writeRewriteStreamDone({
+        await writeRewriteStreamDone({
           streamWriter,
           doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'
         });
@@ -1118,6 +1123,7 @@ app.post(
     try {
       rewriteResult = await invokeServiceSync({
         runtime: rewriteRuntime,
+        signal: cancellation.signal,
         requestId,
         payload: {
           prompt,
@@ -1166,7 +1172,12 @@ app.post(
     }
 
     return writeRewriteJsonSuccess({ res, service: rewriteService, response: modelText, usage });
+  } catch (error) {
+    if (cancellation.signal.aborted || res.destroyed) return;
+    if (res.headersSent) return res.destroy();
+    return next(error);
   } finally {
+    cancellation.dispose();
     logRewriteRequest({
       req,
       requestId,
@@ -1188,8 +1199,9 @@ app.post(
   [t2aService.routes.legacyPath, t2aService.routes.futureApiPath],
   t2aLimiter,
   rewriteHeaderAuth,
-  async (req, res) => {
+  async (req, res, next) => {
     const requestId = crypto.randomUUID();
+    const cancellation = createRequestCancellation(req, res);
 
     try {
       const validationResult = t2aService.validateRequest({ body: req.body });
@@ -1225,6 +1237,7 @@ app.post(
       try {
         t2aResult = await invokeServiceSync({
           runtime: t2aRuntime,
+          signal: cancellation.signal,
           requestId,
           payload: {
             text: trimmedText,
@@ -1261,11 +1274,14 @@ app.post(
       }
       return t2aWriteResult;
     } catch (error) {
+      if (cancellation.signal.aborted || res.destroyed) return;
       if (error?.code === 'STREAMING_UNSUPPORTED') {
         return errorResponse(res, 501, 'STREAMING_UNSUPPORTED', 'stream is not supported for t2a v1');
       }
 
-      throw error;
+      return next(error);
+    } finally {
+      cancellation.dispose();
     }
   }
 );

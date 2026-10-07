@@ -329,3 +329,22 @@ Internal loopback routes remain:
 - [Current documentation audit and baseline readiness](docs/reviews/2026-10-06-main-baseline-audit.md)
 - [Refactor roadmap and deployment gates](docs/architecture/provider-abstraction-roadmap.md)
 - [Step 2 scope and acceptance gates](docs/architecture/provider-abstraction-step-2.md)
+
+## Runtime failure handling
+
+Rewrite and T2A cancel queued work when the caller disconnects and forward cancellation
+to active provider requests. Admission is released only after invocation settles;
+client cancellation does not count as a provider-readiness failure. Cancellation is
+best effort and cannot undo work already accepted or billed by a remote provider.
+
+Streaming waits for downstream capacity, has a 1 MiB pending-output limit and a
+30-second maximum drain wait (also interrupted by the provider deadline or disconnect),
+and emits no text after a terminal event. Native Ollama/legacy MiniMax parsing rejects
+incomplete or malformed streams and bounds its pending input buffer at 1 MiB.
+A disconnected or persistently blocked client may receive a closed connection rather
+than a terminal error frame. Existing successful output formats are unchanged.
+
+MiniMax/Ollama timeouts while reading JSON remain timeout errors. T2A recognizes
+upstream 401/403 even when a proxy returns HTML instead of JSON. See the
+[runtime correction review](docs/reviews/2026-10-07-runtime-failure-corrections.md)
+and [API reference](docs/reference/api-reference.md).

@@ -261,6 +261,28 @@ The server emits text in `response` and applies HK Traditional Chinese conversio
 ```
 
 Read until the terminal `done` event; `done_reason` and `usage` are optional.
+No text follows a terminal event. Malformed legacy MiniMax data frames and streams
+ending before a valid completion signal produce a terminal error, not successful
+partial output. Definitive upstream completion ends reading without waiting for
+socket EOF (Ollama `done`, MiniMax legacy finish reason/`[DONE]`, Anthropic `message_stop`).
+
+The writer awaits downstream drain, limits pending output to 1 MiB, and allows at
+most 30 seconds per drain wait, bounded further by cancellation/provider deadlines.
+Native Ollama/legacy MiniMax parsers also cap pending input at 1 MiB. Oversized
+input is a controlled provider failure; an output limit, closed socket, or blocked
+client can require closing the connection because delivering an error is no longer
+reliable. Consumers must treat a connection ending without a terminal event as
+incomplete, not successful.
+
+For rewrite and T2A, disconnecting removes queued requests and aborts supported
+active upstream operations. Capacity remains occupied until invocation settles.
+Cancellation does not count as a provider-health failure, and cannot guarantee a
+remote provider stops processing or reverses billing. Transcription retains its
+independent cancellation/admission ownership rules.
+
+An invocation deadline during JSON body reading returns `504 MODEL_TIMEOUT`, just
+as a deadline before response headers does. MiniMax upstream 401/403 responses map
+to `502 PROVIDER_AUTH_ERROR` even when the response body is HTML or malformed JSON.
 
 ### Warming/startup responses
 
