@@ -42,7 +42,9 @@ exactly when declared, and `mapError`. Existing result/event shapes come from
 its events. A malformed registration/factory fails as an internal programming error.
 Factory adapters may be plain objects or class instances, including frozen objects.
 The registry forwards interface methods bound to the original adapter so prototype
-methods, getters and private state survive construction.
+methods, getters and private state survive construction. Shared dispatch binds
+`services[serviceId].sync/stream` to the owning service-handler object; legacy
+rewrite methods retain the provider receiver.
 Voice IDs and lifecycle methods are not required of every factory. Active-probe
 implementations still need the methods consumed by the existing lifecycle factory.
 

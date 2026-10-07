@@ -23,6 +23,7 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 | [ADR 0001](architecture/adr/0001-internal-bridge-contract.md) | Accepted internal result/event contract |
 | [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented rewrite/T2A boundary and remaining limits |
 | [Past documents](past/README.md) | Completed/superseded plans preserved as history |
+| [Step 3 corrective review](reviews/2026-10-07-step-3-corrections.md) | Four reproduced defects, their fixes and adversarial simulation evidence |
 | [Current audit](reviews/2026-10-06-main-baseline-audit.md) | Post-merge document review and baseline readiness evidence |
 | [Historical review](reviews/2026-10-06-documentation-review.md) | Original review and reconciliation checkpoints; not current implementation instructions |
 

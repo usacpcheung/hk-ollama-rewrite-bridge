@@ -213,6 +213,12 @@ function createOllamaProvider({
           throw invalidChunkError();
         }
 
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
+            (Object.hasOwn(payload, 'response') && typeof payload.response !== 'string') ||
+            (Object.hasOwn(payload, 'done') && typeof payload.done !== 'boolean') ||
+            (payload.done_reason != null && typeof payload.done_reason !== 'string')) {
+          throw invalidChunkError();
+        }
         lastChunk = payload;
         const token = payload?.response;
         if (typeof token === 'string' && token.length > 0) {

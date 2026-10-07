@@ -215,3 +215,14 @@ Evidence: [whole-branch regressions](../../tests/whole-branch-regressions.test.j
 [HTTP contracts](../../tests/api-contract.test.js). The OpenCC parity check covers
 every loaded dictionary entry split into UTF-16 units. Existing baseline counts above
 are historical checkpoints; PR #132 records the final full-suite/CI results.
+
+
+## Step-3 corrective evidence
+
+The [adversarial follow-up](../reviews/2026-10-07-step-3-corrections.md) adds
+`tests/step3-review-regressions.test.js` for malformed streamed text/completion
+fields (RW-01/RW-03), selected-artifact audio metadata (T2A-01), stateful adapter
+dispatch and non-throwing numeric validation (T2A-01/T2A-03). These intentionally
+correct inherited defects; malformed streams must not report successful partial
+output and invalid numeric objects must not return HTTP 500. Public success
+formats, current preset mappings and supported numeric strings remain unchanged.

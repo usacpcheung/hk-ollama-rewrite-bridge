@@ -4,7 +4,8 @@ function parseOptionalFiniteNumber(value, { min = -Infinity, max = Infinity } = 
     return undefined;
   }
 
-  const parsed = Number(value);
+  let parsed;
+  try { parsed = Number(value); } catch { return null; }
   if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
     return null;
   }

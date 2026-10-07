@@ -169,7 +169,7 @@ fixes and existing public HTTP assertions. New
 [`tests/service-provider-separation.test.js`](../../tests/service-provider-separation.test.js)
 proves alternative requests, description voices, transcription requirements and
 cancellation, native defaults and additional-service registration. Existing tests
-assert all nine MiniMax mappings, both rewrite protocols, aliases, output formats,
+assert all nine MiniMax mappings, all three rewrite protocols, aliases, output formats,
 validation/error ordering, auth, admission and failure behavior.
 
 Before proceeding: run the full suite and real-FFmpeg tests without skips, local
@@ -178,7 +178,7 @@ and PR base. Keep this PR and its parents open. No live cloud credentials, paid
 provider calls, VPS deployment or acoustic quality evaluation are established by
 local fixtures. Step 4 requires separate implementation authorization.
 
-### Local verification recorded 2026-10-07
+### Initial verification recorded 2026-10-07 (before adversarial follow-up)
 
 - Full Node 24 suite: 313 passed, zero failures or skips, including real FFmpeg.
 - Actual-server curl smoke: 18 checks passed across rewrite aliases/JSON/streaming,
@@ -192,3 +192,14 @@ local fixtures. Step 4 requires separate implementation authorization.
 - No further confirmed defect was found in this review. Fixtures do not establish
   absence of all bugs; live authentication/provider/voice acceptance remains stage 6.
 - Node 22/24 CI results for the pushed commit are recorded in the PR description.
+
+
+### Authorized corrective follow-up
+
+The subsequent adversarial review reproduced four inherited defects: malformed
+rewrite streams reporting success, audio labels coming from an unrelated artifact,
+stateful service handlers losing their receiver, and malformed numeric T2A values
+throwing instead of returning validation errors. They are corrected in this branch;
+see the [review and simulation record](../reviews/2026-10-07-step-3-corrections.md).
+The eight additional regression tests bring the suite to 321. Earlier counts above
+are historical checkpoints; current CI evidence belongs to the PR's final commit.

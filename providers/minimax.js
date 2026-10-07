@@ -746,8 +746,17 @@ function createMinimaxProvider({
           continue;
         }
 
+        if (['content_block_delta', 'message_delta'].includes(event.type) &&
+            (!event.delta || typeof event.delta !== 'object' || Array.isArray(event.delta) ||
+              (event.type === 'content_block_delta' && typeof event.delta.type !== 'string'))) {
+          throw new SyntaxError('Invalid provider delta');
+        }
+
         if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-          const chunk = event.delta.text || '';
+          if (typeof event.delta.text !== 'string') {
+            throw new SyntaxError('Invalid provider text delta');
+          }
+          const chunk = event.delta.text;
           if (chunk) {
             text += chunk;
             await emit(streamTextEvent({ text: chunk, raw: event }));
@@ -770,6 +779,9 @@ function createMinimaxProvider({
         }
 
         if (event.type === 'message_delta') {
+          if (event.delta?.stop_reason != null && typeof event.delta.stop_reason !== 'string') {
+            throw new SyntaxError('Invalid provider stop reason');
+          }
           usage = mergeAnthropicUsage(usage, event.usage);
           doneReason = event.delta?.stop_reason || doneReason;
           continue;
@@ -980,6 +992,18 @@ function parseMinimaxSseFrame(payload) {
   const deltaText = choice?.delta?.content;
   const finishReason = choice?.finish_reason;
   const finalMessageContent = choice?.message?.content;
+
+  // Role-only deltas, null content and metadata frames carry no text. A present
+  // non-null content value must be text; never silently discard schema drift.
+  const object = value => value && typeof value === 'object' && !Array.isArray(value);
+  if (!object(eventData) ||
+      (eventData.choices != null && (!Array.isArray(eventData.choices) ||
+        (eventData.choices.length > 0 && !object(eventData.choices[0])))) ||
+      (choice.delta != null && !object(choice.delta)) ||
+      (choice.message != null && !object(choice.message)) ||
+      (deltaText != null && typeof deltaText !== 'string') ||
+      (finalMessageContent != null && typeof finalMessageContent !== 'string') ||
+      (finishReason != null && typeof finishReason !== 'string')) return null;
 
   if (providerFailure) {
     return {

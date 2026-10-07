@@ -25,7 +25,8 @@ function parseOptionalBoundedInteger(value, { min = 0, max = Number.MAX_SAFE_INT
     return undefined;
   }
 
-  const parsed = Number(value);
+  let parsed;
+  try { parsed = Number(value); } catch { return null; }
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
     return null;
   }

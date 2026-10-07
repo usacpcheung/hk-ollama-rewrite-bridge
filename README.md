@@ -67,6 +67,11 @@ See the [step-3 contracts](docs/architecture/provider-abstraction-step-3.md) for
 provider-owned native payloads/voice mappings and transcription contract design. See the
 [registry contract](docs/architecture/provider-registry.md).
 
+The step-3 corrective review also rejects malformed rewrite streams with terminal
+errors, keeps T2A audio labels tied to the selected audio, preserves stateful
+adapter methods and returns validation errors for malformed numeric T2A input.
+See the [review and simulation evidence](docs/reviews/2026-10-07-step-3-corrections.md).
+
 ## Requirements
 
 - Node.js 22+ (CI tests Node 22 and 24)
