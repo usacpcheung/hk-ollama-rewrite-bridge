@@ -221,6 +221,7 @@ function createOllamaProvider({
         }
 
         if (payload?.done) {
+          if (!responseText.trim()) throw invalidChunkError();
           const terminal = normalizeProviderStreamTerminal({
             provider: 'ollama',
             payload,

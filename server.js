@@ -552,7 +552,7 @@ function promoteServiceReady() {
   serviceState = 'ready';
 }
 
-function applyProbeState(probeReady, { demoteReadyOnUnknown = false } = {}) {
+function applyProbeState(probeReady, { demoteReadyOnUnknown = true } = {}) {
   if (probeReady === true) {
     promoteServiceReady();
     return;
@@ -647,9 +647,7 @@ async function runStartupWarmupLoop() {
     const warmupLogFields = getWarmupLogFields();
 
     lastProbeAtMs = Date.now();
-    if (probeResult.ready !== null) {
-      lastProbeReady = probeResult.ready;
-    }
+    lastProbeReady = probeResult.ready;
 
     if (probeResult.ready === true) {
       promoteServiceReady();
@@ -717,9 +715,7 @@ app.get('/model-status', async (_req, res) => {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
-    if (probeResult.ready !== null) {
-      lastProbeReady = probeResult.ready;
-    }
+    lastProbeReady = probeResult.ready;
   }
 
   if (usesPassiveReadiness) {
@@ -811,9 +807,7 @@ app.get('/readyz', opsLimiter, async (_req, res) => {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
-    if (probeResult.ready !== null) {
-      lastProbeReady = probeResult.ready;
-    }
+    lastProbeReady = probeResult.ready;
   }
 
   applyProbeState(probeReady);
@@ -893,9 +887,7 @@ app.post(
       lastProbeAtMs = Date.now();
       probeReady = probeResult.ready;
       probeError = probeResult.error;
-      if (probeResult.ready !== null) {
-        lastProbeReady = probeResult.ready;
-      }
+      lastProbeReady = probeResult.ready;
     }
 
     if (usesPassiveReadiness) {
@@ -936,9 +928,7 @@ app.post(
         probeReady = postWarmupProbe.ready;
         probeError = postWarmupProbe.error;
         lastProbeAtMs = Date.now();
-        if (postWarmupProbe.ready !== null) {
-          lastProbeReady = postWarmupProbe.ready;
-        }
+        lastProbeReady = postWarmupProbe.ready;
 
         applyProbeState(probeReady);
         if (probeReady !== true) {
@@ -1026,6 +1016,7 @@ app.post(
       let streamDoneReason = 'stop';
       let finalUsage = null;
 
+      const converter = rewriteService.createStreamConverter();
       const streamWriter = createStreamWriter(res, { signal: cancellation.signal });
 
       let rewriteResult;
@@ -1055,7 +1046,7 @@ app.post(
             if (event.type === 'text' && typeof event.text === 'string' && event.text.length > 0) {
               streamedText += event.text;
               streamedChunkEmitted = true;
-              await writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text, signal });
+              await writeRewriteStreamText({ streamWriter, service: rewriteService, text: event.text, signal, converter });
               return;
             }
 
@@ -1066,6 +1057,7 @@ app.post(
               }
               streamDoneReason = event.reason || streamDoneReason;
               streamDoneEmitted = true;
+              await writeRewriteStreamText({ streamWriter, service: rewriteService, text: '', signal, converter, final: true });
               await writeRewriteStreamDone({ streamWriter, doneReason: streamDoneReason, signal });
             }
           }
@@ -1107,10 +1099,11 @@ app.post(
       });
       const streamResponse = finalResponse || streamedText.trim();
       if (streamResponse && !streamedChunkEmitted) {
-        await writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse });
+        await writeRewriteStreamText({ streamWriter, service: rewriteService, text: streamResponse, converter });
       }
 
       if (!streamDoneEmitted) {
+        await writeRewriteStreamText({ streamWriter, service: rewriteService, text: '', converter, final: true });
         await writeRewriteStreamDone({
           streamWriter,
           doneReason: rewriteResult.data?.doneReason || streamDoneReason || 'stop'

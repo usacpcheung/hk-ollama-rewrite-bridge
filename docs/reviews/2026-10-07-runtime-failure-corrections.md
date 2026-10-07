@@ -71,3 +71,21 @@ mocked media tests still run without either tool. Tool detection checks successf
 
 CI continues installing both tools and must retain zero skipped tests. A passing
 local run with media skips is not full transcription/media verification.
+
+## Whole-branch review corrections
+
+The follow-up reviewed assembled PR #132, including inherited code. Nine confirmed
+issues were corrected: T2A metadata mistaken for audio, stale healthy readiness,
+literal prompt replacement sequences, phrase conversion across streaming boundaries,
+empty Ollama stream success, widget terminal handling, widget body-read deadlines,
+malformed MiniMax text, and widget Unicode counts. The second pass also corrected
+model-status/widget readiness precedence when the process is live but the model is
+warming or its probe is unavailable. No authentication, transcription ownership or
+provider selection changes are introduced.
+
+`tests/whole-branch-regressions.test.js` covers actual-server reproductions and every
+loaded OpenCC dictionary entry split at UTF-16 boundaries. `tests/widget-regressions.test.js`
+executes the actual widget functions and mounted-widget logic in a Node harness.
+These tests supplement existing admission races, slow clients, provider deadlines,
+permission failures and real-media transcription coverage. They do not replace live
+browser/OIDC/provider/VPS acceptance. Final test counts are recorded in PR #132.

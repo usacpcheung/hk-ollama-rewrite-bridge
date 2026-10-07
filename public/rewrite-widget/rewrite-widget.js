@@ -25,11 +25,22 @@
 
   async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
     const controller = new AbortController();
+    const cancel = () => controller.abort(options.signal.reason);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
     const id = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { ...options, signal: controller.signal, credentials: "include" });
-    } finally {
+    const finishRequest = () => {
       clearTimeout(id);
+      options.signal?.removeEventListener("abort", cancel);
+      controller.abort(); // Cancel unread bodies, including early auth/retry responses.
+    };
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal, credentials: "include" });
+      res.finishRequest = finishRequest;
+      return res;
+    } catch (error) {
+      finishRequest();
+      throw error;
     }
   }
 
@@ -92,7 +103,7 @@
       // Precedence (highest -> lowest):
       // 1) unreachable/down
       // 2) degraded
-      // 3) ready (either field)
+      // 3) explicit model ready; service ready only when model status is unknown
       // 4) starting/warming/loading (either field)
       // 5) unknown
       //
@@ -112,7 +123,7 @@
 
         const isDown = !reachable || status === "down" || serviceState === "down" || status === "unreachable" || serviceState === "unreachable";
         const isDegraded = status === "degraded" || serviceState === "degraded";
-        const isReady = status === "ready" || serviceState === "ready";
+        const isReady = status === "ready" || (status === "unknown" && serviceState === "ready");
         const isStarting = status === "starting" || serviceState === "starting" || status === "warming" || serviceState === "warming" || status === "loading" || serviceState === "loading";
 
         let phase = "unknown";
@@ -160,12 +171,13 @@
       async function pollOnce() {
         if (inFlight) return { ...state };
         inFlight = true;
+        let response;
 
         try {
           // Poll response is normalized into canonical `phase/modelReady/statusText`
           // from API `status` + `serviceState`, so widget instances do not drift
           // with ad-hoc per-widget checks.
-          const res = await fetchWithTimeout(statusUrl, { method: "GET" }, 8000);
+          const res = response = await fetchWithTimeout(statusUrl, { method: "GET" }, 8000);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
           const data = await res.json();
@@ -176,6 +188,7 @@
             { reachable: false, lastError: e?.message || "Model status error" }
           ));
         } finally {
+          response?.finishRequest();
           inFlight = false;
         }
         return { ...state };
@@ -451,6 +464,8 @@
 
     // Per-widget state
     let inFlight = false;
+    let destroyed = false;
+    const widgetAbort = new AbortController();
     let lastOriginalText = "";
     let sharedModelReady = false;
     let sharedPhase = "unknown";
@@ -503,8 +518,8 @@
     }
 
     function renderHint() {
-      const currentLength = getCurrentText().length;
-      const trimmedLength = getCurrentText().trim().length;
+      const currentLength = [...getCurrentText()].length;
+      const trimmedLength = [...getCurrentText().trim()].length;
       const isOverLimit = currentLength > maxChars;
 
       ui.countSpan.textContent = String(currentLength);
@@ -541,7 +556,7 @@
 
     function syncButtons() {
       const text = (ui.ta.value || "").trim();
-      const okLen = text.length > 0 && text.length <= maxChars;
+      const okLen = [...text].length > 0 && [...text].length <= maxChars;
       ui.rewriteBtn.disabled = !(sharedModelReady && okLen && !inFlight);
       ui.undoBtn.disabled = !(lastOriginalText && !inFlight);
       renderHint();
@@ -642,6 +657,8 @@
     }
 
     async function rewrite() {
+      if (inFlight || destroyed) return;
+      let response;
       const original = (ui.ta.value || "").trim();
       if (!original) return;
       const before = getCurrentText();
@@ -662,14 +679,17 @@
       try {
         let attempts = 0;
         while (attempts < 6) {
+          if (destroyed) return;
+          response?.finishRequest();
           attempts++;
 
           const useStream = !!ui.streamCheckbox.checked;
 
-          const res = await fetchWithTimeout(
+          const res = response = await fetchWithTimeout(
             REWRITE_URL,
             {
               method: "POST",
+              signal: widgetAbort.signal,
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ text: original, stream: useStream }),
               redirect: "follow",
@@ -762,11 +782,12 @@
         ui.statusText.textContent = "Rewrite failed";
         ui.hint.textContent = "Check logs then retry";
       } finally {
+        response?.finishRequest();
         const after = getCurrentText();
         rewriteComplete.emit({ before, after, changed: after !== before, success, errorMessage });
         inFlight = false;
         ui.ta.disabled = false;
-        await poller.pollOnce();     // shared poll
+        if (!destroyed) await poller.pollOnce();     // shared poll
         applySharedState(poller.getState());
         syncButtons();
       }
@@ -800,6 +821,8 @@
       onRewriteComplete: (callback) => rewriteComplete.on(callback),
       onTextChange: (callback) => textChange.on(callback),
       destroy: () => {
+        destroyed = true;
+        widgetAbort.abort();
         unsubscribe();
         rewriteStart.clear();
         rewriteComplete.clear();
@@ -813,78 +836,45 @@
     if (!res.body || typeof res.body.getReader !== "function") {
       throw new Error("Streaming is not supported in this browser.");
     }
-
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let fullText = "";
-    let errorMessage = "";
-    let receivedAnyContent = false;
-    let parseError = "";
-
-    const handlePayload = (payload) => {
-      if (typeof payload.response === "string" && payload.response.length > 0) {
-        receivedAnyContent = true;
-        onChunk(payload.response);
-      }
-
-      if (typeof payload.result === "string" && payload.result.length > 0) {
-        receivedAnyContent = true;
-        onChunk(payload.result);
-      }
-
-      if (payload.error && typeof payload.error.message === "string" && payload.error.message.length > 0) {
-        errorMessage = payload.error.message;
-      }
-    };
-
-    const handleLine = (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
+    let buffer = "", errorMessage = "", receivedAnyContent = false, terminal = false;
+    const handleLine = line => {
+      if (terminal || !line.trim()) return;
       let payload;
-      try {
-        payload = JSON.parse(trimmed);
-      } catch {
-        parseError = "Streaming response was not valid NDJSON.";
+      try { payload = JSON.parse(line); } catch { throw new Error("Streaming response was not valid NDJSON."); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("Unexpected streaming response format.");
+      }
+      if (payload.error) {
+        errorMessage = typeof payload.error.message === "string" && payload.error.message
+          ? payload.error.message : "Rewrite stream failed.";
+        terminal = true;
         return;
       }
-
-      handlePayload(payload);
+      for (const text of [payload.response, payload.result]) {
+        if (typeof text === "string" && text.length) { receivedAnyContent = true; onChunk(text); }
+      }
+      if (payload.done === true) terminal = true;
     };
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const decoded = decoder.decode(value, { stream: true });
-      fullText += decoded;
-      buffer += decoded;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        handleLine(line);
+    try {
+      while (!terminal) {
+        const { value, done } = await reader.read();
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        if (buffer.length > 1024 * 1024) throw new Error("Streaming response exceeded the buffer limit.");
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+        for (const line of lines) handleLine(line);
+        if (done) {
+          if (!terminal && buffer.trim()) handleLine(buffer);
+          break;
+        }
       }
+      if (!terminal) errorMessage = "Streaming response ended before completion.";
+      return { errorMessage, receivedAnyContent };
+    } finally {
+      try { await reader.cancel(); } finally { reader.releaseLock(); }
     }
-
-    const trailing = decoder.decode();
-    fullText += trailing;
-    buffer += trailing;
-
-    if (buffer.trim()) {
-      const trimmedBuffer = buffer.trim();
-      try {
-        handlePayload(JSON.parse(trimmedBuffer));
-      } catch {
-        parseError = "Streaming response was truncated or malformed.";
-      }
-    }
-
-    if (!receivedAnyContent && !errorMessage && !parseError && fullText.trim()) {
-      parseError = "Streaming response contained no rewrite content.";
-    }
-
-    return { errorMessage: errorMessage || parseError, receivedAnyContent };
   }
 
   global.RewriteWidget = { mount };

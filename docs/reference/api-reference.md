@@ -644,3 +644,24 @@ When building another app on top of this API, implement the following:
 4. For T2A, choose `binary` vs `base64_json` intentionally based on your transport and UI needs.
 5. Treat optional response metadata as additive rather than required.
 6. Do not rely on undocumented fields or internal-only defaults beyond what is listed in this document.
+
+## Reviewed runtime and widget corrections
+
+Rewrite prompt insertion preserves literal dollar sequences. Provider text must be a
+nonempty string; malformed responses return controlled provider errors. Empty Ollama
+streams end with an error rather than successful completion. Streaming Chinese
+conversion keeps phrase context across chunks and flushes before the terminal event;
+chunk boundaries may change, while NDJSON fields and concatenated output stay stable.
+
+Readiness caches the latest probe result, including unavailable results. The widget
+requires a terminal streaming event, ignores trailing text, retains timeouts until body
+consumption finishes, and counts Unicode code points like the backend. Destroying a
+widget cancels its active rewrite. A warming model does not become ready merely because
+the bridge process is running.
+
+MiniMax T2A rejects nonzero provider status before decoding audio. Supported audio keys
+are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
+`data`, `output`, `outputs` (including arrays), and `wrapper` containers; the existing
+`data.wrapper.payload` variant is retained. Existing direct response candidates remain
+supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
+fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.

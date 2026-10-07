@@ -354,3 +354,24 @@ MiniMax/Ollama timeouts while reading JSON remain timeout errors. T2A recognizes
 upstream 401/403 even when a proxy returns HTML instead of JSON. See the
 [runtime correction review](docs/reviews/2026-10-07-runtime-failure-corrections.md)
 and [API reference](docs/reference/api-reference.md).
+
+## Reviewed runtime and widget corrections
+
+Rewrite prompt insertion preserves literal dollar sequences. Provider text must be a
+nonempty string; malformed responses return controlled provider errors. Empty Ollama
+streams end with an error rather than successful completion. Streaming Chinese
+conversion keeps phrase context across chunks and flushes before the terminal event;
+chunk boundaries may change, while NDJSON fields and concatenated output stay stable.
+
+Readiness caches the latest probe result, including unavailable results. The widget
+requires a terminal streaming event, ignores trailing text, retains timeouts until body
+consumption finishes, and counts Unicode code points like the backend. Destroying a
+widget cancels its active rewrite. A warming model does not become ready merely because
+the bridge process is running.
+
+MiniMax T2A rejects nonzero provider status before decoding audio. Supported audio keys
+are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
+`data`, `output`, `outputs` (including arrays), and `wrapper` containers; the existing
+`data.wrapper.payload` variant is retained. Existing direct response candidates remain
+supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
+fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.

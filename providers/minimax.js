@@ -203,6 +203,10 @@ function createMinimaxProvider({
         }
       });
 
+      const providerFailure = getMinimaxProviderFailure(data);
+      if (providerFailure) return failureResult(mapError(new Error('provider_error'), {
+        kind: 'provider', providerCode: providerFailure.code
+      }));
       const extractedAudio = extractMinimaxT2AAudio(data);
       if (!extractedAudio.ok) {
         return failureResult(mapError(new Error(extractedAudio.reason), { kind: extractedAudio.reason }));
@@ -308,7 +312,7 @@ function createMinimaxProvider({
       }
 
       const normalized = extractMinimaxRewriteResponse(data);
-      if (!normalized.text) {
+      if (typeof normalized.text !== 'string' || !normalized.text.trim()) {
         return failureResult(mapError(new Error('empty_content'), { kind: 'empty_content' }));
       }
 
@@ -1096,7 +1100,7 @@ function renderUserContent(template, text) {
   }
 
   if (template.includes('{TEXT}')) {
-    return template.replace('{TEXT}', text);
+    return template.replace('{TEXT}', () => text);
   }
 
   return `${template}${text}`;
@@ -1158,7 +1162,8 @@ function deepFindHexAudio(node, path = 'root', seen = new WeakSet(), metadataNod
   }
 
   if (typeof node === 'string') {
-    return isLikelyHexAudio(node) ? { value: node, path, metadataNodes } : null;
+    return /(?:^|\.)(?:audio|audio_hex|audioHex|audio_data)$/.test(path) || path === 'data.wrapper.payload'
+      ? (isLikelyHexAudio(node) ? { value: node, path, metadataNodes } : null) : null;
   }
 
   if (typeof node !== 'object') {
@@ -1182,6 +1187,7 @@ function deepFindHexAudio(node, path = 'root', seen = new WeakSet(), metadataNod
   }
 
   for (const [key, value] of Object.entries(node)) {
+    if (!['output', 'outputs', 'data', 'wrapper', 'payload', 'audio', 'audio_hex', 'audioHex', 'audio_data'].includes(key)) continue;
     const found = deepFindHexAudio(value, path === 'root' ? key : `${path}.${key}`, seen, ancestors);
     if (found) {
       return found;

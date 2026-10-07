@@ -198,3 +198,20 @@ remain the record for PRs #128/#129, not the total after later additions.
 
 See [registry boundaries and remaining work](provider-registry.md) before interpreting
 this construction refactor as complete env-driven provider interchangeability.
+
+## Whole-branch correction gate in PR #132
+
+The assembled branch also corrects inherited defects found during its full review.
+Literal prompt text must survive template insertion; unavailable readiness must not
+reuse stale health; malformed provider text and empty Ollama streams must fail.
+T2A provider failures and unrelated hexadecimal metadata cannot become audio success.
+Streaming conversion must preserve whole-text OpenCC results across chunk boundaries;
+public chunk fields and terminal metadata remain unchanged, but chunk count is not
+fixed. The widget must require completion, honor body-read deadlines, count Unicode
+code points, and distinguish model readiness from process availability.
+
+Evidence: [whole-branch regressions](../../tests/whole-branch-regressions.test.js),
+[widget regressions](../../tests/widget-regressions.test.js), and the existing
+[HTTP contracts](../../tests/api-contract.test.js). The OpenCC parity check covers
+every loaded dictionary entry split into UTF-16 units. Existing baseline counts above
+are historical checkpoints; PR #132 records the final full-suite/CI results.
