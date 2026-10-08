@@ -1,6 +1,6 @@
 # Current runtime and request flows
 
-Updated for the step-3 service/provider separation branch stacked on PR #132. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Updated for the step-4 transcription integration branch stacked on PR #133. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
@@ -53,8 +53,8 @@ After the shared JSON parser and baseline limiter, both `/transcriptions` and `/
 
 1. Check allowed Origin / `Sec-Fetch-Site`, storage, one-active-request-per-authenticated-email and total admission capacity before receiving audio.
 2. Create a private job directory and enforce exact multipart field `audio`, byte limit and receive deadline in [`lib/transcription-upload.js`](../../lib/transcription-upload.js).
-3. Wait for a bounded conversion slot, probe actual media, reject unsupported content and enforce decoded duration. [`lib/transcription-media.js`](../../lib/transcription-media.js) normalizes accepted audio to mono 16 kHz FLAC with FFmpeg/FFprobe.
-4. [`providers/google-speech.js`](../../providers/google-speech.js) uses ADC and the shared provider adapter for a V2 synchronous recognition request. Calls can run concurrently; retries are disabled.
+3. Wait for a bounded conversion slot, probe actual media, reject unsupported content and enforce decoded duration. [`lib/transcription-media.js`](../../lib/transcription-media.js) follows the adapter's validated input plan. The current Google plan retains mono 16 kHz FLAC with FFmpeg/FFprobe.
+4. [`configuration/transcription.js`](../../configuration/transcription.js) selects the registered Google adapter. [`lib/transcription-recognition.js`](../../lib/transcription-recognition.js) dispatches prepared audio and validates normalized output; [`providers/google-speech.js`](../../providers/google-speech.js) owns ADC and the V2 synchronous recognition request. Calls can run concurrently; retries are disabled.
 5. Join recognized segments, delete audio, then return transcript/duration/request ID/timings. The caller may separately submit the transcript to rewrite; no automatic rewrite or job history exists.
 
 Disconnects/deadlines abort local work. Once issued, the Google promise can settle later under its RPC deadline; admission remains occupied until settlement and late results are discarded. A response timeout does not undo billing.
@@ -72,7 +72,8 @@ A deletion failure blocks further admission in that process. Failed final cleanu
 The existing tests cover request contracts, configuration, auth/identity, per-service limiters, provider lifecycle, admission, voice mappings, output writing and transcription/media behavior. The original documentation review passed 203 tests; after PRs #128/#129 the suite contains 238 passing tests, including real FFmpeg normalization. That baseline passed all 238 tests with zero failures/skips. The step-2 registry change adds seven registry cases and one HTTP case; its 246-test suite also passes without failures/skips. These local checks use mocked cloud providers and synthetic media; they do not establish deployment state or live recognition/speech quality.
 
 Step 3 separates rewrite/T2A request intent from native payloads and defines the
-transcription input contract without migrating its production workflow. See the
-[step-3 design and gates](provider-abstraction-step-3.md) for current boundaries,
+transcription input contract. Step 4 integrates it into the production workflow; see
+the [step-4 design](provider-abstraction-step-4.md) and
+[step-3 design and gates](provider-abstraction-step-3.md) for boundaries,
 extension proofs and remaining steps. PR #132 recorded 306 passing tests before
 this increment; earlier counts above are historical checkpoints.

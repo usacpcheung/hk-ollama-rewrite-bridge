@@ -48,7 +48,7 @@ and [environment settings](docs/reference/env-reference.md#transcription) for de
 
 - Express server bound to `127.0.0.1:3001` only.
 - Service registry in `services/` composes rewrite/T2A definitions using the readers in `configuration/`.
-- Transcription has an independent upload/conversion lifecycle and admission limits in `services/transcription.js`, using the shared provider adapter with `providers/google-speech.js`.
+- Transcription keeps its independent upload/conversion/admission lifecycle in `services/transcription.js`. `configuration/transcription.js` constructs its registered provider; shared preparation uses the adapter's declared audio requirements.
 - Provider adapters normalize upstream behavior so route handlers can keep a stable API contract.
 - Protected JSON routes (`/rewrite`, `/api/rewrite`, `/t2a`, `/api/t2a`) share:
   - trusted-header auth
@@ -59,13 +59,14 @@ and [environment settings](docs/reference/env-reference.md#transcription) for de
 - Transcription aliases share header auth and the global rate limiter, with separate per-user rate limits, admission and conversion slots.
 - The bridge does not serve the widget assets; host `public/rewrite-widget/` on your web server. See the [widget guide](docs/guides/rewrite-widget.md).
 
-Rewrite/T2A construction now uses registered provider factories with capabilities
-scoped to each service. Existing provider/model/environment settings and public
-formats are unchanged. Google transcription retains its separate lifecycle; this
-implements step-3 rewrite/T2A request separation, not completion of provider interchangeability.
-See the [step-3 contracts](docs/architecture/provider-abstraction-step-3.md) for
-provider-owned native payloads/voice mappings and transcription contract design. See the
-[registry contract](docs/architecture/provider-registry.md).
+All three services now construct providers through registered factories. Existing
+provider/model/environment settings and public formats are unchanged. Step 4 wires
+the transcription audio contract into production while preserving its independent
+lifecycle and Google behavior. See the [step-4 boundary](docs/architecture/provider-abstraction-step-4.md),
+[step-3 request contracts](docs/architecture/provider-abstraction-step-3.md) and
+[registry contract](docs/architecture/provider-registry.md). General env-driven
+provider selection and remaining lifecycle work are still Step 5. Malformed
+transcription adapter/native results return controlled errors, never partial success.
 
 The step-3 corrective review also rejects malformed rewrite streams with terminal
 errors, keeps T2A audio labels tied to the selected audio, preserves stateful

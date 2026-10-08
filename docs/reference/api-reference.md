@@ -8,6 +8,11 @@ This document reflects the current server implementation and is intended for dow
 
 ## Transcription
 
+Step 4 preserves the Google service and public formats while moving production
+audio preparation/recognition behind the [provider contract](../architecture/provider-abstraction-step-4.md).
+Malformed adapter results or native transcript fields return controlled
+`502 TRANSCRIPTION_FAILED`; valid empty recognition remains `422 NO_SPEECH`.
+
 Public route: `POST /api/rewrite-bridge/transcriptions`, proxied to internal
 `POST /transcriptions` (also available as `/api/transcriptions`). Uses the same
 trusted-header authentication and domain policy as rewrite. Google credentials

@@ -2,21 +2,26 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createProviderAdapter } = require('../lib/provider-adapter');
-const { createGoogleSpeechProvider } = require('../providers/google-speech');
 const { createFixedWindowRateLimiter } = require('../middleware/rate-limit');
-const { readTranscriptionConfig } = require('../lib/transcription-config');
+const { planTranscriptionInput } = require('../lib/transcription-input-plan');
+const { recognizeAudio } = require('../lib/transcription-recognition');
 const { TranscriptionError, aborted, checkAbort } = require('../lib/transcription-errors');
 const { createConversionSlots } = require('../lib/transcription-slots');
 const { prepareDirectory, createJobDirectory } = require('../lib/transcription-files');
 const { receiveAudio } = require('../lib/transcription-upload');
 const { normalizeAudio } = require('../lib/transcription-media');
 
-function createTranscriptionService({ config = readTranscriptionConfig(), provider, normalize = normalizeAudio } = {}) {
+function createTranscriptionService({ config, provider, normalize = normalizeAudio } = {}) {
   const paths = ['/transcriptions', '/api/transcriptions'];
   if (!config.enabled) return { paths, middleware: [(_req, res) => res.status(503).json({
     ok: false, error: { code: 'TRANSCRIPTION_DISABLED', message: 'Transcription is not enabled.' }
   })] };
-  const adapter = createProviderAdapter(provider || createGoogleSpeechProvider(config));
+  const adapter = createProviderAdapter(provider);
+  if (!adapter.hasSyncHandler({ serviceId: 'transcription' })) throw new TypeError('Transcription requires a sync handler');
+  if (!Number.isFinite(config.recognitionMs) || config.recognitionMs <= 0) throw new TypeError('Invalid recognition timeout');
+  const inputPlan = planTranscriptionInput({ requirements: provider.services.transcription.inputRequirements,
+    limits: { maxDurationSeconds: config.maxSeconds, maxPreparedBytes: 4 * 1024 * 1024 } });
+  const mediaConfig = { ...config, inputPlan };
   const acquireConversion = createConversionSlots(config.conversions);
   const users = new Set();
   let active = 0;
@@ -77,21 +82,19 @@ function createTranscriptionService({ config = readTranscriptionConfig(), provid
       const release = await acquireConversion(signal);
       let audio;
       const conversionStarted = Date.now();
-      try { audio = await normalize(input, directory, config, signal); } finally { release(); }
+      try { audio = await normalize(input, directory, mediaConfig, signal); } finally { release(); }
       const conversionMs = Date.now() - conversionStarted;
       checkAbort(signal);
       const providerStarted = Date.now();
-      const result = await adapter.invokeSync({ serviceId: 'transcription', requestId,
-        payload: { content: audio.content, signal }, timeoutMs: Math.min(config.googleMs, Math.max(1, config.totalMs - (Date.now() - started))) });
-      checkAbort(signal);
-      if (!result.ok) throw new TranscriptionError(result.error.status, result.error.code, result.error.message);
+      const text = await recognizeAudio({ adapter, audio, inputPlan, requestId, signal,
+        timeoutMs: Math.min(config.recognitionMs, Math.max(1, config.totalMs - (Date.now() - started))) });
       const transcriptionMs = Date.now() - providerStarted;
       // Delete audio before returning success; no audio or result is retained by the bridge.
       try { await fs.rm(directory, { recursive: true, force: true }); }
       catch (error) { storageFailed = true; throw error; }
       directory = null;
       checkAbort(signal);
-      res.json({ ok: true, result: result.data.response, durationSeconds: audio.durationSeconds, requestId,
+      res.json({ ok: true, result: text, durationSeconds: audio.durationSeconds, requestId,
         timings: { conversionMs, transcriptionMs, totalMs: Date.now() - started } });
     } catch (error) {
       const safeError = error instanceof TranscriptionError ? error : new TranscriptionError(503, 'TRANSCRIPTION_UNAVAILABLE', 'Transcription is temporarily unavailable.');

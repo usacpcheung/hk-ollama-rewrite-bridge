@@ -50,8 +50,9 @@ native factory options and route gates still depend on concrete integrations.
 conversion, admission, cleanup, and HTTP response lifecycle. Its
 [Google adapter](../../providers/google-speech.js) encapsulates recognition calls,
 but transcription is not another entry in the rewrite/T2A service registry.
-Its public result is independent of Google's native response shape; its workflow
-and output composition have not yet been unified with the other services.
+Step 4 uses the shared provider construction/dispatch and normalized output, with
+audio preparation driven by declared requirements. Its distinct upload/admission
+lifecycle intentionally remains separate. See [step 4](provider-abstraction-step-4.md).
 
 Consequently, the presence of adapters and normalized outputs is not evidence that
 every service already supports interchangeable providers through configuration.
@@ -193,8 +194,8 @@ remain the record for PRs #128/#129, not the total after later additions.
   Google initialization and a fake adapter through runtime/validation/output.
 - New [HTTP coverage](../../tests/service-compatibility.test.js), “compatibility: unregistered Ollama T2A preserves validation order and does not affect rewrite”,
   checks both aliases and proves rejected T2A work makes no upstream calls.
-- Transcription composition and startup-state branches are not moved. Their
-  previously recorded coverage gates still apply to later stages.
+- At the step-2 checkpoint, transcription composition and startup-state branches
+  were not moved. Step 4 now integrates transcription; startup extraction remains Step 5.
 
 See [registry boundaries and remaining work](provider-registry.md) before interpreting
 this construction refactor as complete env-driven provider interchangeability.
