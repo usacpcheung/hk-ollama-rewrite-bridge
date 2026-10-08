@@ -39,8 +39,8 @@ messages contain sensitive data.
 
 ## Automated coverage
 
-The full suite includes the parent branch's 321 tests plus 16 new transcription
-boundary tests: **337 passed, zero failures/skips** on local Node 24. Tests include real FFmpeg, actual server composition
+The initial implementation included the parent branch's 321 tests plus 16 new
+transcription boundary tests: **337 passed, zero failures/skips** on local Node 24. Tests include real FFmpeg, actual server composition
 with a mocked Google SDK, and a registered alternative adapter on real HTTP routes.
 The new cases cover:
 
@@ -99,3 +99,20 @@ adapter never settles, the service retains its capacity/files rather than starti
 unbounded replacement work. General provider configuration and remaining lifecycle
 selection remain Step 5. The stack stays open/unmerged; future authorized increments
 must use this Step 4 branch as their base. Production remains unchanged.
+
+
+## Follow-up corrections after adversarial review
+
+Review of commit `7867cc2` reproduced three issues, now corrected on the same PR:
+
+| Issue and trigger | Correction |
+|---|---|
+| Failed recognition followed by slow deletion cleared the total timer before cleanup; a 120 ms request still had no response after 350 ms. Also reproduced on parent PR #133. | Keep the timer/listeners until cleanup settles. At the deadline send an already-selected error, or the usual timeout if none exists. Keep admission/file ownership until actual settlement; subsequent cleanup failure still blocks new admission. |
+| Upload writes failing with ENOSPC/EACCES/EIO returned 400 INVALID_UPLOAD. Also reproduced on parent PR #133. | Classify known filesystem failures as 503 TRANSCRIPTION_UNAVAILABLE with Retry-After, and log only a fixed diagnostic code and allowlisted reason. Synchronous writer construction failures are also handled. Malformed multipart and interrupted input retain client-error behavior. |
+| Rejected recognition skipped the elapsed-time check: a 10 ms budget with a 40 ms blocking/rejecting adapter returned 502. | Apply the same deadline check to both resolved and rejected operations, preserving prior cancellation. |
+
+Six additional regression tests cover both aliases, blocked deletion, cleanup
+failure after the response deadline, eight storage failure modes per alias,
+post-failure recovery, synchronous/asynchronous rejection and cancellation precedence.
+The new full-suite total is 343. Follow-up simulation and CI results are recorded
+on the PR for its exact corrective commit; earlier counts above are historical.

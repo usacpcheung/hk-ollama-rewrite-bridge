@@ -103,15 +103,17 @@ was requested.
   Google can abort initialization waiting but cannot cancel an issued recognition
   promise. Initialization is shared; one cancelled waiter does not retire a
   healthy client. Failed initialization permits a later fresh client.
-- A recognition deadline requests abort and rejects late success after settlement.
+- A recognition deadline requests abort and rejects late success or failure after settlement.
   The total handler deadline still sends a prompt 504 even if native work has not
-  settled. Do not use a detached `Promise.race` to free capacity early.
+  settled. During cleanup of a previously selected failure, it sends that failure
+  by the deadline while retaining ownership until deletion settles. Do not use a detached `Promise.race` to free capacity early.
 - Client disconnect, timeout and provider settlement cannot release capacity twice
   or write a second response. Per-user and total permits remain owned through
   outstanding work and cleanup, including after a timeout response.
 - The job directory owns uploaded input, decoded PCM and prepared output. Success
   waits for deletion. Failure cleanup preserves the selected error; failed
   deletion latches storage failure, logs a safe code and blocks new admission.
+  Upload write failures use sanitized 503 errors and a safe diagnostic code.
   Existing dead-process startup cleanup remains unchanged.
 
 An adapter which never settles despite its promised deadline retains admission;

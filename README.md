@@ -67,6 +67,8 @@ lifecycle and Google behavior. See the [step-4 boundary](docs/architecture/provi
 [registry contract](docs/architecture/provider-registry.md). General env-driven
 provider selection and remaining lifecycle work are still Step 5. Malformed
 transcription adapter/native results return controlled errors, never partial success.
+Upload storage failures return sanitized 503 errors. Total response deadlines remain
+active during cleanup, and late recognition failures are classified as timeouts.
 
 The step-3 corrective review also rejects malformed rewrite streams with terminal
 errors, keeps T2A audio labels tied to the selected audio, preserves stateful

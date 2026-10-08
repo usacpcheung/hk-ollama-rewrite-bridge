@@ -269,3 +269,98 @@ test('recognition rejects completion past the deadline even before the timer cal
   await assert.rejects(recognizeAudio({ adapter, audio: { content: Buffer.from('audio'), durationSeconds: 1 },
     inputPlan: requirements, requestId: 'late', signal: new AbortController().signal, timeoutMs: 100 }), { code: 'TRANSCRIPTION_TIMEOUT' });
 });
+
+for (const route of ['/transcriptions', '/api/transcriptions']) {
+  test(`${route}: failed-request cleanup preserves the error and bounds the response wait`, { timeout: 10000 }, async t => {
+    const entered = deferred(); const release = deferred(); let fail = true;
+    const f = await fixture(t, { config: { totalMs: 150, concurrency: 1 }, sync: async () => fail
+      ? failureResult({ status: 502, code: 'TRANSCRIPTION_FAILED', message: 'Recognition failed.' })
+      : successResult({ response: 'recovered' }) });
+    const original = fs.rm.bind(fs);
+    t.mock.method(fs, 'rm', async (target, options) => {
+      if (fail && String(target).startsWith(path.join(f.directory, 'job-'))) { entered.resolve(); await release.promise; }
+      return original(target, options);
+    });
+    t.after(() => release.resolve());
+    const pending = f.submit({ route }); await entered.promise;
+    // The client gets the selected error while deletion is still blocked.
+    const result = await pending;
+    assert.equal(result.status, 502); assert.equal(result.body.error.code, 'TRANSCRIPTION_FAILED');
+    assert.equal((await fs.readdir(f.directory)).length, 1);
+    assert.equal((await f.submit({ route })).body.error.code, 'TRANSCRIPTION_ALREADY_ACTIVE');
+    assert.equal((await f.submit({ route, user: 'bob' })).body.error.code, 'TRANSCRIPTION_BUSY');
+    fail = false; release.resolve();
+    await until(async () => !(await fs.readdir(f.directory)).length);
+    assert.equal((await f.submit({ route })).body.result, 'recovered');
+  });
+}
+
+test('cleanup failure after the deadline response preserves the response and blocks new admission', { timeout: 10000 }, async t => {
+  const entered = deferred(); const release = deferred();
+  const f = await fixture(t, { config: { totalMs: 150 }, sync: async () => failureResult({ status: 502, code: 'TRANSCRIPTION_FAILED', message: 'Failed.' }) });
+  const original = fs.rm.bind(fs); const logs = [];
+  t.mock.method(console, 'error', message => logs.push(JSON.parse(message)));
+  t.mock.method(fs, 'rm', async (target, options) => {
+    if (String(target).startsWith(path.join(f.directory, 'job-'))) { entered.resolve(); await release.promise; throw new Error('private cleanup failure'); }
+    return original(target, options);
+  });
+  t.after(() => release.resolve());
+  const pending = f.submit(); await entered.promise;
+  assert.equal((await pending).status, 502);
+  release.resolve(); await until(() => logs.length === 1);
+  assert.equal(logs[0].code, 'TRANSCRIPTION_CLEANUP_FAILED');
+  assert.equal((await f.submit({ user: 'bob' })).body.error.code, 'TRANSCRIPTION_UNAVAILABLE');
+});
+
+test('upload filesystem failures return sanitized 503 on both aliases and recover', { timeout: 15000 }, async t => {
+  const fileSystem = require('node:fs'); const { Writable } = require('node:stream');
+  const original = fileSystem.createWriteStream.bind(fileSystem);
+  const f = await fixture(t); let failure; const logs = [];
+  t.mock.method(console, 'error', message => logs.push(JSON.parse(message)));
+  t.mock.method(fileSystem, 'createWriteStream', (target, options) => {
+    if (failure && String(target).startsWith(f.directory)) {
+      if (failure === 'sync') throw new Error('private path and credentials');
+      return new Writable({ write(_chunk, _encoding, callback) {
+        callback(Object.assign(new Error('private path and credentials'), { code: failure }));
+      } });
+    }
+    return original(target, options);
+  });
+  for (const route of ['/transcriptions', '/api/transcriptions']) {
+    for (failure of ['ENOSPC', 'EACCES', 'EIO', 'EROFS', 'EDQUOT', 'EMFILE', 'ENOENT', 'sync']) {
+      const before = f.calls.length;
+      const result = await f.submit({ route });
+      assert.equal(result.status, 503); assert.equal(result.body.error.code, 'TRANSCRIPTION_UNAVAILABLE');
+      assert.equal(result.headers.get('retry-after'), '10');
+      assert.equal(f.calls.length, before); assert.deepEqual(await fs.readdir(f.directory), []);
+      assert.equal(logs.at(-1).code, 'TRANSCRIPTION_UPLOAD_STORAGE_FAILED');
+      assert.equal(logs.at(-1).reason, failure === 'sync' ? 'WRITE_FAILED' : failure);
+      assert.ok(!JSON.stringify([result.body, logs]).includes('private'));
+    }
+    failure = null;
+    assert.equal((await f.submit({ route })).status, 200);
+  }
+  assert.equal(logs.length, 16);
+});
+
+test('recognition deadline covers rejected promises and synchronous exceptions before timers run', async t => {
+  let now = 1000; t.mock.method(Date, 'now', () => now);
+  for (const asynchronous of [false, true]) {
+    const reject = () => { now += 101; throw new Error('private late native failure'); };
+    const adapter = createProviderAdapter({ services: { transcription: { sync: asynchronous ? async () => reject() : reject } } });
+    await assert.rejects(recognizeAudio({ adapter, audio: { content: Buffer.from('audio'), durationSeconds: 1 },
+      inputPlan: requirements, signal: new AbortController().signal, timeoutMs: 100 }), { status: 504, code: 'TRANSCRIPTION_TIMEOUT' });
+  }
+});
+
+test('recognition preserves client cancellation when rejection also exceeds the deadline', async t => {
+  const { TranscriptionError } = require('../lib/transcription-errors');
+  let now = 1000; t.mock.method(Date, 'now', () => now);
+  const controller = new AbortController();
+  const reason = new TranscriptionError(408, 'TRANSCRIPTION_CANCELLED', 'Cancelled.');
+  const adapter = createProviderAdapter({ services: { transcription: { sync: async () => {
+    controller.abort(reason); now += 101; throw new Error('late failure');
+  } } } });
+  await assert.rejects(recognizeAudio({ adapter, audio: { content: Buffer.from('audio'), durationSeconds: 1 },
+    inputPlan: requirements, signal: controller.signal, timeoutMs: 100 }), error => error === reason);
+});

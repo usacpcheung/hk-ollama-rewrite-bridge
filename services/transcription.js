@@ -65,13 +65,15 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
     const disconnect = () => { if (!res.writableEnded) controller.abort(aborted()); };
     req.once('aborted', disconnect);
     res.once('close', disconnect);
+    let responseError;
     const timer = setTimeout(() => {
       const error = new TranscriptionError(504, 'TRANSCRIPTION_TIMEOUT', 'Transcription timed out.');
       controller.abort(error);
-      sendError(error);
+      // Cleanup may still be running. Preserve an already selected failure,
+      // but bound the client wait without releasing files or admission early.
+      sendError(responseError || error);
     }, config.totalMs);
     let directory;
-    let responseError;
     const started = Date.now();
     try {
       if (!await directoryReady) throw new TranscriptionError(503, 'TRANSCRIPTION_UNAVAILABLE', 'Transcription storage is unavailable.');
@@ -100,9 +102,6 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
       const safeError = error instanceof TranscriptionError ? error : new TranscriptionError(503, 'TRANSCRIPTION_UNAVAILABLE', 'Transcription is temporarily unavailable.');
       responseError = safeError;
     } finally {
-      clearTimeout(timer);
-      req.removeListener('aborted', disconnect);
-      res.removeListener('close', disconnect);
       if (directory) {
         try { await fs.rm(directory, { recursive: true, force: true }); }
         catch {
@@ -110,6 +109,9 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
           console.error(JSON.stringify({ level: 'error', code: 'TRANSCRIPTION_CLEANUP_FAILED', requestId }));
         }
       }
+      clearTimeout(timer);
+      req.removeListener('aborted', disconnect);
+      res.removeListener('close', disconnect);
       active--;
       users.delete(user);
       if (responseError) sendError(responseError);
