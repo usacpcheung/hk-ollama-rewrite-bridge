@@ -1,3 +1,4 @@
+const { createGoogleSpeechProvider } = require('./google-speech');
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
 const { createProviderLifecycle } = require('./lifecycle');
@@ -53,6 +54,9 @@ function buildMinimax({ serviceConfig, minimaxApiKey, debugLog }) {
 }
 
 const providerRegistry = createProviderRegistry([
+  { provider: 'google-speech', serviceId: 'transcription',
+    create: ({ serviceConfig }) => createGoogleSpeechProvider(serviceConfig.provider.runtime),
+    capabilities: { sync: true, streaming: false, lifecycle: 'none' } },
   { provider: 'ollama', serviceId: 'rewrite', create: buildOllama,
     capabilities: { sync: true, streaming: true, lifecycle: 'active_probe' } },
   { provider: 'minimax', serviceId: 'rewrite', create: buildMinimax,

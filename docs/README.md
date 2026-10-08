@@ -19,9 +19,11 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 | [Provider registry](architecture/provider-registry.md) | Implemented construction/capability contract and remaining extension boundaries |
 | [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Working-code implementation scope, acceptance criteria and deferred migration gates |
 | [Step 3 contracts and gates](architecture/provider-abstraction-step-3.md) | Rewrite/T2A separation, all-service contracts, extension proofs and deferred work |
+| [Step 4 transcription boundary](architecture/provider-abstraction-step-4.md) | Production audio planning, registered recognition and ownership rules |
+| [Step 4 validation](reviews/2026-10-08-step-4-validation.md) | Extension tests, lifecycle simulations and acceptance limits |
 | [Runtime architecture](architecture/runtime.md) | Current request flows and actual service/provider boundaries |
 | [ADR 0001](architecture/adr/0001-internal-bridge-contract.md) | Accepted internal result/event contract |
-| [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented rewrite/T2A boundary and remaining limits |
+| [ADR 0002](architecture/adr/0002-service-provider-runtime-boundary.md) | Implemented service/provider boundaries and remaining limits |
 | [Past documents](past/README.md) | Completed/superseded plans preserved as history |
 | [Step 3 corrective review](reviews/2026-10-07-step-3-corrections.md) | Four reproduced defects, their fixes and adversarial simulation evidence |
 | [Current audit](reviews/2026-10-06-main-baseline-audit.md) | Post-merge document review and baseline readiness evidence |

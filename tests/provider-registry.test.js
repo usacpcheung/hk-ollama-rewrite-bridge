@@ -137,6 +137,8 @@ test('registry discovery and disabled transcription never initialize the Google 
     const { providerRegistry } = require('./providers');
     providerRegistry.capabilitiesFor('rewrite');
     providerRegistry.capabilitiesFor('t2a');
+    providerRegistry.capabilitiesFor('transcription');
+    require('./configuration/transcription').createTranscriptionService({ config: { enabled: false } });
     require('./services/transcription').createTranscriptionService({ config: { enabled: false } });
   `], { cwd: require('node:path').resolve(__dirname, '..'), encoding: 'utf8' });
   assert.equal(child.status, 0, child.stderr);
