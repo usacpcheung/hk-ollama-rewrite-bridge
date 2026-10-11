@@ -1,6 +1,16 @@
 # Repository documentation
 
-Active guidance was reviewed against main commit `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [merged-main audit](reviews/2026-10-06-main-baseline-audit.md) for the current inventory, code evidence and readiness decision. The [earlier review](reviews/2026-10-06-documentation-review.md) preserves historical review checkpoints.
+Active references describe the Step 5 refactor branch, including registered provider
+configuration/lifecycle. See the [Step 5 validation record](reviews/2026-10-11-step-5-validation.md)
+for its review scope and the [roadmap](architecture/provider-abstraction-roadmap.md)
+for the still-pending production acceptance gate.
+
+The repository-wide document disposition was reviewed against main commit
+`a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
+[merged-main audit](reviews/2026-10-06-main-baseline-audit.md) records that baseline
+inventory and readiness decision. The [earlier review](reviews/2026-10-06-documentation-review.md)
+preserves previous checkpoints; these dated reviews do not override later code
+or active references.
 
 ## Find the right document
 
