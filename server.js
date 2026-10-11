@@ -113,30 +113,6 @@ function parseEnvBoundedInteger(name, fallback, bounds = {}) {
   return parsed;
 }
 
-function parseDeprecatedEnvBoundedInteger(name, deprecatedNames, fallback, bounds = {}) {
-  return readEnvWithDeprecatedAliases({
-    name,
-    deprecatedNames,
-    defaultValue: fallback,
-    parse: (rawValue, sourceName) => {
-      const parsed = parseBoundedInteger(rawValue, bounds);
-      if (parsed == null) {
-        console.warn(
-          JSON.stringify({
-            level: 'warn',
-            msg: `Invalid ${sourceName}; using default`,
-            provided: rawValue,
-            fallback
-          })
-        );
-        return fallback;
-      }
-
-      return parsed;
-    }
-  }).value;
-}
-
 function parseEnvMilliseconds(name, fallback, bounds = {}) {
   const rawValue = process.env[name];
   if (rawValue == null || rawValue.trim() === '') {
@@ -157,10 +133,6 @@ function parseEnvMilliseconds(name, fallback, bounds = {}) {
   }
 
   return parsed;
-}
-
-function parseDeprecatedEnvMilliseconds(name, deprecatedNames, fallback, bounds = {}) {
-  return parseDeprecatedEnvBoundedInteger(name, deprecatedNames, fallback, { min: 0, ...bounds });
 }
 
 function parseEnvBoolean(name, fallback = false) {
@@ -217,85 +189,6 @@ function parseDeprecatedEnvBoolean(name, deprecatedNames, fallback = false) {
   }).value;
 }
 
-const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '30m';
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434/api/generate';
-const OLLAMA_PS_URL = process.env.OLLAMA_PS_URL || 'http://127.0.0.1:11434/api/ps';
-// Deprecated env aliases kept for one compatibility window.
-// Prefer REWRITE_OLLAMA_READINESS_CACHE_MS. Remove after production env files have migrated.
-const OLLAMA_PS_CACHE_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_OLLAMA_READINESS_CACHE_MS',
-  ['OLLAMA_PS_CACHE_MS', 'WARMUP_PS_CACHE_MS'],
-  2_000,
-  { max: 30_000 }
-);
-// Deprecated env aliases kept for one compatibility window.
-// Prefer REWRITE_OLLAMA_READINESS_TIMEOUT_MS. Remove after production env files have migrated.
-const OLLAMA_PS_TIMEOUT_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_OLLAMA_READINESS_TIMEOUT_MS',
-  ['OLLAMA_PS_TIMEOUT_MS', 'WARMUP_PS_TIMEOUT_MS'],
-  1_000,
-  { max: 10_000 }
-);
-const MINIMAX_READINESS_TIMEOUT_MS = parseEnvMilliseconds('MINIMAX_READINESS_TIMEOUT_MS', 5_000, {
-  max: 30_000
-});
-const T2A_INVOKE_TIMEOUT_MS = parseEnvMilliseconds('T2A_INVOKE_TIMEOUT_MS', 30_000, {
-  min: 1_000,
-  max: 300_000
-});
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_MINIMAX_PASSIVE_READY_GRACE_MS. Remove after production env files have migrated.
-const MINIMAX_PASSIVE_READY_GRACE_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_MINIMAX_PASSIVE_READY_GRACE_MS',
-  ['MINIMAX_PASSIVE_READY_GRACE_MS'],
-  10 * 60_000,
-  { max: 24 * 60 * 60_000 }
-);
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE. Remove after production env files have migrated.
-const MINIMAX_FAIL_OPEN_ON_IDLE = parseDeprecatedEnvBoolean(
-  'REWRITE_MINIMAX_PASSIVE_FAIL_OPEN_ON_IDLE',
-  ['MINIMAX_FAIL_OPEN_ON_IDLE'],
-  true
-);
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD. Remove after production env files have migrated.
-const MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD =
-  parseDeprecatedEnvBoundedInteger('REWRITE_MINIMAX_PASSIVE_FAILURE_THRESHOLD', [
-    'MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD'
-  ], null, {
-    min: 1,
-    max: 100
-  }) || 3;
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_MINIMAX_PASSIVE_RECOVERY_COOLDOWN_MS. Remove after production env files have migrated.
-const MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_MINIMAX_PASSIVE_RECOVERY_COOLDOWN_MS',
-  ['MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS'],
-  15_000,
-  { max: 10 * 60_000 }
-);
-const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds(
-  'READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
-  Math.min(1_000, OLLAMA_PS_CACHE_MS),
-  { max: 30_000 }
-);
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_OLLAMA_WARMUP_TRIGGER_TIMEOUT_MS. Remove after production env files have migrated.
-const WARMUP_TRIGGER_TIMEOUT_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_OLLAMA_WARMUP_TRIGGER_TIMEOUT_MS',
-  ['WARMUP_TRIGGER_TIMEOUT_MS'],
-  60_000,
-  { max: 300_000 }
-);
-// Deprecated env alias kept for one compatibility window.
-// Prefer REWRITE_OLLAMA_WARMUP_RETRIGGER_WINDOW_MS. Remove after production env files have migrated.
-const WARMUP_RETRIGGER_WINDOW_MS = parseDeprecatedEnvMilliseconds(
-  'REWRITE_OLLAMA_WARMUP_RETRIGGER_WINDOW_MS',
-  ['WARMUP_RETRIGGER_WINDOW_MS'],
-  10_000,
-  { max: 120_000 }
-);
 const WARMUP_ON_START = parseEnvBoolean('WARMUP_ON_START', true);
 const WARMUP_STARTUP_MAX_WAIT_MS = parseEnvMilliseconds('WARMUP_STARTUP_MAX_WAIT_MS', 180_000, {
   max: 900_000
@@ -305,10 +198,6 @@ const WARMUP_STARTUP_RETRY_INTERVAL_MS = parseEnvMilliseconds(
   5_000,
   { max: 60_000 }
 );
-const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RETRY_AFTER_SEC, {
-  min: 1,
-  max: 30
-}) || Math.min(3, Math.max(2, Math.ceil(OLLAMA_PS_CACHE_MS / 1000)));
 // Deprecated env alias kept for one compatibility window.
 // Prefer BRIDGE_PROVIDER_DEBUG_RAW_OUTPUT. Remove after production env files have migrated.
 const PROVIDER_DEBUG_RAW_OUTPUT = parseDeprecatedEnvBoolean(
@@ -318,7 +207,6 @@ const PROVIDER_DEBUG_RAW_OUTPUT = parseDeprecatedEnvBoolean(
 );
 
 
-const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
 
 function parseRawBoundedInteger(rawValue, fallback, bounds = {}, envName = 'value') {
   if (rawValue == null || String(rawValue).trim() === '') {
@@ -364,21 +252,7 @@ const serviceRuntimes = createServiceRuntimes({
   createProvider,
   createProviderAdapter,
   createLifecycle: createProviderLifecycle,
-  createProviderOptions: () => ({
-    ollamaUrl: OLLAMA_URL,
-    ollamaPsUrl: OLLAMA_PS_URL,
-    ollamaKeepAlive: OLLAMA_KEEP_ALIVE,
-    minimaxApiKey: MINIMAX_API_KEY,
-    debugLog
-  }),
-  createLifecycleOptions: () => ({
-    minimaxApiKey: MINIMAX_API_KEY,
-    minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
-    minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
-    minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
-    minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
-    warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS
-  })
+  createProviderOptions: () => ({ debugLog })
 });
 const rewriteRuntime = serviceRuntimes.get('rewrite');
 const t2aRuntime = serviceRuntimes.get('t2a');
@@ -386,6 +260,15 @@ const rewriteService = rewriteRuntime.service;
 const t2aService = t2aRuntime.service;
 const rewriteProviderAdapter = rewriteRuntime.adapter;
 const rewriteLifecycle = rewriteRuntime.lifecycle;
+const { readinessCacheMs: READINESS_CACHE_MS = 2000, readinessTimeoutMs: READINESS_TIMEOUT_MS = 1000,
+  warmupTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS = 60000, warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS = 10000,
+  passiveReadyGraceMs: PASSIVE_READY_GRACE_MS, failOpenOnIdle: FAIL_OPEN_ON_IDLE,
+  failureThreshold: FAILURE_THRESHOLD, recoveryAttemptCooldownMs: RECOVERY_COOLDOWN_MS } = rewriteLifecycle.settings;
+const READY_REWRITE_STRICT_PROBE_MAX_AGE_MS = parseEnvMilliseconds('READY_REWRITE_STRICT_PROBE_MAX_AGE_MS',
+  Math.min(1000, READINESS_CACHE_MS), { max: 30000 });
+const MODEL_WARMING_RETRY_AFTER_SEC = parseBoundedInteger(process.env.WARMUP_RETRY_AFTER_SEC, { min: 1, max: 30 })
+  || Math.min(3, Math.max(2, Math.ceil(READINESS_CACHE_MS / 1000)));
+
 
 const admissionController = createAdmissionController({
   globalLimits: rewriteService.provider.admission?.global || {},
@@ -567,7 +450,7 @@ function applyProbeState(probeReady, { demoteReadyOnUnknown = true } = {}) {
 }
 
 async function probeModelReady() {
-  const timeoutMs = rewriteLifecycle.mode === 'passive_remote' ? MINIMAX_READINESS_TIMEOUT_MS : OLLAMA_PS_TIMEOUT_MS;
+  const timeoutMs = READINESS_TIMEOUT_MS;
   return rewriteLifecycle.checkReadiness({ timeoutMs, nowMs: Date.now() });
 }
 
@@ -631,7 +514,7 @@ async function runStartupWarmupLoop() {
         startupWarmupAttempts,
         startupWarmupDeadlineAt: new Date(startupWarmupDeadlineAtMs).toISOString(),
         passiveReady: false,
-        passiveReason: passiveReadiness.reason || 'MINIMAX_NOT_READY'
+        passiveReason: passiveReadiness.reason || rewriteLifecycle.settings.reasons?.notReady || 'PROVIDER_NOT_READY'
       })
     );
     return;
@@ -709,7 +592,7 @@ app.get('/model-status', async (_req, res) => {
   const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
   const minimaxPassiveReadiness = usesPassiveReadiness ? getRewritePassiveReadiness(nowMs) : null;
 
-  if (!usesPassiveReadiness && nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+  if (!usesPassiveReadiness && nowMs - lastProbeAtMs >= READINESS_CACHE_MS) {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
@@ -769,10 +652,10 @@ app.get('/model-status', async (_req, res) => {
           lastRecoveryAttemptAt: lastRecoveryAttemptAtMs
             ? new Date(lastRecoveryAttemptAtMs).toISOString()
             : null,
-          recoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS,
-          passiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
-          failOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
-          failureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD
+          recoveryAttemptCooldownMs: RECOVERY_COOLDOWN_MS,
+          passiveReadyGraceMs: PASSIVE_READY_GRACE_MS,
+          failOpenOnIdle: FAIL_OPEN_ON_IDLE,
+          failureThreshold: FAILURE_THRESHOLD
         }
       : null
   });
@@ -798,10 +681,10 @@ app.get('/readyz', opsLimiter, async (_req, res) => {
     serviceState = 'degraded';
     return res
       .status(503)
-      .json({ ok: false, serviceState, reason: passiveReadiness.reason || 'MINIMAX_NOT_READY' });
+      .json({ ok: false, serviceState, reason: passiveReadiness.reason || rewriteLifecycle.settings.reasons?.notReady || 'PROVIDER_NOT_READY' });
   }
 
-  if (nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS) {
+  if (nowMs - lastProbeAtMs >= READINESS_CACHE_MS) {
     const probeResult = await probeModelReady();
     lastProbeAtMs = Date.now();
     probeReady = probeResult.ready;
@@ -847,9 +730,8 @@ app.post(
   let probeReady = lastProbeReady;
   let probeError = null;
   let warmupTriggeredNow = false;
-  let minimaxRecoveryAttempt = false;
-  let minimaxPassiveReason = null;
-  const isMinimax = rewriteService.provider.selected === 'minimax';
+  let recoveryAttemptActive = false;
+  let passiveReason = null;
   const usesPassiveReadiness = rewriteLifecycle.mode === 'passive_remote';
 
   try {
@@ -880,7 +762,7 @@ app.post(
       serviceState === 'ready' &&
       (probeReady === null || probeAgeMs > READY_REWRITE_STRICT_PROBE_MAX_AGE_MS);
 
-    if (!usesPassiveReadiness && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= OLLAMA_PS_CACHE_MS)) {
+    if (!usesPassiveReadiness && (shouldForceFreshReadyProbe || nowMs - lastProbeAtMs >= READINESS_CACHE_MS)) {
       const probeResult = await probeModelReady();
       lastProbeAtMs = Date.now();
       probeReady = probeResult.ready;
@@ -891,29 +773,30 @@ app.post(
     if (usesPassiveReadiness) {
       const passiveReadiness = getRewritePassiveReadiness(nowMs);
       probeReady = passiveReadiness.ready;
-      minimaxPassiveReason = passiveReadiness.reason;
-      probeError = minimaxPassiveReason;
+      passiveReason = passiveReadiness.reason;
+      probeError = passiveReason;
       if (passiveReadiness.ready) {
         promoteServiceReady();
       } else {
         modelPhase = 'warming';
         serviceState = 'degraded';
 
-        if (passiveReadiness.reason === 'MINIMAX_RECENT_FAILURES') {
+        if (rewriteLifecycle.canRecover(passiveReadiness)) {
           const recoveryAttempt = rewriteLifecycle.beginRecoveryAttempt({ nowMs });
           if (!recoveryAttempt.allowed) {
             const retryAfterSec = recoveryAttempt.retryAfterSec;
             res.set('Retry-After', String(retryAfterSec));
+            const recoveryError = rewriteLifecycle.recoveryError(retryAfterSec);
             return errorResponse(
               res,
-              429,
-              'MINIMAX_RECOVERY_COOLDOWN',
-              `Minimax recovery attempt cooldown active, retry after ${retryAfterSec} seconds.`,
+              recoveryError.status,
+              recoveryError.code,
+              recoveryError.message,
               { retryAfterSec }
             );
           }
 
-          minimaxRecoveryAttempt = true;
+          recoveryAttemptActive = true;
         }
       }
     } else {
@@ -935,14 +818,8 @@ app.post(
       }
     }
 
-    if (isMinimax && probeReady !== true && minimaxPassiveReason === 'MINIMAX_API_KEY_MISSING') {
-      return errorResponse(
-        res,
-        503,
-        'MINIMAX_API_KEY_MISSING',
-        'Minimax API key is missing; set MINIMAX_API_KEY to enable rewrite requests.'
-      );
-    }
+    const unavailable = rewriteRuntime.getAvailability();
+    if (unavailable) return errorResponse(res, unavailable.status, unavailable.code, unavailable.message);
 
     requestPhase = modelPhase;
     selectedTimeoutMs = requestPhase === 'ready' ? rewriteService.timeouts.readyMs : rewriteService.timeouts.coldMs;
@@ -968,7 +845,7 @@ app.post(
       );
     }
 
-    if (serviceState === 'degraded' && !minimaxRecoveryAttempt) {
+    if (serviceState === 'degraded' && !recoveryAttemptActive) {
       return errorResponse(
         res,
         503,
@@ -984,7 +861,7 @@ app.post(
       );
     }
 
-    if (requestPhase !== 'ready' && !minimaxRecoveryAttempt) {
+    if (requestPhase !== 'ready' && !recoveryAttemptActive) {
       res.set('Retry-After', String(MODEL_WARMING_RETRY_AFTER_SEC));
       return errorResponse(
         res,
@@ -1172,7 +1049,7 @@ app.post(
       probeReady,
       probeError,
       warmupTriggeredNow,
-      minimaxRecoveryAttempt
+      minimaxRecoveryAttempt: recoveryAttemptActive
     });
   }
 });
@@ -1207,14 +1084,8 @@ app.post(
         return errorResponse(res, unsupportedError.status, unsupportedError.code, unsupportedError.message);
       }
 
-      if (t2aService.provider.selected === 'minimax' && !MINIMAX_API_KEY) {
-        return errorResponse(
-          res,
-          503,
-          'MINIMAX_API_KEY_MISSING',
-          'Minimax API key is missing; set MINIMAX_API_KEY to enable t2a requests.'
-        );
-      }
+      const unavailable = t2aRuntime.getAvailability();
+      if (unavailable) return errorResponse(res, unavailable.status, unavailable.code, unavailable.message);
 
       let t2aResult;
       try {
@@ -1294,8 +1165,8 @@ app.listen(PORT, HOST, () => {
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
       t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,
-      ollamaPsCacheMs: OLLAMA_PS_CACHE_MS,
-      ollamaPsTimeoutMs: OLLAMA_PS_TIMEOUT_MS,
+      ollamaPsCacheMs: READINESS_CACHE_MS,
+      ollamaPsTimeoutMs: READINESS_TIMEOUT_MS,
       warmupTriggerTimeoutMs: WARMUP_TRIGGER_TIMEOUT_MS,
       warmupRetriggerWindowMs: WARMUP_RETRIGGER_WINDOW_MS,
       rateLimitPolicy,
@@ -1305,10 +1176,10 @@ app.listen(PORT, HOST, () => {
       warmupStartupRetryIntervalMs: WARMUP_STARTUP_RETRY_INTERVAL_MS,
       modelWarmingRetryAfterSec: MODEL_WARMING_RETRY_AFTER_SEC,
       serviceState,
-      minimaxPassiveReadyGraceMs: MINIMAX_PASSIVE_READY_GRACE_MS,
-      minimaxFailOpenOnIdle: MINIMAX_FAIL_OPEN_ON_IDLE,
-      minimaxConsecutiveFailureThreshold: MINIMAX_CONSECUTIVE_FAILURE_THRESHOLD,
-      minimaxRecoveryAttemptCooldownMs: MINIMAX_RECOVERY_ATTEMPT_COOLDOWN_MS
+      minimaxPassiveReadyGraceMs: PASSIVE_READY_GRACE_MS,
+      minimaxFailOpenOnIdle: FAIL_OPEN_ON_IDLE,
+      minimaxConsecutiveFailureThreshold: FAILURE_THRESHOLD,
+      minimaxRecoveryAttemptCooldownMs: RECOVERY_COOLDOWN_MS
     })
   );
   console.log(`rewrite-bridge listening on http://${HOST}:${PORT}`);

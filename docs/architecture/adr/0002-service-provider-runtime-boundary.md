@@ -1,12 +1,12 @@
 # ADR 0002: Service and Provider Runtime Boundary
 
-- Status: Provider boundaries implemented for rewrite/T2A/transcription; broader configuration/lifecycle orchestration remains partial
+- Status: Provider boundaries implemented for rewrite/T2A/transcription; registered configuration/availability/lifecycle selection implemented in Step 5
 - Date: 2026-05-07
-- Implementation updated: step-4 branch stacked on PR #133
+- Implementation updated: step-5 branch stacked on PR #134
 
 ## Context
 
-The original proposal called for routes to use a service runtime instead of assembling provider adapters and lifecycle details themselves. Main now has that runtime, invocation helpers and output writers. It still has provider-specific decisions in `server.js`; the implementation is not a complete generic service framework.
+The original proposal called for routes to use a service runtime instead of assembling provider adapters and lifecycle details themselves. The refactor branch supplies that runtime, invocation helpers and output writers. Step 5 removes provider-name selection/key decisions from shared routes; service-specific orchestration remains explicit.
 
 ## Decision implemented
 
@@ -19,7 +19,8 @@ The original proposal called for routes to use a service runtime instead of asse
   adapter,
   capabilities,
   timeouts,
-  lifecycle
+  lifecycle,
+  getAvailability
 }
 ```
 
@@ -29,18 +30,19 @@ Rewrite and T2A select providers independently. [`providers/index.js`](../../../
 
 The [provider registry](../provider-registry.md) supplies per-service capabilities
 and validates factory handler declarations. Runtime capabilities combine that
-descriptor with existing configured service capabilities. Lifecycle descriptors
-are informational in this stage; the existing lifecycle factory still selects policy.
+descriptor with existing configured service capabilities. Lifecycle descriptors now select mode-driven policy; provider-owned hooks supply
+settings, availability and compatibility errors.
 
 Service-owned requests now carry rewrite intent or T2A voice selection/audio options;
 provider-owned translation applies native prompts, presets and legacy defaults.
-Environment readers live in `configuration/`. See [step 3](../provider-abstraction-step-3.md)
+Service readers live in `configuration/`; native readers live in
+`providers/configuration/` and are selected by registration. See [step 3](../provider-abstraction-step-3.md)
 for request contracts and [step 4](../provider-abstraction-step-4.md) for production transcription integration.
 
 ## Current limits of the boundary
 
-- `server.js` still owns startup state, readiness gates, timeout selection and provider-specific rewrite branches, including MiniMax cooldown/missing-key handling. Native prompt assembly now belongs to adapters.
-- T2A route logic explicitly checks its supported provider and MiniMax API key. Only MiniMax T2A is supported; provider selection does not imply automatic fallback.
+- `server.js` owns rewrite startup state, readiness gates and timeout selection. Provider availability/cooldown policy and native prompt assembly come from registration/adapters.
+- T2A checks support and registered availability without native key/name branches. Only MiniMax T2A ships as a live integration; provider selection does not imply automatic fallback.
 - Admission is shared per provider key, not an aggregate limit across all services/providers.
 - [`services/transcription.js`](../../../services/transcription.js) is created independently of the rewrite/T2A registry. Its composition now uses the common provider factory/registry, dispatch and result contract, while the service owns upload, input planning, media conversion, neutral recognition deadlines, cleanup and separate capacity limits. Google request/configuration details stay behind composition and its adapter.
 - Model status and `/readyz` describe rewrite. They do not establish T2A or Google readiness.
@@ -55,3 +57,6 @@ Evidence: [`tests/service-runtime.test.js`](../../../tests/service-runtime.test.
 ## Consequences
 
 The existing boundary supports independent rewrite/T2A provider configuration and centralized invocation/output handling. Future service work can build on it, but must account for remaining server orchestration and transcription's separate lifecycle rather than assuming every service already follows one generic path.
+
+See [Step 5](../provider-abstraction-step-5.md) and the
+[provider author guide](../../guides/adding-a-provider.md) for current extension and retirement.

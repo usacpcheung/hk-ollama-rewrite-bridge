@@ -1,10 +1,12 @@
-function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown' } = {}) {
+function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown', availability = () => null } = {}) {
   return {
     mode: 'none',
     providerName,
     serviceId,
     async checkReadiness() {
-      return { ready: null, error: null };
+      if (serviceId !== 'rewrite') return { ready: null, error: null };
+      const error = availability();
+      return { ready: error ? false : serviceId === 'rewrite' ? true : null, error: error?.code || null };
     },
     async maybeWarmup() {
       return { triggered: false };
@@ -27,7 +29,8 @@ function createActiveProbeLifecycle({
   providerName,
   serviceId,
   adapter,
-  warmupRetriggerWindowMs
+  warmupRetriggerWindowMs,
+  availability = () => null
 }) {
   let lastWarmupTriggerAtMs = 0;
   let warmupInFlight = false;
@@ -43,9 +46,12 @@ function createActiveProbeLifecycle({
     providerName,
     serviceId,
     checkReadiness({ timeoutMs } = {}) {
+      const unavailable = availability();
+      if (unavailable) return Promise.resolve({ ready: false, error: unavailable.code });
       return adapter.checkReadiness({ timeoutMs });
     },
     async maybeWarmup({ nowMs = Date.now(), timeoutMs } = {}) {
+      if (availability()) return { triggered: false };
       if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
         return { triggered: false };
       }
@@ -90,7 +96,8 @@ function createActiveProbeLifecycle({
 function createPassiveRemoteLifecycle({
   providerName,
   serviceId,
-  apiKey,
+  availability = () => null,
+  reasons = { recentFailures: 'PROVIDER_RECENT_FAILURES', idle: 'PROVIDER_IDLE_FAIL_OPEN' },
   passiveReadyGraceMs = 10 * 60_000,
   failOpenOnIdle = true,
   failureThreshold = 3,
@@ -102,9 +109,8 @@ function createPassiveRemoteLifecycle({
   let lastRecoveryAttemptAtMs = 0;
 
   function getPassiveReadiness(nowMs = Date.now()) {
-    if (!apiKey) {
-      return { ready: false, reason: 'MINIMAX_API_KEY_MISSING' };
-    }
+    const unavailable = availability();
+    if (unavailable) return { ready: false, reason: unavailable.code };
 
     const lastActivityAtMs = Math.max(lastSuccessAtMs, lastFailureAtMs, 0);
     const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
@@ -113,14 +119,14 @@ function createPassiveRemoteLifecycle({
 
     if (consecutiveFailures >= failureThreshold) {
       if (failOpenOnIdle && (failuresAreStale || (idleMs !== null && idleMs > passiveReadyGraceMs))) {
-        return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+        return { ready: true, reason: reasons.idle };
       }
 
-      return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
+      return { ready: false, reason: reasons.recentFailures };
     }
 
     if (failOpenOnIdle && idleMs !== null && idleMs > passiveReadyGraceMs) {
-      return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+      return { ready: true, reason: reasons.idle };
     }
 
     return { ready: true, reason: null };
@@ -172,38 +178,18 @@ function createPassiveRemoteLifecycle({
   };
 }
 
-function createProviderLifecycle({
-  providerName,
-  serviceId,
-  adapter,
-  options = {}
-}) {
-  if (serviceId !== 'rewrite') {
-    return createNoopLifecycle({ providerName, serviceId });
-  }
-
-  if (providerName === 'ollama') {
-    return createActiveProbeLifecycle({
-      providerName,
-      serviceId,
-      adapter,
-      warmupRetriggerWindowMs: options.warmupRetriggerWindowMs
-    });
-  }
-
-  if (providerName === 'minimax') {
-    return createPassiveRemoteLifecycle({
-      providerName,
-      serviceId,
-      apiKey: options.minimaxApiKey,
-      passiveReadyGraceMs: options.minimaxPassiveReadyGraceMs,
-      failOpenOnIdle: options.minimaxFailOpenOnIdle,
-      failureThreshold: options.minimaxConsecutiveFailureThreshold,
-      recoveryAttemptCooldownMs: options.minimaxRecoveryAttemptCooldownMs
-    });
-  }
-
-  return createNoopLifecycle({ providerName, serviceId });
+function createProviderLifecycle({ providerName, serviceId, adapter, mode = 'none', options = {} }) {
+  let lifecycle;
+  if (mode === 'active_probe') lifecycle = createActiveProbeLifecycle({ providerName, serviceId, adapter, ...options });
+  else if (mode === 'passive_remote') lifecycle = createPassiveRemoteLifecycle({ providerName, serviceId, ...options });
+  else if (mode === 'none') lifecycle = createNoopLifecycle({ providerName, serviceId, ...options });
+  else throw new TypeError(`Unsupported lifecycle mode: ${mode}`);
+  return Object.assign(lifecycle, {
+    settings: options,
+    canRecover: readiness => readiness?.reason === (options.reasons?.recentFailures || 'PROVIDER_RECENT_FAILURES'),
+    recoveryError: options.recoveryError || (retryAfterSec => ({ status: 429, code: 'PROVIDER_RECOVERY_COOLDOWN',
+      message: `Provider recovery cooldown active, retry after ${retryAfterSec} seconds.` }))
+  });
 }
 
 module.exports = {

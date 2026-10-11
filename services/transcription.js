@@ -54,6 +54,8 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
     if (req.get('Sec-Fetch-Site') === 'cross-site' || (origin && !config.allowedOrigins.includes(origin))) {
       return sendError(new TranscriptionError(403, 'TRANSCRIPTION_ORIGIN_FORBIDDEN', 'Use the worksheet application to upload recordings.'));
     }
+    const unavailable = provider.getAvailability?.();
+    if (unavailable) return sendError(new TranscriptionError(unavailable.status, unavailable.code, unavailable.message));
     if (storageFailed) return sendError(new TranscriptionError(503, 'TRANSCRIPTION_UNAVAILABLE', 'Transcription storage is unavailable.'));
     if (users.has(user)) return sendError(new TranscriptionError(429, 'TRANSCRIPTION_ALREADY_ACTIVE', 'You already have a transcription in progress.'));
     if (active >= config.concurrency) return sendError(new TranscriptionError(503, 'TRANSCRIPTION_BUSY', 'Transcription is busy. Please retry shortly.'));

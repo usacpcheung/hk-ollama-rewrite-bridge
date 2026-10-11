@@ -9,12 +9,16 @@ migration decision.
 
 Disabled by default and independent of rewrite/T2A provider selection. Invalid
 settings fail startup when enabled; disabled deployments need no Google or media
-configuration. Credentials are read through Google Application Default Credentials.
+configuration. Only the selected provider reads its native settings. Google uses
+Application Default Credentials; other adapters declare their own credentials.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `TRANSCRIPTION_ENABLED` | `false` | Enable transcription (`true`/`1` or `false`/`0`). |
-| `TRANSCRIPTION_GOOGLE_PROJECT` | Required when enabled | Google Cloud project ID (not project number). |
+| `TRANSCRIPTION_PROVIDER` | `google-speech` | Registered transcription provider, normalized to lowercase; unknown selection fails enabled startup. Ignored when transcription is disabled. |
+| `TRANSCRIPTION_GOOGLE_MODEL` | `chirp_3` | Model identifier for the implemented Google V2 synchronous recognition call; letters/digits/underscore/dot/hyphen. Confirm region/language/model compatibility before changing. |
+| `TRANSCRIPTION_GOOGLE_LANGUAGE` | `yue-Hant-HK` | Language tag passed to Google; 2–3 letter primary tag with optional 2–8 character alphanumeric subtags. Syntax checking does not establish Google support. |
+| `TRANSCRIPTION_GOOGLE_PROJECT` | Required when Google transcription is enabled | Google Cloud project ID (not project number). |
 | `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | `us` or `eu`; endpoint and recognizer location always match. |
 | `TRANSCRIPTION_ALLOWED_ORIGINS` | Empty | Comma-separated exact worksheet HTTP(S) origins without paths/trailing slashes. Required for browser uploads with Origin headers; cross-site requests are rejected. Authenticated server-side calls without Origin remain supported. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | ADC discovery | Optional SDK credential-file path; use an absolute server-readable path for deployment and never commit the file. If unset, the SDK uses other ADC sources. |
@@ -31,9 +35,12 @@ configuration. Credentials are read through Google Application Default Credentia
 | `TRANSCRIPTION_FFMPEG_PATH` | `ffmpeg` | Server executable; use an absolute path if systemd PATH is restricted. |
 | `TRANSCRIPTION_FFPROBE_PATH` | `ffprobe` | Server executable. |
 
-Model `chirp_3`, language `yue-Hant-HK`, and output mono 16 kHz FLAC are fixed to
-the reviewed/tested profile. `GOOGLE_SDK_NODE_LOGGING` must be empty/unset for
-privacy; any non-empty value, including `false` or `0`, blocks enabled startup.
+The default reviewed Google profile remains `chirp_3`, `yue-Hant-HK`, and mono
+16 kHz FLAC. The two new model/language settings are passed through the existing
+Google V2 synchronous call; other combinations need live compatibility/quality
+acceptance. Changing the calling protocol or audio contract requires adapter code.
+`GOOGLE_SDK_NODE_LOGGING` must be empty/unset when Google is selected for privacy;
+any non-empty value, including `false` or `0`, blocks that enabled startup.
 Unset numeric transcription settings use defaults, but empty/whitespace values
 coerce to zero and fail their positive bounds. The bridge validates transcription
 configuration at startup; it does not preflight ADC credentials or Google access.
@@ -281,8 +288,22 @@ The `ANTHROPIC_*` and `MINIMAX_GROUP_API_KEY` names above are script-only. They 
 
 ## Configuration implementation boundary
 
-Rewrite/T2A readers now live in `configuration/rewrite.js` and `configuration/t2a.js`;
-`configuration/services.js` composes them with service definitions. This move changes
-no environment names, precedence, defaults or supported selections. Arbitrary new
-provider names are not enabled merely by registering an adapter. See the
-[step-3 design](../architecture/provider-abstraction-step-3.md) for remaining configuration work.
+Service readers in `configuration/` and `lib/transcription-config.js` select a
+code-owned provider/service registration. Native readers in
+`providers/configuration/` own model, protocol, endpoint, credential policy and
+lifecycle settings. Production reads only selected providers. Legacy rewrite/T2A
+resolver inspection can still request all registered configurations; it is not
+production initialization. Existing names, aliases, precedence and defaults remain.
+
+Set each service selector, the selected provider's documented model/options and
+server credentials, then restart; there is no hot reload or automatic fallback.
+Changing to an already implemented compatible model/protocol needs configuration,
+not a rebuild. A new provider or unsupported calling protocol requires adapter code
+and deployment. Unregistered rewrite and enabled transcription fail startup;
+unregistered T2A retains its validation-first, request-time 501 behavior.
+The [author guide](../guides/adding-a-provider.md) covers extension and retirement.
+
+Registered rewrite/T2A providers also receive `<PROVIDER>_MAX_CONCURRENCY`,
+`<PROVIDER>_MAX_QUEUE_SIZE` and `<PROVIDER>_MAX_WAIT_MS` admission overrides.
+Uppercase the ID and replace non-alphanumeric characters with underscores.
+T2A-only registrations are included; transcription admission remains separate.

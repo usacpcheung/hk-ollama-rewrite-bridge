@@ -6,10 +6,32 @@ This document reflects the current server implementation and is intended for dow
 - Typical public namespace via reverse proxy: `/api/rewrite-bridge/*`
 - Protected routes: `POST /rewrite`, `POST /t2a`, `POST /transcriptions` (and their `/api/` aliases)
 
+## Provider selection and compatibility
+
+Provider choice is server configuration, not a per-request native-provider switch.
+`REWRITE_PROVIDER`, `T2A_PROVIDER` and `TRANSCRIPTION_PROVIDER` select registered
+implementations after restart. Existing service endpoints and output contracts stay
+the same. Adding an implementation still requires adapter code and registration.
+`/readyz` remains a rewrite gate, not proof that every provider is usable.
+
+T2A keeps MiniMax MP3/WAV/PCM and all current presets/raw controls. An added
+provider declaring fewer formats returns `422 AUDIO_FORMAT_UNSUPPORTED` for an
+unsupported valid format (including default MP3 if unavailable); invalid format
+names retain `400 INVALID_INPUT`. An unsupported preset returns
+`422 VOICE_CHOICE_UNSUPPORTED`. New adapters must explicitly document/reject
+unsupported legacy controls rather than silently interpreting old `voice_id` values.
+Raw controls are not retired by this change.
+
 ## Transcription
 
 Step 4 preserves the Google service and public formats while moving production
 audio preparation/recognition behind the [provider contract](../architecture/provider-abstraction-step-4.md).
+`TRANSCRIPTION_PROVIDER` defaults to `google-speech`. Operators may configure
+`TRANSCRIPTION_GOOGLE_MODEL` (default `chirp_3`) and
+`TRANSCRIPTION_GOOGLE_LANGUAGE` (default `yue-Hant-HK`) and restart, subject to
+Google V2 model/region/language support. Other registered adapters use their
+declared preparation profile and return the same HTTP contract. See the
+[environment reference](env-reference.md#transcription).
 Malformed adapter results or native transcript fields return controlled
 `502 TRANSCRIPTION_FAILED`; valid empty recognition remains `422 NO_SPEECH`.
 

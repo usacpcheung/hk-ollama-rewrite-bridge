@@ -5,106 +5,17 @@ const ABSOLUTE_MAX_COMPLETION_TOKENS = 8192;
 const DEFAULT_ADMISSION_MAX_CONCURRENCY = 4;
 const DEFAULT_ADMISSION_MAX_QUEUE_SIZE = 100;
 const DEFAULT_ADMISSION_MAX_WAIT_MS = 15000;
-const DEFAULT_MINIMAX_API_FORMAT = 'legacy-chat';
-const DEFAULT_MINIMAX_ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
-const SUPPORTED_MINIMAX_API_FORMATS = new Set(['legacy-chat', 'anthropic']);
-
-function readPreferredEnv(env, keys = []) {
-  for (const key of keys) {
-    const raw = env[key];
-    if (raw != null && raw.trim() !== '') {
-      return { key, value: raw };
-    }
-  }
-  return null;
-}
-
-function parseBooleanFlag(raw, fallback) {
-  if (typeof raw !== 'string') {
-    return fallback;
-  }
-
-  const normalized = raw.trim().toLowerCase();
-  if (normalized === 'true' || normalized === '1') {
-    return true;
-  }
-
-  if (normalized === 'false' || normalized === '0') {
-    return false;
-  }
-
-  return fallback;
-}
-
-function parseEnumValue(raw, fallback, supportedValues) {
-  if (typeof raw !== 'string') {
-    return fallback;
-  }
-
-  const normalized = raw.trim().toLowerCase();
-  return supportedValues.has(normalized) ? normalized : fallback;
-}
-
-function readWithLegacyFallback({
-  env,
-  preferredKeys,
-  legacyKeys,
-  parse,
-  defaultValue,
-  warnLegacyUsage,
-  warningLabel
-}) {
-  const parseWithValidity = (raw) => {
-    const invalidMarker = Symbol('invalid-env-value');
-    const parsed = parse(raw, invalidMarker);
-
-    return {
-      isValid: parsed !== invalidMarker,
-      value: parsed
-    };
-  };
-
-  const preferred = readPreferredEnv(env, preferredKeys);
-  if (preferred) {
-    const preferredParsed = parseWithValidity(preferred.value);
-    if (preferredParsed.isValid) {
-      return {
-        value: preferredParsed.value,
-        source: { type: 'preferred', key: preferred.key }
-      };
-    }
-  }
-
-  const legacy = readPreferredEnv(env, legacyKeys);
-  if (legacy) {
-    const legacyParsed = parseWithValidity(legacy.value);
-    if (legacyParsed.isValid) {
-      warnLegacyUsage({
-        legacyKey: legacy.key,
-        preferredKeys,
-        warningLabel
-      });
-      return {
-        value: legacyParsed.value,
-        source: { type: 'legacy', key: legacy.key }
-      };
-    }
-  }
-
-  return {
-    value: defaultValue,
-    source: { type: 'default', key: null }
-  };
-}
-
+const { readWithLegacyFallback, parseBooleanFlag } = require('./values');
 function resolveRewriteConfig({
   env = process.env,
   parseEnvBoundedInteger,
   parseEnvMilliseconds,
-  providerCapabilities = {}
+  providerCapabilities = {},
+  registry = require('../providers').providerRegistry,
+  selectedOnly = false
 }) {
   const serviceId = 'REWRITE';
-  const supportedProviders = ['ollama', 'minimax'];
+  const supportedProviders = [...new Set([...registry.providersFor('rewrite'), ...registry.providersFor('t2a')])];
 
   const warnLegacyUsage = ({ legacyKey, preferredKeys, warningLabel }) => {
     if (!preferredKeys.length) {
@@ -189,90 +100,16 @@ function resolveRewriteConfig({
   });
 
 
-  const ollamaUrlResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_OLLAMA_URL`, `${serviceId}_PROVIDER_OLLAMA_URL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer REWRITE_OLLAMA_URL. Remove after production env files have migrated.
-    legacyKeys: ['OLLAMA_URL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: 'http://127.0.0.1:11434/api/generate',
-    warnLegacyUsage,
-    warningLabel: 'ollamaUrl'
-  });
-
-  const ollamaPsUrlResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_OLLAMA_PS_URL`, `${serviceId}_PROVIDER_OLLAMA_PS_URL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer REWRITE_OLLAMA_PS_URL. Remove after production env files have migrated.
-    legacyKeys: ['OLLAMA_PS_URL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: 'http://127.0.0.1:11434/api/ps',
-    warnLegacyUsage,
-    warningLabel: 'ollamaPsUrl'
-  });
-
-  const ollamaModelResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_OLLAMA_MODEL`, `${serviceId}_PROVIDER_OLLAMA_MODEL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer REWRITE_OLLAMA_MODEL. Remove after production env files have migrated.
-    legacyKeys: ['OLLAMA_MODEL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: 'qwen2.5:3b-instruct',
-    warnLegacyUsage,
-    warningLabel: 'ollamaModel'
-  });
-
-  const minimaxModelResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_MODEL`, `${serviceId}_PROVIDER_MINIMAX_MODEL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer REWRITE_MINIMAX_MODEL. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_MODEL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: 'M2-her',
-    warnLegacyUsage,
-    warningLabel: 'minimaxModel'
-  });
-
-  const minimaxApiUrlResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_API_URL`, `${serviceId}_PROVIDER_MINIMAX_API_URL`],
-    // Deprecated env alias kept for one compatibility window.
-    // Prefer REWRITE_MINIMAX_API_URL. Remove after production env files have migrated.
-    legacyKeys: ['MINIMAX_API_URL'],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: 'https://api.minimax.io/v1/text/chatcompletion_v2',
-    warnLegacyUsage,
-    warningLabel: 'minimaxApiUrl'
-  });
-
-  const minimaxApiFormatResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [`${serviceId}_MINIMAX_API_FORMAT`, `${serviceId}_PROVIDER_MINIMAX_API_FORMAT`],
-    legacyKeys: [],
-    parse: (raw, fallback) => parseEnumValue(raw, fallback, SUPPORTED_MINIMAX_API_FORMATS),
-    defaultValue: DEFAULT_MINIMAX_API_FORMAT,
-    warnLegacyUsage,
-    warningLabel: 'minimaxApiFormat'
-  });
-
-  const minimaxAnthropicBaseUrlResolution = readWithLegacyFallback({
-    env,
-    preferredKeys: [
-      `${serviceId}_MINIMAX_ANTHROPIC_BASE_URL`,
-      `${serviceId}_PROVIDER_MINIMAX_ANTHROPIC_BASE_URL`
-    ],
-    legacyKeys: [],
-    parse: (raw, fallback) => raw || fallback,
-    defaultValue: DEFAULT_MINIMAX_ANTHROPIC_BASE_URL,
-    warnLegacyUsage,
-    warningLabel: 'minimaxAnthropicBaseUrl'
-  });
-
   const provider = providerResolution.value;
+  const resolvedProviders = {};
+  const providerSources = {};
+  for (const name of selectedOnly ? [provider] : registry.providersFor('rewrite')) {
+    if (!registry.supports(name, 'rewrite')) continue;
+    const configured = registry.readConfiguration(name, 'rewrite', { env, warnLegacyUsage });
+    resolvedProviders[name] = { ...configured.runtime, capabilities: providerCapabilities[name] || { streaming: false } };
+    Object.assign(providerSources, configured.sources);
+  }
+
 
   const admissionGlobalLimits = {
     maxConcurrency: parseEnvBoundedInteger(
@@ -296,7 +133,7 @@ function resolveRewriteConfig({
   };
 
   const admissionByProvider = supportedProviders.reduce((acc, providerName) => {
-    const providerEnvPrefix = providerName.toUpperCase();
+    const providerEnvPrefix = providerName.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
     const maxConcurrency = parseEnvBoundedInteger(
       env[`${providerEnvPrefix}_MAX_CONCURRENCY`],
       null,
@@ -331,7 +168,7 @@ function resolveRewriteConfig({
     preferredKeys: [
       `${serviceId}_STREAMING_ENABLED`,
       `${serviceId}_PROVIDER_STREAMING_ENABLED`,
-      `${serviceId}_${String(provider).toUpperCase()}_STREAMING_ENABLED`
+      `${serviceId}_${String(provider).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}_STREAMING_ENABLED`
     ],
     legacyKeys: [],
     parse: parseBooleanFlag,
@@ -355,21 +192,7 @@ function resolveRewriteConfig({
       global: admissionGlobalLimits,
       byProvider: admissionByProvider
     },
-    providers: {
-      ollama: {
-        model: ollamaModelResolution.value,
-        generateUrl: ollamaUrlResolution.value,
-        psUrl: ollamaPsUrlResolution.value,
-        capabilities: providerCapabilities.ollama || { streaming: false }
-      },
-      minimax: {
-        model: minimaxModelResolution.value,
-        apiUrl: minimaxApiUrlResolution.value,
-        apiFormat: minimaxApiFormatResolution.value,
-        anthropicBaseUrl: minimaxAnthropicBaseUrlResolution.value,
-        capabilities: providerCapabilities.minimax || { streaming: false }
-      }
-    },
+    providers: resolvedProviders,
     selectedProviderCapabilities,
     selectedProviderStreamingEnabled,
     sources: {
@@ -378,13 +201,7 @@ function resolveRewriteConfig({
       maxTextLength: maxTextLengthResolution.source,
       readyTimeoutMs: readyTimeoutResolution.source,
       coldTimeoutMs: coldTimeoutResolution.source,
-      ollamaModel: ollamaModelResolution.source,
-      ollamaUrl: ollamaUrlResolution.source,
-      ollamaPsUrl: ollamaPsUrlResolution.source,
-      minimaxModel: minimaxModelResolution.source,
-      minimaxApiUrl: minimaxApiUrlResolution.source,
-      minimaxApiFormat: minimaxApiFormatResolution.source,
-      minimaxAnthropicBaseUrl: minimaxAnthropicBaseUrlResolution.source,
+      ...providerSources,
       streamingEnabled: providerStreamingEnvResolution.source
     }
   };

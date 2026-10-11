@@ -1,8 +1,8 @@
 # Registered provider construction
 
-Implemented in the step-2 PR based on main
-`668e68e4e9ad72760b28bdc5b901e4d8659a249d`. Public APIs, supported env selections,
-protocol/model defaults, auth, admission, voice presets and raw controls are unchanged.
+Current implementation includes Steps 2–5. Existing public contracts and built-in
+provider defaults are preserved; Step 5 adds registered configuration/availability
+and lifecycle selection. See the [Step 5 design](provider-abstraction-step-5.md).
 
 ## Production path
 
@@ -35,6 +35,11 @@ configuration consumers; server composition uses per-service views.
   and existing construction options (endpoints, credentials,
   timeouts/options where applicable, and debug logger). Factories may initialize
   adapter objects but must not make paid requests during discovery/construction.
+- `readConfiguration({env, ...})`: native validated settings as `{runtime, sources?}`.
+- `availability(options)`: optional local controlled configuration error or null.
+- `lifecycleOptions({env})`: optional validated neutral lifecycle settings.
+- `requestPolicy`: required for registered T2A providers; validates native legacy
+  controls and declares supported neutral presets.
 - `capabilities`: `sync: true`, boolean `streaming`, optional lifecycle descriptor,
   audio format list and `legacyVoiceControls` flag. Capability snapshots and audio
   lists are frozen; discovering capabilities does not execute a factory.
@@ -51,8 +56,8 @@ rewrite methods retain the provider receiver.
 Voice IDs and lifecycle methods are not required of every factory. Active-probe
 implementations still need the methods consumed by the existing lifecycle factory.
 
-Lifecycle/audio/legacy descriptors document support; they do not replace current
-lifecycle selection, request validation or unsupported-control policy in this stage.
+Lifecycle descriptors now select mode-driven policy. T2A audio format declarations
+are enforced by shared validation; request policy handles preset/raw-control support.
 Configured service capabilities override descriptive factory capabilities in the
 runtime, so available rewrite streaming remains disabled unless configuration enables it.
 
@@ -70,23 +75,18 @@ it through the same `createProvider` wrapper and runtime/invoker, uses the uncha
 T2A validator, and writes the existing base64 JSON contract using artifacts. It
 requires neither native voice IDs nor readiness/warmup methods. No cloud calls occur.
 
-This proves the construction boundary, not public acceptance of arbitrary env
-provider names. Current config readers and route support/key checks still know
-existing providers, native voice mapping now lives in `providers/minimax-voices.js`, and
-lifecycle policy still branches in `providers/lifecycle.js`. Adding a real provider
-still requires an explicit supported configuration/mapping integration in later
-stages; registration alone does not bypass validation or route gates.
+Step 5 extends the proof through actual server routes with environment-selected
+alternative providers for all three services. Native readers and policies are
+registered alongside factories; adding a supported implementation does not need
+provider-name branches in routes. `providers/registrations.js` owns definitions.
+Unknown enabled transcription also fails startup; disabled transcription is lazy.
 
-Credential/model/protocol interpretation remains in provider-specific factory
-functions. Transcription capacity/cleanup retain their service-owned lifecycle; startup
-orchestration remains incomplete. Cancellation
-and deadlines remain service/adapter responsibilities under the existing flows;
-the registry adds no retries, failover or lifecycle state machine.
-
-Before stages 3–5, use the [roadmap](provider-abstraction-roadmap.md) and
-[baseline gates](compatibility-baseline.md). Production remains pinned until the
-operator's separately planned acceptance; this PR does not establish VPS state.
-
+Cancellation/deadlines remain service/adapter responsibilities. The registry adds
+no retries or failover. Transcription keeps independent capacity/cleanup and the
+server keeps rewrite startup state. New service routes and new transport modes
+still require explicit design. Follow the [author guide](../guides/adding-a-provider.md)
+and [roadmap](provider-abstraction-roadmap.md). Production remains pinned pending
+separate maintenance-window acceptance.
 
 ## Historical step-2 verification
 
@@ -103,5 +103,5 @@ The PR's Node 22/24 CI is the merge-time verification for its final commit.
 Factories now translate service-owned rewrite/T2A requests into native payloads.
 The pure T2A compatibility policy is composed in `configuration/services.js`.
 See [step 3](provider-abstraction-step-3.md) for payloads, preset intent, alternative
-adapter proofs and the transcription contract (integrated into production in step 4). Config/lifecycle selection
-is still incomplete; registration alone does not add a supported env selection.
+adapter proofs and the transcription contract (integrated into production in step 4). Step 5 completes config/lifecycle selection through registered hooks; a new
+provider still needs its reader, policy, native implementation and tests.

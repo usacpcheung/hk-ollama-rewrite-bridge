@@ -16,6 +16,9 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 | [Transcription runbook](runbooks/transcription-deployment.md) | Opt-in Google/media setup, validation, rollback and cleanup |
 | [Compatibility baseline](architecture/compatibility-baseline.md) | Code/test-backed contracts, legacy support, corrected defects and remaining coverage gaps |
 | [Refactor roadmap](architecture/provider-abstraction-roadmap.md) | Six stages, production baseline, VPS acceptance and rollback gates |
+| [Step 5 validation](reviews/2026-10-11-step-5-validation.md) | Implementation review, extension tests and server simulations |
+| [Step 5 completion](architecture/provider-abstraction-step-5.md) | Registered configuration/lifecycle and extension acceptance |
+| [Adding or retiring a provider](guides/adding-a-provider.md) | Provider contracts, env settings, voice mappings and migration |
 | [Provider registry](architecture/provider-registry.md) | Implemented construction/capability contract and remaining extension boundaries |
 | [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Working-code implementation scope, acceptance criteria and deferred migration gates |
 | [Step 3 contracts and gates](architecture/provider-abstraction-step-3.md) | Rewrite/T2A separation, all-service contracts, extension proofs and deferred work |

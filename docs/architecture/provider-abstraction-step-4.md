@@ -135,10 +135,11 @@ Upload/auth/admission/HTTP response logic does not need provider-specific change
 New transport modes such as remote URLs, streaming or asynchronous jobs require
 an explicitly designed shared capability; this PR does not pretend to support them.
 
-Step 5 still owns general env selection, credential/configuration guidance and
-remaining lifecycle/readiness orchestration. No `TRANSCRIPTION_PROVIDER` setting
-is added. Existing Google env settings remain valid. No live provider is added,
-legacy voice controls are not retired, and rewrite/T2A formats remain unchanged.
+Step 4 did not introduce a provider selector. [Step 5](provider-abstraction-step-5.md)
+now adds `TRANSCRIPTION_PROVIDER`, selected-provider native configuration, Google
+model/language settings and availability policy. Existing Google defaults remain
+valid. No live provider is added, legacy voice controls are not retired, and
+rewrite/T2A formats remain unchanged.
 
 ## Validation and release gate
 
@@ -149,6 +150,6 @@ while waiting for conversion, deadlines, native settlement ownership and recover
 The [Step 4 review record](../reviews/2026-10-08-step-4-validation.md) records final
 counts and simulations. Node 22/24 CI and manual curl checks are required.
 
-Keep the PR stack open and the production version unchanged. Step 5 needs separate
-authorization. Final maintenance-window VPS acceptance still checks real Google
+Keep the PR stack open and the production version unchanged. Step 5 was
+subsequently authorized and is implemented on its stacked branch. Final maintenance-window VPS acceptance still checks real Google
 credentials/quotas, OIDC/proxy sessions, worksheet behavior and operational cleanup.
