@@ -1,10 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  createProviderLifecycle,
-  createPassiveRemoteLifecycle
-} = require('../providers/lifecycle');
+const { createProviderLifecycle } = require('../providers');
+const { createPassiveRemoteLifecycle } = require('../providers/lifecycle');
+const { minimaxLifecycle } = require('../providers/configuration/lifecycle');
 
 test('ollama rewrite lifecycle actively probes readiness and warmup through adapter', async () => {
   const calls = [];
@@ -74,7 +73,8 @@ test('minimax passive lifecycle tracks failures, cooldown, success reset, and id
   const lifecycle = createPassiveRemoteLifecycle({
     providerName: 'minimax',
     serviceId: 'rewrite',
-    apiKey: 'test-key',
+    ...minimaxLifecycle({ env: {} }),
+    availability: () => null,
     passiveReadyGraceMs: 10_000,
     failOpenOnIdle: true,
     failureThreshold: 2,

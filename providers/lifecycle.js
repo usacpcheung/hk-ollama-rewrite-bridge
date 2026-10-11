@@ -1,10 +1,14 @@
-function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown' } = {}) {
+const { performance } = require('node:perf_hooks');
+const { readProviderAvailability } = require('../lib/provider-availability');
+function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown', availability = () => null } = {}) {
   return {
     mode: 'none',
     providerName,
     serviceId,
     async checkReadiness() {
-      return { ready: null, error: null };
+      if (serviceId !== 'rewrite') return { ready: null, error: null };
+      const error = readProviderAvailability(availability);
+      return { ready: error ? false : serviceId === 'rewrite' ? true : null, error: error?.code || null };
     },
     async maybeWarmup() {
       return { triggered: false };
@@ -27,8 +31,10 @@ function createActiveProbeLifecycle({
   providerName,
   serviceId,
   adapter,
-  warmupRetriggerWindowMs
+  warmupRetriggerWindowMs,
+  availability = () => null
 }) {
+  let readinessInFlight = null;
   let lastWarmupTriggerAtMs = 0;
   let warmupInFlight = false;
   let lastWarmupResult = null;
@@ -43,9 +49,27 @@ function createActiveProbeLifecycle({
     providerName,
     serviceId,
     checkReadiness({ timeoutMs } = {}) {
-      return adapter.checkReadiness({ timeoutMs });
+      const unavailable = readProviderAvailability(availability);
+      if (unavailable) return Promise.resolve({ ready: false, error: unavailable.code });
+      // All status/request/startup callers share one probe. An older response
+      // therefore cannot arrive after, and overwrite, a newer observation.
+      if (!readinessInFlight) {
+        const deadline = Number.isFinite(timeoutMs) ? performance.now() + timeoutMs : Infinity;
+        readinessInFlight = Promise.resolve().then(() => adapter.checkReadiness({ timeoutMs }))
+          .then(result => {
+            const unavailable = readProviderAvailability(availability);
+            if (unavailable) return { ready: false, error: unavailable.code };
+            if (performance.now() >= deadline) throw new Error('Probe deadline exceeded');
+            if (!result || ![true, false, null].includes(result.ready)) throw new TypeError('Invalid readiness');
+            return result;
+          })
+          .catch(() => ({ ready: null, error: 'PROVIDER_PROBE_UNAVAILABLE' }))
+          .finally(() => { readinessInFlight = null; });
+      }
+      return readinessInFlight;
     },
     async maybeWarmup({ nowMs = Date.now(), timeoutMs } = {}) {
+      if (readProviderAvailability(availability)) return { triggered: false };
       if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
         return { triggered: false };
       }
@@ -53,8 +77,10 @@ function createActiveProbeLifecycle({
       warmupInFlight = true;
       lastWarmupTriggerAtMs = nowMs;
 
+      const deadline = Number.isFinite(timeoutMs) ? performance.now() + timeoutMs : Infinity;
       try {
         const warmupResult = await adapter.triggerWarmup({ timeoutMs });
+        if (performance.now() >= deadline) throw new Error('Warmup deadline exceeded');
         if (!warmupResult.ok) {
           lastWarmupResult = 'failed';
           lastWarmupError = warmupResult.error?.detail || 'warmup_fetch_failed';
@@ -64,6 +90,10 @@ function createActiveProbeLifecycle({
         lastWarmupResult = 'success';
         lastWarmupError = null;
         return { triggered: true, result: lastWarmupResult, error: null };
+      } catch {
+        lastWarmupResult = 'failed';
+        lastWarmupError = 'PROVIDER_WARMUP_FAILED';
+        return { triggered: true, result: lastWarmupResult, error: lastWarmupError };
       } finally {
         warmupInFlight = false;
       }
@@ -90,7 +120,8 @@ function createActiveProbeLifecycle({
 function createPassiveRemoteLifecycle({
   providerName,
   serviceId,
-  apiKey,
+  availability = () => null,
+  reasons = { recentFailures: 'PROVIDER_RECENT_FAILURES', idle: 'PROVIDER_IDLE_FAIL_OPEN' },
   passiveReadyGraceMs = 10 * 60_000,
   failOpenOnIdle = true,
   failureThreshold = 3,
@@ -102,9 +133,8 @@ function createPassiveRemoteLifecycle({
   let lastRecoveryAttemptAtMs = 0;
 
   function getPassiveReadiness(nowMs = Date.now()) {
-    if (!apiKey) {
-      return { ready: false, reason: 'MINIMAX_API_KEY_MISSING' };
-    }
+    const unavailable = readProviderAvailability(availability);
+    if (unavailable) return { ready: false, reason: unavailable.code };
 
     const lastActivityAtMs = Math.max(lastSuccessAtMs, lastFailureAtMs, 0);
     const idleMs = lastActivityAtMs > 0 ? Math.max(0, nowMs - lastActivityAtMs) : null;
@@ -113,14 +143,14 @@ function createPassiveRemoteLifecycle({
 
     if (consecutiveFailures >= failureThreshold) {
       if (failOpenOnIdle && (failuresAreStale || (idleMs !== null && idleMs > passiveReadyGraceMs))) {
-        return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+        return { ready: true, reason: reasons.idle };
       }
 
-      return { ready: false, reason: 'MINIMAX_RECENT_FAILURES' };
+      return { ready: false, reason: reasons.recentFailures };
     }
 
     if (failOpenOnIdle && idleMs !== null && idleMs > passiveReadyGraceMs) {
-      return { ready: true, reason: 'MINIMAX_IDLE_FAIL_OPEN' };
+      return { ready: true, reason: reasons.idle };
     }
 
     return { ready: true, reason: null };
@@ -172,38 +202,18 @@ function createPassiveRemoteLifecycle({
   };
 }
 
-function createProviderLifecycle({
-  providerName,
-  serviceId,
-  adapter,
-  options = {}
-}) {
-  if (serviceId !== 'rewrite') {
-    return createNoopLifecycle({ providerName, serviceId });
-  }
-
-  if (providerName === 'ollama') {
-    return createActiveProbeLifecycle({
-      providerName,
-      serviceId,
-      adapter,
-      warmupRetriggerWindowMs: options.warmupRetriggerWindowMs
-    });
-  }
-
-  if (providerName === 'minimax') {
-    return createPassiveRemoteLifecycle({
-      providerName,
-      serviceId,
-      apiKey: options.minimaxApiKey,
-      passiveReadyGraceMs: options.minimaxPassiveReadyGraceMs,
-      failOpenOnIdle: options.minimaxFailOpenOnIdle,
-      failureThreshold: options.minimaxConsecutiveFailureThreshold,
-      recoveryAttemptCooldownMs: options.minimaxRecoveryAttemptCooldownMs
-    });
-  }
-
-  return createNoopLifecycle({ providerName, serviceId });
+function createProviderLifecycle({ providerName, serviceId, adapter, mode = 'none', options = {} }) {
+  let lifecycle;
+  if (mode === 'active_probe') lifecycle = createActiveProbeLifecycle({ providerName, serviceId, adapter, ...options });
+  else if (mode === 'passive_remote') lifecycle = createPassiveRemoteLifecycle({ providerName, serviceId, ...options });
+  else if (mode === 'none') lifecycle = createNoopLifecycle({ providerName, serviceId, ...options });
+  else throw new TypeError(`Unsupported lifecycle mode: ${mode}`);
+  return Object.assign(lifecycle, {
+    settings: options,
+    canRecover: readiness => readiness?.reason === (options.reasons?.recentFailures || 'PROVIDER_RECENT_FAILURES'),
+    recoveryError: options.recoveryError || (retryAfterSec => ({ status: 429, code: 'PROVIDER_RECOVERY_COOLDOWN',
+      message: `Provider recovery cooldown active, retry after ${retryAfterSec} seconds.` }))
+  });
 }
 
 module.exports = {

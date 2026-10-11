@@ -1,12 +1,12 @@
 # Current runtime and request flows
 
-Updated for the step-4 transcription integration branch stacked on PR #133. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Updated for the step-5 provider completion branch stacked on PR #134. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
 [`server.js`](../../server.js) creates an Express listener at the fixed address `127.0.0.1:3001`. It loads the rewrite/T2A definitions from [`services/index.js`](../../services/index.js), constructs their runtimes through [`lib/service-runtime.js`](../../lib/service-runtime.js), and independently creates transcription through [`services/transcription.js`](../../services/transcription.js).
 
-The rewrite/T2A runtimes contain the service, provider name, adapter, capabilities, timeouts and lifecycle. Rewrite defaults to Ollama; MiniMax can use legacy chat or the opt-in Anthropic Messages interface. T2A supports only MiniMax and defaults to `speech-2.6-hd`. Transcription is disabled unless explicitly enabled; its Google V2 profile is `chirp_3` / `yue-Hant-HK` in configured `us` or `eu`.
+The rewrite/T2A runtimes contain the service, provider name, adapter, capabilities, timeouts and lifecycle. Rewrite defaults to Ollama; MiniMax can use legacy chat or the opt-in Anthropic Messages interface. T2A ships a MiniMax integration and defaults to `speech-2.6-hd`. Transcription is disabled unless explicitly enabled; its default Google V2 profile is `chirp_3` / `yue-Hant-HK` in configured `us` or `eu`.
 
 Provider construction now resolves a `(provider, service)` registration in
 [`providers/index.js`](../../providers/index.js) through
@@ -15,7 +15,9 @@ capabilities per service to the readers in `configuration/`; MiniMax rewrite str
 appears as a T2A capability. Configured service streaming remains the effective
 request toggle. See the [registry contract](provider-registry.md).
 
-Provider lifecycle wiring is implemented, but startup state and several provider-specific decisions remain in `server.js`. [ADR 0002](adr/0002-service-provider-runtime-boundary.md) records this partial boundary.
+Provider configuration, availability and lifecycle mode are selected by registrations.
+Shared rewrite startup state remains in `server.js`. [ADR 0002](adr/0002-service-provider-runtime-boundary.md)
+records the boundary and [Step 5](provider-abstraction-step-5.md) explains extension.
 
 ## Shared middleware and trust
 
@@ -41,7 +43,7 @@ Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 
 Both `/t2a` and `/api/t2a` run the T2A limiter and shared auth. [`services/t2a.js`](../../services/t2a.js) rejects streaming, trims/validates text and output options, and uses an injected pure policy for legacy control validation. It emits a default, legacy or stable preset selection from [`lib/t2a-voice-choices.js`](../../lib/t2a-voice-choices.js). MiniMax defaults and native preset mapping are applied in [`providers/minimax-t2a-compatibility.js`](../../providers/minimax-t2a-compatibility.js) and [`providers/minimax-voices.js`](../../providers/minimax-voices.js). A choice cannot be mixed with raw voice controls, even null ones.
 
-The route checks supported provider/key, invokes through the shared admission/invocation path, and writes raw bytes or base64 JSON. T2A's lifecycle is a no-op; it does not consult rewrite readiness before invocation. The MiniMax adapter sends native settings, not `voice_choice`, and does not write audio to disk.
+The route checks supported provider and registered availability, invokes through the shared admission/invocation path, and writes raw bytes or base64 JSON. T2A's lifecycle is a no-op; it does not consult rewrite readiness before invocation. The MiniMax adapter sends native settings, not `voice_choice`, and does not write audio to disk.
 
 The adapter normalizes format/MIME declarations along the selected audio ancestry, including wrapped/array responses, without mixing unrelated siblings. Declared format takes precedence; absent metadata uses the request format. Unsupported or contradictory declarations return controlled 502. Binary filenames and JSON labels agree; bytes remain unchanged. See [audio-format metadata](../reference/api-reference.md#audio-format-metadata) and the [compatibility baseline](compatibility-baseline.md).
 
@@ -51,7 +53,7 @@ The adapter normalizes format/MIME declarations along the selected audio ancestr
 
 After the shared JSON parser and baseline limiter, both `/transcriptions` and `/api/transcriptions` set `Cache-Control: no-store`, run shared auth, then transcription middleware. Earlier parser/baseline-limiter rejections do not receive that header. Disabled mode returns 503 after auth. Enabled mode has its own limiter and handler:
 
-1. Check allowed Origin / `Sec-Fetch-Site`, storage, one-active-request-per-authenticated-email and total admission capacity before receiving audio.
+1. Check allowed Origin / `Sec-Fetch-Site`, optional provider availability, storage, one-active-request-per-authenticated-email and total admission capacity before receiving audio.
 2. Create a private job directory and enforce exact multipart field `audio`, byte limit and receive deadline in [`lib/transcription-upload.js`](../../lib/transcription-upload.js).
 3. Wait for a bounded conversion slot, probe actual media, reject unsupported content and enforce decoded duration. [`lib/transcription-media.js`](../../lib/transcription-media.js) follows the adapter's validated input plan. The current Google plan retains mono 16 kHz FLAC with FFmpeg/FFprobe.
 4. [`configuration/transcription.js`](../../configuration/transcription.js) selects the registered Google adapter. [`lib/transcription-recognition.js`](../../lib/transcription-recognition.js) dispatches prepared audio and validates normalized output; [`providers/google-speech.js`](../../providers/google-speech.js) owns ADC and the V2 synchronous recognition request. Calls can run concurrently; retries are disabled.
@@ -75,5 +77,7 @@ Step 3 separates rewrite/T2A request intent from native payloads and defines the
 transcription input contract. Step 4 integrates it into the production workflow; see
 the [step-4 design](provider-abstraction-step-4.md) and
 [step-3 design and gates](provider-abstraction-step-3.md) for boundaries,
-extension proofs and remaining steps. PR #132 recorded 306 passing tests before
+extension proofs. [Step 5](provider-abstraction-step-5.md) completes registered
+configuration, credential availability and mode-driven rewrite lifecycle selection.
+Production acceptance remains Step 6. PR #132 recorded 306 passing tests before
 this increment; earlier counts above are historical checkpoints.

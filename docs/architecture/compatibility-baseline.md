@@ -195,10 +195,12 @@ remain the record for PRs #128/#129, not the total after later additions.
 - New [HTTP coverage](../../tests/service-compatibility.test.js), “compatibility: unregistered Ollama T2A preserves validation order and does not affect rewrite”,
   checks both aliases and proves rejected T2A work makes no upstream calls.
 - At the step-2 checkpoint, transcription composition and startup-state branches
-  were not moved. Step 4 now integrates transcription; startup extraction remains Step 5.
+  were not moved. Step 4 integrates transcription; Step 5 now selects native
+  configuration/availability/lifecycle through registrations. Shared startup state
+  remains in the server.
 
-See [registry boundaries and remaining work](provider-registry.md) before interpreting
-this construction refactor as complete env-driven provider interchangeability.
+See the [registry boundary](provider-registry.md) and [Step 5 extension proof](provider-abstraction-step-5.md)
+for current configuration selection and remaining protocol/production limits.
 
 ## Whole-branch correction gate in PR #132
 

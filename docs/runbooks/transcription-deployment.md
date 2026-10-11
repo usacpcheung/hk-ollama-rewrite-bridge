@@ -13,7 +13,10 @@ See the [API contract](../reference/api-reference.md#transcription) and
 
 - Google Cloud Speech-to-Text **V2**, `chirp_3`, `us`, `yue-Hant-HK`.
 - `lib/transcription-media.js` decodes every accepted upload to mono 16 kHz FLAC; declaring a MIME type does not bypass validation. Synthetic-media tests verify this local path, not live Google recognition accuracy.
-- The code permits `us` or `eu` and fixes `chirp_3` / `yue-Hant-HK`. Confirm current Google model/language availability, project access and quota before rollout; the repository cannot establish these external facts. Google AI Studio keys/credits are not used by this Google Cloud SDK path.
+- The code permits `us` or `eu`; `TRANSCRIPTION_GOOGLE_MODEL` and
+  `TRANSCRIPTION_GOOGLE_LANGUAGE` default to `chirp_3` / `yue-Hant-HK`.
+  This runbook tests that default profile. `TRANSCRIPTION_PROVIDER` defaults to
+  `google-speech`; changing the model/language uses the existing V2 call, not a new protocol. Confirm current Google model/language availability, project access and quota before rollout; the repository cannot establish these external facts. Google AI Studio keys/credits are not used by this Google Cloud SDK path.
 - Use Application Default Credentials (ADC) with the existing service account
   granted `roles/speech.client` on the configured project. Do not grant Owner or
   Editor. No bucket, named recognizer, or Google Files upload is required.

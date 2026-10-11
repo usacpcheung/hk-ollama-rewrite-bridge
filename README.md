@@ -18,7 +18,9 @@ student edit. This change supplies the backend, not the worksheet recording UI.
 
 Transcription is disabled by default. Enable with `TRANSCRIPTION_ENABLED=true`,
 `TRANSCRIPTION_GOOGLE_PROJECT`, the worksheet's `TRANSCRIPTION_ALLOWED_ORIGINS`,
-and server-side Application Default Credentials.
+and server-side Application Default Credentials. `TRANSCRIPTION_PROVIDER` defaults
+to `google-speech`; `TRANSCRIPTION_GOOGLE_MODEL` and `TRANSCRIPTION_GOOGLE_LANGUAGE`
+select the model/language within the implemented Google V2 recognition protocol.
 It uses `chirp_3`, `yue-Hant-HK`, and the `us` endpoint by default. No Whisper daemon
 is needed. Uploads are limited to 20 MiB and 60 decoded seconds; FFmpeg normalizes
 audio to mono 16 kHz FLAC. Ten requests can be admitted, two conversions can run,
@@ -64,8 +66,14 @@ provider/model/environment settings and public formats are unchanged. Step 4 wir
 the transcription audio contract into production while preserving its independent
 lifecycle and Google behavior. See the [step-4 boundary](docs/architecture/provider-abstraction-step-4.md),
 [step-3 request contracts](docs/architecture/provider-abstraction-step-3.md) and
-[registry contract](docs/architecture/provider-registry.md). General env-driven
-provider selection and remaining lifecycle work are still Step 5. Malformed
+[registry contract](docs/architecture/provider-registry.md). Step 5 completes registered configuration, availability and lifecycle selection.
+Operators select implemented providers using `REWRITE_PROVIDER`, `T2A_PROVIDER`
+and `TRANSCRIPTION_PROVIDER`, set that provider's credentials/model/options and
+restart. New providers still require adapter code, configuration and registration;
+environment settings do not load arbitrary modules or invent protocols. See the
+[Step 5 design](docs/architecture/provider-abstraction-step-5.md) and
+[provider author guide](docs/guides/adding-a-provider.md). Existing providers and
+formats remain available. Production deployment still requires Step 6 acceptance. Malformed
 transcription adapter/native results return controlled errors, never partial success.
 Upload storage failures return sanitized 503 errors. Total response deadlines remain
 active during cleanup, and late recognition failures are classified as timeouts.
@@ -74,6 +82,11 @@ The step-3 corrective review also rejects malformed rewrite streams with termina
 errors, keeps T2A audio labels tied to the selected audio, preserves stateful
 adapter methods and returns validation errors for malformed numeric T2A input.
 See the [review and simulation evidence](docs/reviews/2026-10-07-step-3-corrections.md).
+
+The Step 5 corrective review contains provider-hook failures as controlled errors,
+shares overlapping readiness probes, and rechecks queue/invocation deadlines even
+when timer callbacks run late. Capacity stays owned until provider work settles.
+See the [review record](docs/reviews/2026-10-11-step-5-validation.md).
 
 ## Requirements
 
