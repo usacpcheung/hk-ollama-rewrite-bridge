@@ -22,6 +22,19 @@ names retain `400 INVALID_INPUT`. An unsupported preset returns
 unsupported legacy controls rather than silently interpreting old `voice_id` values.
 Raw controls are not retired by this change.
 
+Unexpected or malformed availability-hook results return sanitized
+`503 PROVIDER_UNAVAILABLE`; existing missing-key codes are preserved. Readiness
+and warmup exceptions cannot terminate the server. Overlapping active readiness
+checks share a probe so completion order cannot restore stale health.
+
+Queue expiry is checked again before granting capacity. Rewrite/T2A invocation
+budgets start after admission; elapsed-time checks reject late results with
+`504 MODEL_TIMEOUT` (or the existing cold-start mapping). For a stream whose HTTP
+headers were sent, timeout is one NDJSON terminal error with status 504, not a
+change to the already-sent HTTP 200. Caller cancellation takes precedence, and
+admission remains held until provider work settles. A blocked event loop cannot
+send a timely response, but it must not accept late success when execution resumes.
+
 ## Transcription
 
 Step 4 preserves the Google service and public formats while moving production

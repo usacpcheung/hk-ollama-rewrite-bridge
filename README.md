@@ -83,6 +83,11 @@ errors, keeps T2A audio labels tied to the selected audio, preserves stateful
 adapter methods and returns validation errors for malformed numeric T2A input.
 See the [review and simulation evidence](docs/reviews/2026-10-07-step-3-corrections.md).
 
+The Step 5 corrective review contains provider-hook failures as controlled errors,
+shares overlapping readiness probes, and rechecks queue/invocation deadlines even
+when timer callbacks run late. Capacity stays owned until provider work settles.
+See the [review record](docs/reviews/2026-10-11-step-5-validation.md).
+
 ## Requirements
 
 - Node.js 22+ (CI tests Node 22 and 24)

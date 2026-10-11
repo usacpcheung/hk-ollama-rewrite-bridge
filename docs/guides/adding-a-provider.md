@@ -71,7 +71,9 @@ settings and return an object `runtime` (optional `sources` metadata). Keep secr
 out of source/diagnostic metadata. Factories are synchronous/lazy construction,
 not paid health checks. Availability is a synchronous local configuration check:
 return `null` or a controlled `{status, code, message}` with no secrets/network I/O.
-It should not throw for ordinary missing configuration.
+It should not throw for ordinary missing configuration. Exceptions, asynchronous
+returns and malformed results are contained as `503 PROVIDER_UNAVAILABLE`; this is
+a fault boundary, not support for network calls inside the synchronous hook.
 
 The adapter exposes `services[serviceId].sync`, `mapError`, optional `getInfo` and
 `stream` exactly when declared. Use `lib/bridge-contract.js` result/events and
@@ -83,7 +85,10 @@ and errors before they reach output writers.
 Choose `none`, `active_probe` or `passive_remote` for rewrite. `active_probe`
 requires `checkReadiness` and `triggerWarmup` methods returning controlled results;
 probes must honor timeouts, catch ordinary transport failures and must not throw
-unhandled rejections into status endpoints. `lifecycleOptions({env})` returns
+unhandled rejections into status endpoints. The lifecycle contains unexpected probe
+exceptions as unknown readiness and warmup exceptions as failure, and shares
+overlapping active probes. These guards do not replace an adapter's own bounded
+network operations. `lifecycleOptions({env})` returns
 validated neutral cache/probe/warmup or passive grace/threshold/cooldown settings.
 An optional `reasons` object/recovery error builder can preserve public native
 compatibility codes. Refer to `providers/configuration/lifecycle.js` for built-ins.

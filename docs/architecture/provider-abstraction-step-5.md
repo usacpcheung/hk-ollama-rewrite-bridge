@@ -47,13 +47,19 @@ Routes ask their runtime for a controlled availability error instead of testing
 native credentials. MiniMax keeps `503 MINIMAX_API_KEY_MISSING` and existing
 validation order. Google ADC remains lazy; startup/readiness does not preflight
 cloud credentials. Transcription checks optional provider availability after
-identity/origin validation, before admission/upload processing.
+identity/origin validation, before admission/upload processing. Thrown, asynchronous or malformed availability
+hooks fail closed as sanitized `503 PROVIDER_UNAVAILABLE`; rejected promises are
+observed to avoid process-level unhandled rejections.
 
 Rewrite lifecycle is selected by declared mode:
 
 - `active_probe`: adapter readiness/warmup methods; deduplicated warmup with
   provider-configured cache, timeout and retrigger values. Missing availability
-  prevents probing/warming.
+  prevents probing/warming. Concurrent consumers share one active probe;
+  unexpected exceptions/malformed readiness become controlled unknown readiness.
+  Availability is rechecked before accepting the probe result. Elapsed deadlines
+  also reject late probe/warmup success when timer delivery is delayed; warmup
+  exceptions become a controlled failure and release the warmup flag.
 - `passive_remote`: process-local success/failure observation, idle policy,
   single recovery attempt and cooldown. MiniMax's existing public reasons and
   cooldown errors come from its registration policy.
@@ -98,6 +104,10 @@ and existing HTTP output through alternative providers without route edits. It a
 covers selected-reader isolation, removal without fallback, missing credentials,
 active warmup concurrency, passive recovery and format capability rejection.
 The preload is a test harness, not a production plugin loader.
+
+The corrective review adds shared invocation elapsed-time checks before result/stream
+acceptance and queue expiry checks at capacity handoff. Budgets use monotonic time;
+caller cancellation wins and unsettled operations retain their permits.
 
 Retain the full previous suite, including startup `MODEL_WARMUP_STARTED`, auth,
 queue/disconnect ownership, slow recognition/cleanup, malformed results and storage

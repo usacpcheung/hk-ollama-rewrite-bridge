@@ -1,3 +1,5 @@
+const { performance } = require('node:perf_hooks');
+const { readProviderAvailability } = require('../lib/provider-availability');
 function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown', availability = () => null } = {}) {
   return {
     mode: 'none',
@@ -5,7 +7,7 @@ function createNoopLifecycle({ providerName = 'unknown', serviceId = 'unknown', 
     serviceId,
     async checkReadiness() {
       if (serviceId !== 'rewrite') return { ready: null, error: null };
-      const error = availability();
+      const error = readProviderAvailability(availability);
       return { ready: error ? false : serviceId === 'rewrite' ? true : null, error: error?.code || null };
     },
     async maybeWarmup() {
@@ -32,6 +34,7 @@ function createActiveProbeLifecycle({
   warmupRetriggerWindowMs,
   availability = () => null
 }) {
+  let readinessInFlight = null;
   let lastWarmupTriggerAtMs = 0;
   let warmupInFlight = false;
   let lastWarmupResult = null;
@@ -46,12 +49,27 @@ function createActiveProbeLifecycle({
     providerName,
     serviceId,
     checkReadiness({ timeoutMs } = {}) {
-      const unavailable = availability();
+      const unavailable = readProviderAvailability(availability);
       if (unavailable) return Promise.resolve({ ready: false, error: unavailable.code });
-      return adapter.checkReadiness({ timeoutMs });
+      // All status/request/startup callers share one probe. An older response
+      // therefore cannot arrive after, and overwrite, a newer observation.
+      if (!readinessInFlight) {
+        const deadline = Number.isFinite(timeoutMs) ? performance.now() + timeoutMs : Infinity;
+        readinessInFlight = Promise.resolve().then(() => adapter.checkReadiness({ timeoutMs }))
+          .then(result => {
+            const unavailable = readProviderAvailability(availability);
+            if (unavailable) return { ready: false, error: unavailable.code };
+            if (performance.now() >= deadline) throw new Error('Probe deadline exceeded');
+            if (!result || ![true, false, null].includes(result.ready)) throw new TypeError('Invalid readiness');
+            return result;
+          })
+          .catch(() => ({ ready: null, error: 'PROVIDER_PROBE_UNAVAILABLE' }))
+          .finally(() => { readinessInFlight = null; });
+      }
+      return readinessInFlight;
     },
     async maybeWarmup({ nowMs = Date.now(), timeoutMs } = {}) {
-      if (availability()) return { triggered: false };
+      if (readProviderAvailability(availability)) return { triggered: false };
       if (warmupInFlight || warmupWithinColdWindow(nowMs)) {
         return { triggered: false };
       }
@@ -59,8 +77,10 @@ function createActiveProbeLifecycle({
       warmupInFlight = true;
       lastWarmupTriggerAtMs = nowMs;
 
+      const deadline = Number.isFinite(timeoutMs) ? performance.now() + timeoutMs : Infinity;
       try {
         const warmupResult = await adapter.triggerWarmup({ timeoutMs });
+        if (performance.now() >= deadline) throw new Error('Warmup deadline exceeded');
         if (!warmupResult.ok) {
           lastWarmupResult = 'failed';
           lastWarmupError = warmupResult.error?.detail || 'warmup_fetch_failed';
@@ -70,6 +90,10 @@ function createActiveProbeLifecycle({
         lastWarmupResult = 'success';
         lastWarmupError = null;
         return { triggered: true, result: lastWarmupResult, error: null };
+      } catch {
+        lastWarmupResult = 'failed';
+        lastWarmupError = 'PROVIDER_WARMUP_FAILED';
+        return { triggered: true, result: lastWarmupResult, error: lastWarmupError };
       } finally {
         warmupInFlight = false;
       }
@@ -109,7 +133,7 @@ function createPassiveRemoteLifecycle({
   let lastRecoveryAttemptAtMs = 0;
 
   function getPassiveReadiness(nowMs = Date.now()) {
-    const unavailable = availability();
+    const unavailable = readProviderAvailability(availability);
     if (unavailable) return { ready: false, reason: unavailable.code };
 
     const lastActivityAtMs = Math.max(lastSuccessAtMs, lastFailureAtMs, 0);

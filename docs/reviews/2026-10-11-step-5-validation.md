@@ -82,3 +82,46 @@ and provider setup. The stack remains unmerged; no VPS changes were made.
 Use the [current Step 5 design](../architecture/provider-abstraction-step-5.md),
 [author/operator guide](../guides/adding-a-provider.md) and
 [roadmap acceptance/rollback procedure](../architecture/provider-abstraction-roadmap.md).
+
+
+## Corrective review checkpoint (2026-10-11)
+
+A subsequent fault-injection review reproduced four defects on the original Step 5
+head. The earlier no-further-defect statement describes that earlier test scope;
+these findings and their corrections supersede it.
+
+| Finding and trigger | Correction and regression evidence |
+|---|---|
+| A new adapter throws from availability/readiness/warmup, or returns a rejected asynchronous availability result. Unhandled failures could terminate the process. | Local availability checks validate their synchronous result, observe rejected promises and return sanitized `503 PROVIDER_UNAVAILABLE`. Active probe/warmup exceptions become controlled lifecycle failures. Actual HTTP tests verify auth precedence, both transcription aliases and continued health/rewrite/T2A operation. |
+| Two readiness requests overlap and the older ready result arrives after a newer unavailable result. | Active lifecycle consumers share one in-flight probe; availability is checked again before accepting its result. Tests hold the native probe open across concurrent status/ready requests, check failure/recovery and change availability during the probe. |
+| Parsing/provider work blocks the event loop beyond the invocation budget, before the timeout callback can run. Rewrite/T2A could accept a late result or stream frame. | A monotonic deadline starts after admission and is checked before invocation, before each emitted chunk and after settlement. Both rewrite providers/aliases and T2A aliases return timeout; HTTP streaming emits one timeout terminal event. Caller cancellation wins and unsettled provider work retains capacity. |
+| A queue wait expires while its timeout callback is delayed, then a slot becomes free. | Expiry is checked at the slot handoff using a monotonic clock. Tests cover exact expiry, expired entries ahead of live work, observed cancellation, stale timers and repeated release without capacity leaks. |
+
+The second review extended the elapsed-time guard to active readiness and warmup:
+a blocked event loop cannot turn an expired probe/warmup into success. It also
+covered late thrown provider errors and availability loss during an active probe.
+These related cases are fixed in the same corrective change.
+
+The regression suite adds 20 cases to the original 355-test baseline. The final
+local Node 24 aggregate run passed **375 tests, zero failures or skips**, including
+real FFmpeg. Final commit CI is recorded in the PR. The extra simulations were
+rerun with these corrective boundaries: 12 scenarios passed (80 mixed requests,
+30 queued/15 cancelled requests, reused-connection authentication isolation,
+transcription late settlement/cleanup, storage failures and 100 recognition races).
+All 30 curl checks passed again. The final readiness/warmup elapsed-time addition
+is covered by the aggregate regression suite.
+
+One initial HTTP availability regression hit `EPIPE` while streaming its FormData
+body into an intentionally early connection-closing rejection. A targeted repeat
+passed; that hook-containment fixture now uses a fully buffered valid multipart
+body to avoid testing upload transport timing accidentally. Existing streaming
+upload/cancellation tests remain intact. All 19 cases passed after this fixture
+adjustment, before the final readiness/warmup test was added.
+
+No further confirmed defect remained in this corrective review. The test boundary
+is still local upstreams, synthetic identities and mocked SDKs, with real HTTP and
+FFmpeg. No live OIDC/provider/VPS acceptance is claimed. A custom provider must
+still implement bounded network operations and settle after cancellation: elapsed
+checks reject late results but cannot interrupt a blocked JavaScript event loop or
+force a never-settling adapter to finish. Capacity is deliberately retained until
+native work settles. The stack remains open and the VPS unchanged.

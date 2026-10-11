@@ -273,6 +273,14 @@ T2A environment voice defaults use the same ranges as raw request controls: spee
 
 Rate-limit windows accept 1–3,600 seconds; request budgets accept 1–100,000. The “global” policy is a baseline per identity across non-ops routes, not a single aggregate counter. Admission defaults apply independently to each provider pool. Rate counters and admission queues reset when the process restarts; transcription is separate from rewrite/T2A admission.
 
+Queue wait and rewrite/T2A invocation expiry use a monotonic elapsed-time clock.
+Expired queue entries are rejected before admission even if their timer callback
+has not run. Invocation time starts after admission, not when the request enters
+the queue; zero invocation time permits no provider work. Late timer delivery
+cannot turn an expired result or stream frame into success. Providers still must
+honor cancellation/deadlines and settle their operations; permits are not released
+merely because a response deadline has elapsed.
+
 ## Standalone diagnostic-script settings
 
 The scripts in `scripts/` are optional diagnostics, not runtime configuration loaders. They can call billable providers directly and print provider responses or generated content. They are not run by `npm test`.
