@@ -6,10 +6,45 @@ This document reflects the current server implementation and is intended for dow
 - Typical public namespace via reverse proxy: `/api/rewrite-bridge/*`
 - Protected routes: `POST /rewrite`, `POST /t2a`, `POST /transcriptions` (and their `/api/` aliases)
 
+## Provider selection and compatibility
+
+Provider choice is server configuration, not a per-request native-provider switch.
+`REWRITE_PROVIDER`, `T2A_PROVIDER` and `TRANSCRIPTION_PROVIDER` select registered
+implementations after restart. Existing service endpoints and output contracts stay
+the same. Adding an implementation still requires adapter code and registration.
+`/readyz` remains a rewrite gate, not proof that every provider is usable.
+
+T2A keeps MiniMax MP3/WAV/PCM and all current presets/raw controls. An added
+provider declaring fewer formats returns `422 AUDIO_FORMAT_UNSUPPORTED` for an
+unsupported valid format (including default MP3 if unavailable); invalid format
+names retain `400 INVALID_INPUT`. An unsupported preset returns
+`422 VOICE_CHOICE_UNSUPPORTED`. New adapters must explicitly document/reject
+unsupported legacy controls rather than silently interpreting old `voice_id` values.
+Raw controls are not retired by this change.
+
+Unexpected or malformed availability-hook results return sanitized
+`503 PROVIDER_UNAVAILABLE`; existing missing-key codes are preserved. Readiness
+and warmup exceptions cannot terminate the server. Overlapping active readiness
+checks share a probe so completion order cannot restore stale health.
+
+Queue expiry is checked again before granting capacity. Rewrite/T2A invocation
+budgets start after admission; elapsed-time checks reject late results with
+`504 MODEL_TIMEOUT` (or the existing cold-start mapping). For a stream whose HTTP
+headers were sent, timeout is one NDJSON terminal error with status 504, not a
+change to the already-sent HTTP 200. Caller cancellation takes precedence, and
+admission remains held until provider work settles. A blocked event loop cannot
+send a timely response, but it must not accept late success when execution resumes.
+
 ## Transcription
 
 Step 4 preserves the Google service and public formats while moving production
 audio preparation/recognition behind the [provider contract](../architecture/provider-abstraction-step-4.md).
+`TRANSCRIPTION_PROVIDER` defaults to `google-speech`. Operators may configure
+`TRANSCRIPTION_GOOGLE_MODEL` (default `chirp_3`) and
+`TRANSCRIPTION_GOOGLE_LANGUAGE` (default `yue-Hant-HK`) and restart, subject to
+Google V2 model/region/language support. Other registered adapters use their
+declared preparation profile and return the same HTTP contract. See the
+[environment reference](env-reference.md#transcription).
 Malformed adapter results or native transcript fields return controlled
 `502 TRANSCRIPTION_FAILED`; valid empty recognition remains `422 NO_SPEECH`.
 

@@ -139,6 +139,13 @@ function createT2AServiceDefinition({ config: resolvedConfig, requestPolicy }) {
         return { ok: false, status: 400, code: 'INVALID_INPUT', message: 'format must be one of mp3, wav, or pcm' };
       }
 
+      const selectedFormat = parsedFormat === undefined ? audioDefaults.format : parsedFormat;
+      const supportedFormats = resolvedConfig.selectedProviderCapabilities?.audioFormats;
+      if (supportedFormats && !supportedFormats.includes(selectedFormat)) {
+        return { ok: false, status: 422, code: 'AUDIO_FORMAT_UNSUPPORTED',
+          message: 'format is not supported by the selected t2a provider' };
+      }
+
       let selectedChoice = null;
       if (Object.hasOwn(body || {}, 'voice_choice')) {
         const conflictingField = requestPolicy.legacyFields
@@ -174,7 +181,7 @@ function createT2AServiceDefinition({ config: resolvedConfig, requestPolicy }) {
           audio: {
             sampleRate: parsedSampleRate === undefined ? audioDefaults.sampleRate : parsedSampleRate,
             bitrate: parsedBitrate === undefined ? audioDefaults.bitrate : parsedBitrate,
-            format: parsedFormat === undefined ? audioDefaults.format : parsedFormat,
+            format: selectedFormat,
             channel: audioDefaults.channel
           }
         }

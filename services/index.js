@@ -6,14 +6,18 @@ function createServiceRegistry({
   parseEnvMilliseconds,
   providerCapabilities = {},
   providerCapabilitiesForService,
-  additionalServices = []
+  additionalServices = [],
+  registry = require('../providers').providerRegistry,
+  env = process.env
 }) {
   const rewriteService = createRewriteServiceDefinition({
+    registry, env,
     parseEnvBoundedInteger,
     parseEnvMilliseconds,
     providerCapabilities: providerCapabilitiesForService?.('rewrite') || providerCapabilities
   });
   const t2aService = createT2AServiceDefinition({
+    registry, env,
     parseEnvBoundedInteger,
     parseEnvMilliseconds,
     providerCapabilities: providerCapabilitiesForService?.('t2a') || providerCapabilities

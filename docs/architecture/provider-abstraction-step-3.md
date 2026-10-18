@@ -126,9 +126,9 @@ text conversion. PR #132's actual-server success tests remain part of the gate.
 
 | Change | Contained work now | Work still required |
 |---|---|---|
-| Rewrite provider/protocol | Adapter factory, native request/response translation, normalized streaming/errors and tests | Integrate supported configuration and current readiness/key gates; step 5 removes remaining hardcoded orchestration. |
-| T2A provider/model | Adapter, pure request policy, documented preset mappings/capabilities, output normalization and tests | Integrate config/policy selection and key gate; prove format support and raw-control rejection before exposure. |
-| Transcription provider/model | Implement the agreed input requirements, recognition/result and cancellation contract | Step 4 integration is implemented; step 5 configuration/lifecycle completion remains. |
+| Rewrite provider/protocol | Adapter factory, native request/response translation, normalized streaming/errors and tests | Register its native config reader, availability and lifecycle policy; step 5 supplies selection without route edits. |
+| T2A provider/model | Adapter, pure request policy, documented preset mappings/capabilities, output normalization and tests | Register config/request policy and availability; prove format support and raw-control rejection before exposure. |
+| Transcription provider/model | Implement the agreed input requirements, recognition/result and cancellation contract | Steps 4–5 supply integration and env selection; register native config and verify deadline/media support. |
 | New service | Definition, validation/request/output contract and provider registration; `additionalServices` in `services/index.js` reuses runtime/invocation | Explicit HTTP route, auth/rate/admission policy, output writer, configuration, documentation and contract tests. Registration does not publish a route. |
 | Remove provider | Remove registration/config selection/mappings after clients migrate | Announce unsupported settings and legacy controls; preserve unrelated services and test failure timing. |
 
@@ -136,11 +136,11 @@ Additional service IDs must be unique and non-empty; duplicates are rejected bef
 construction so registry lookup and runtime dispatch cannot select different definitions.
 No dynamic plugin loader or automatic route discovery is introduced.
 
-Remaining provider coupling is explicit: supported env names/allowlists in
-`configuration/`, policy composition in `configuration/services.js`, credentials
-and rewrite readiness/startup state in `server.js`, provider branches in
-`providers/lifecycle.js`, and independent transcription construction. Moving env
-readers out of service files does not by itself make new providers env-selectable.
+At the Step 3 checkpoint config/key/lifecycle selection still knew native providers.
+[Step 5](provider-abstraction-step-5.md) now moves those decisions into registrations
+and provider readers. Startup state remains server-owned and transcription keeps
+its independent composition/lifecycle; these service differences do not require
+provider-name branches. New protocols and new services still need explicit design.
 
 ## Review and validation gate
 

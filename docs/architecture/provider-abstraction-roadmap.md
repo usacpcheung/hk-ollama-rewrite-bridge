@@ -12,8 +12,10 @@ this repository does not establish whether that deployment occurred. Step-2 PR
 creation was subsequently authorized. Step 2 and its corrective work are in open
 PRs #131/#132. Step 3 was separately authorized and is implemented on the stacked
 `codex/service-provider-step3` branch. Step 4 was subsequently authorized and is
-implemented on `codex/transcription-provider-step4`; deployment and stages 5–6
-remain separate actions.
+implemented on `codex/transcription-provider-step4` (PR #134). Step 5 was separately
+authorized and is implemented on `codex/provider-completion-step5`, based on PR #134.
+See the [Step 5 design](provider-abstraction-step-5.md). Step 6 deployment and
+acceptance remain separate operator-authorized actions.
 
 Use an immutable commit or release as the production base, not a moving branch.
 Retain the previously working VPS version until this base passes acceptance.
@@ -29,7 +31,7 @@ The repository's test workflow alone cannot establish that no such automation ex
 | 2 — provider registration/construction | Explicit per-service capabilities and registered provider factories actually used by rewrite/T2A runtime construction. | Registry/configuration/error-timing tests, fake-adapter extension test and HTTP regression suite. See [step 2](provider-abstraction-step-2.md). |
 | 3 — service/provider separation | Rewrite/T2A native requests and voice mappings live behind adapters. Define contracts for all three services, including transcription audio requirements and cancellation. See [step 3](provider-abstraction-step-3.md). | Alternative rewrite/description-voice adapters, transcription contract proofs and HTTP tests preserve existing formats, nine voice mappings and legacy raw controls. Production transcription migration remains step 4. |
 | 4 — transcription integration | Registered provider construction and production audio/recognition contracts, preserving transcription's distinct upload, conversion, cancellation, cleanup and capacity ownership. See [step 4](provider-abstraction-step-4.md). | Retain/extend actual-server success coverage with fake recognition added in PR #132; preserve component/media/privacy/failure tests. |
-| 5 — configuration/lifecycle and extension completion | Resolve remaining provider-specific orchestration, finish operator configuration guidance and prove contained adapter extension. | Retain/extend startup MODEL_WARMUP_STARTED coverage added in PR #132; configuration/restart, readiness, errors and extension checks pass. |
+| 5 — configuration/lifecycle and extension completion | Registered provider configuration/availability/lifecycle, operator/author guidance and HTTP extension proof. See [step 5](provider-abstraction-step-5.md). | Retain/extend startup MODEL_WARMUP_STARTED coverage added in PR #132; configuration/restart, readiness, errors and extension checks pass. |
 | 6 — VPS acceptance/release | Deploy and evaluate the completed candidate during a maintenance window using the existing gateway/provider setup. | Real integration acceptance passes or restore the recorded production base. |
 
 A stage may require multiple PRs. Keep every incremental branch working and reviewable.
@@ -43,9 +45,10 @@ separate integration task; use a fake adapter to test extensibility during refac
 After separate authorization to implement, create each incremental refactor PR from
 and against the latest PR branch in the stack, not main. The current sequence is
 `main → #131 (codex/provider-registry-step2) → #132 (codex/runtime-failure-corrections)
-→ #133 (codex/service-provider-step3) → step 4 (codex/transcription-provider-step4)`;
-the step-4 PR uses #133's branch as its base, and the next authorized increment
-must use the step-4 branch. This is a standing rule
+→ #133 (codex/service-provider-step3) → #134 (codex/transcription-provider-step4)
+→ step 5 (codex/provider-completion-step5)`; the step-5 PR uses #134's branch as
+its base. Any next corrective increment must use the step-5 branch while it is
+the latest open tip. This is a standing rule
 for all subsequent refactor increments, including corrective PRs, until acceptance.
 PR #130 is already merged and is not the stack parent.
 

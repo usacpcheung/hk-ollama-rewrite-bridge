@@ -1,6 +1,16 @@
 # Repository documentation
 
-Active guidance was reviewed against main commit `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The implementation, not an old plan's status, determined each document's disposition. See the [merged-main audit](reviews/2026-10-06-main-baseline-audit.md) for the current inventory, code evidence and readiness decision. The [earlier review](reviews/2026-10-06-documentation-review.md) preserves historical review checkpoints.
+Active references describe the Step 5 refactor branch, including registered provider
+configuration/lifecycle. See the [Step 5 validation record](reviews/2026-10-11-step-5-validation.md)
+for its review scope and the [roadmap](architecture/provider-abstraction-roadmap.md)
+for the still-pending production acceptance gate.
+
+The repository-wide document disposition was reviewed against main commit
+`a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
+[merged-main audit](reviews/2026-10-06-main-baseline-audit.md) records that baseline
+inventory and readiness decision. The [earlier review](reviews/2026-10-06-documentation-review.md)
+preserves previous checkpoints; these dated reviews do not override later code
+or active references.
 
 ## Find the right document
 
@@ -16,6 +26,9 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 | [Transcription runbook](runbooks/transcription-deployment.md) | Opt-in Google/media setup, validation, rollback and cleanup |
 | [Compatibility baseline](architecture/compatibility-baseline.md) | Code/test-backed contracts, legacy support, corrected defects and remaining coverage gaps |
 | [Refactor roadmap](architecture/provider-abstraction-roadmap.md) | Six stages, production baseline, VPS acceptance and rollback gates |
+| [Step 5 validation](reviews/2026-10-11-step-5-validation.md) | Implementation review, extension tests and server simulations |
+| [Step 5 completion](architecture/provider-abstraction-step-5.md) | Registered configuration/lifecycle and extension acceptance |
+| [Adding or retiring a provider](guides/adding-a-provider.md) | Provider contracts, env settings, voice mappings and migration |
 | [Provider registry](architecture/provider-registry.md) | Implemented construction/capability contract and remaining extension boundaries |
 | [Step 2 scope and gates](architecture/provider-abstraction-step-2.md) | Working-code implementation scope, acceptance criteria and deferred migration gates |
 | [Step 3 contracts and gates](architecture/provider-abstraction-step-3.md) | Rewrite/T2A separation, all-service contracts, extension proofs and deferred work |

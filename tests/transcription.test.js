@@ -24,7 +24,7 @@ async function fixture(t, { config: overrides = {}, recognize, normalize, disabl
   const config = { ...readTranscriptionConfig({ TRANSCRIPTION_ENABLED: 'true', TRANSCRIPTION_GOOGLE_PROJECT: 'test-project' }),
     directory, ratePerMinute: 60, ...overrides };
   const calls = [];
-  const provider = createGoogleSpeechProvider(config, { createClient: () => ({
+  const provider = createGoogleSpeechProvider(config.providerConfig, { createClient: () => ({
     recognize: async (request, options) => {
       calls.push({ request, options });
       if (recognize) return recognize(request, options);
@@ -81,7 +81,7 @@ test('stalled Google initialization has a bounded wait and never starts a late b
   let initCalls = 0;
   let rpcCalls = 0;
   const config = readTranscriptionConfig({ TRANSCRIPTION_ENABLED: 'true', TRANSCRIPTION_GOOGLE_PROJECT: 'test-project' });
-  const provider = createGoogleSpeechProvider(config, { createClient: () => ({
+  const provider = createGoogleSpeechProvider(config.providerConfig, { createClient: () => ({
     initialize: () => { initCalls++; return new Promise(resolve => { resolveInitialization = resolve; }); },
     recognize: () => { rpcCalls++; return [{ results: [] }]; }
   }) });
@@ -97,7 +97,7 @@ test('stalled Google initialization has a bounded wait and never starts a late b
 test('Google initialization failures are controlled and cannot trigger a recognition call', async () => {
   let invoked = false;
   const config = readTranscriptionConfig({ TRANSCRIPTION_ENABLED: 'true', TRANSCRIPTION_GOOGLE_PROJECT: 'test-project' });
-  const provider = createGoogleSpeechProvider(config, { createClient: () => ({
+  const provider = createGoogleSpeechProvider(config.providerConfig, { createClient: () => ({
     initialize: async () => { throw new Error('private-credential-path'); },
     recognize: () => { invoked = true; }
   }) });
