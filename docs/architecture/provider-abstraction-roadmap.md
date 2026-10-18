@@ -1,6 +1,7 @@
 # Provider abstraction roadmap and production gates
 
-Status: agreed sequence, recorded in PR #130 on 2026-10-06. This is a plan,
+Status: sequence recorded in PR #130, amended in PR #132 on 2026-10-07 to keep
+the refactor stacked until VPS acceptance and operator approval. This is a plan,
 not a claim that the implementation or VPS acceptance has happened.
 
 ## Immediate boundary
@@ -28,7 +29,7 @@ The repository's test workflow alone cannot establish that no such automation ex
 | 5 — configuration/lifecycle and extension completion | Resolve remaining provider-specific orchestration, finish operator configuration guidance and prove contained adapter extension. | Cover startup MODEL_WARMUP_STARTED before extraction; configuration/restart, readiness, errors and extension checks pass. |
 | 6 — VPS acceptance/release | Deploy and evaluate the completed candidate during a maintenance window using the existing gateway/provider setup. | Real integration acceptance passes or restore the recorded production base. |
 
-A stage may require multiple PRs. Keep every merged stage working and reviewable.
+A stage may require multiple PRs. Keep every incremental branch working and reviewable.
 Design configuration and lifecycle interfaces early, even when their implementation
 finishes in stage 5. Preserve existing providers, configured models/protocols and
 authentication mechanisms throughout the refactor. A new real cloud provider is a
@@ -36,10 +37,27 @@ separate integration task; use a fake adapter to test extensibility during refac
 
 ## Development and testing sequence
 
-After separate authorization to implement, create each incremental PR from updated
-main, run relevant tests plus the full suite, review and merge, then start the next
-stage. Sequential PRs against main are the default; do not keep the whole refactor
-stacked on #130. Update affected API/env/design guidance with each implementation.
+After separate authorization to implement, create each incremental refactor PR from
+and against the latest PR branch in the stack, not main. The current sequence is
+`main → #131 (codex/provider-registry-step2) → #132 (codex/runtime-failure-corrections)`;
+the next authorized PR must use #132's branch as its base. This is a standing rule
+for all subsequent refactor increments, including corrective PRs, until acceptance.
+PR #130 is already merged and is not the stack parent.
+
+Keep the entire stack open and unmerged while development and testing proceed.
+Run relevant tests, the full suite and Node 22/24 CI, and review each increment before
+building the next one. Update affected API/env/design guidance in the same PR.
+Before creating a PR, check the latest remote stack tip and verify both the branch
+ancestry and GitHub base. Ask the operator if the intended base is unclear or a
+change to this sequence is proposed; do not silently start from main.
+
+The latest stack tip contains all preceding changes. Select its exact commit for
+stage-6 VPS testing during the agreed maintenance window, retaining the approved
+production baseline for rollback. Only after successful VPS acceptance and explicit
+operator approval, merge oldest to newest. Update each remaining PR's base to the
+appropriate surviving parent or updated main, resolve conflicts and recheck its diff
+and CI before merging. If the tested candidate changes, repeat affected acceptance
+checks and obtain approval for the revised candidate before release.
 
 Production remains pinned while stages 2–5 proceed. VPS testing is not mandatory
 after every stage. Local fixtures, HTTP tests and Node 22/24 CI provide incremental
@@ -48,7 +66,7 @@ coverage gap before modifying the affected flow, rather than deferring it to sta
 
 Use an earlier VPS check only if a necessary SDK/authentication/runtime change
 cannot be adequately verified locally. Decide and schedule it explicitly; do not
-silently deploy intermediate main. A separate public staging/OIDC installation is
+silently deploy an intermediate refactor branch. A separate public staging/OIDC installation is
 not required by this plan. A private isolated instance remains an optional alternative.
 
 ## VPS acceptance and rollback

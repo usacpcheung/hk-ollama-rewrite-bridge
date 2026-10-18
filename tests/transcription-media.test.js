@@ -3,14 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { spawnSync } = require('node:child_process');
 const { normalizeAudio, validateMedia, runMedia } = require('../lib/transcription-media');
 const { TranscriptionError } = require('../lib/transcription-errors');
 
-const ffmpeg = process.env.TEST_FFMPEG_PATH || 'ffmpeg';
-const ffprobe = process.env.TEST_FFPROBE_PATH || 'ffprobe';
-const available = !spawnSync(ffmpeg, ['-version'], { windowsHide: true }).error &&
-  !spawnSync(ffprobe, ['-version'], { windowsHide: true }).error;
+const { ffmpeg, ffprobe, available, skipReason } = require('../test-support/media-tools');
 const signal = () => new AbortController().signal;
 
 test('media validation rejects video, multiple audio streams, unsupported codecs and channels', () => {
@@ -46,7 +42,7 @@ test('media subprocesses have deadlines and respond to cancellation', async () =
   await assert.rejects(runMedia('missing-bridge-binary', [], { signal: signal(), timeoutMs: 1000 }), { code: 'AUDIO_PROCESSOR_UNAVAILABLE' });
 });
 
-test('real FFmpeg normalizes browser formats and rejects invalid or overlong recordings', { skip: !available && 'Install FFmpeg/FFprobe or set TEST_FFMPEG_PATH and TEST_FFPROBE_PATH' }, async t => {
+test('real FFmpeg normalizes browser formats and rejects invalid or overlong recordings', { skip: !available && skipReason }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'bridge-real-media-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const config = { ffmpeg, ffprobe, maxSeconds: 60, conversionMs: 15000 };

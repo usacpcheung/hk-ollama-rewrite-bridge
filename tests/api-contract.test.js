@@ -221,7 +221,11 @@ test('rewrite and t2a preserve current public HTTP response contracts', async (t
   const rewriteStreamChunks = rewriteStreamBody.trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(rewriteStreamResponse.status, 200);
   assert.match(rewriteStreamResponse.headers.get('content-type') || '', /^application\/x-ndjson/);
-  assert.deepEqual(rewriteStreamChunks, [
+  assert.ok(rewriteStreamChunks.slice(0, -1).every(chunk => chunk.done === false && typeof chunk.response === 'string'));
+  assert.deepEqual([
+    { response: rewriteStreamChunks.slice(0, -1).map(chunk => chunk.response).join(''), done: false },
+    rewriteStreamChunks.at(-1)
+  ], [
     { response: '串流正式中文', done: false },
     {
       response: '',
@@ -300,7 +304,8 @@ test('M3 Anthropic-compatible rewrite preserves public sync and streaming contra
   const chunks = (await streamResponse.text()).trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(streamResponse.status, 200);
   assert.match(streamResponse.headers.get('content-type') || '', /^application\/x-ndjson/);
-  assert.deepEqual(chunks, [
+  assert.ok(chunks.slice(0, -1).every(chunk => chunk.done === false && typeof chunk.response === 'string'));
+  assert.deepEqual([{ response: chunks.slice(0, -1).map(chunk => chunk.response).join(''), done: false }, chunks.at(-1)], [
     { response: 'M3串流正式中文', done: false },
     {
       response: '',

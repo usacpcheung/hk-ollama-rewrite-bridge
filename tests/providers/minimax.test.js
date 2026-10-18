@@ -163,7 +163,7 @@ test('rewriteStream falls back to single user message when system prompt is miss
   let capturedBody = null;
   global.fetch = async (_url, options) => {
     capturedBody = JSON.parse(options.body);
-    return new Response(createSseStream(['[DONE]']), {
+    return new Response(createSseStream([JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }), '[DONE]']), {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' }
     });
@@ -237,7 +237,7 @@ test('rewriteStream uses configured max_completion_tokens', async (t) => {
   let capturedBody = null;
   global.fetch = async (_url, options) => {
     capturedBody = JSON.parse(options.body);
-    return new Response(createSseStream(['[DONE]']), {
+    return new Response(createSseStream([JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }), '[DONE]']), {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' }
     });

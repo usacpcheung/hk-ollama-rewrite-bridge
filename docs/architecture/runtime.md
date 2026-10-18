@@ -33,7 +33,7 @@ Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 2. `server.js` applies rewrite readiness/warmup/recovery gates and selects ready/cold timeout. Ollama uses active readiness probes and warmup; MiniMax uses passive state based on API-key presence and observed requests, without synthetic paid probes.
 3. [`lib/service-invoker.js`](../../lib/service-invoker.js) acquires admission by provider, invokes the adapter's sync/stream handler, and records lifecycle success/failure.
 4. [`providers/ollama.js`](../../providers/ollama.js) or [`providers/minimax.js`](../../providers/minimax.js) parses transport responses into the [internal contract](adr/0001-internal-bridge-contract.md).
-5. [`lib/service-output-writer.js`](../../lib/service-output-writer.js) applies HK Traditional Chinese conversion and writes public JSON or NDJSON. Rewrite JSON contains `ok`, `result` and optional `usage`; internal artifacts are not exposed.
+5. [`lib/service-output-writer.js`](../../lib/service-output-writer.js) applies HK Traditional Chinese conversion and writes public JSON or NDJSON. Streaming uses request-local phrase state from [`lib/rewrite-stream-converter.js`](../../lib/rewrite-stream-converter.js) and flushes pending text before completion. Rewrite JSON contains `ok`, `result` and optional `usage`; internal artifacts are not exposed.
 
 `/readyz` and `/model-status` describe this rewrite lifecycle. Neither proves T2A or Google connectivity, nor guarantees the next request succeeds.
 

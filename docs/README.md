@@ -36,3 +36,5 @@ Active guidance was reviewed against main commit `a50c47d150724820080a8e7d786107
 - When changing API/env behavior, update the active references and root README as required by `AGENTS.md`. Keep navigation and relative links working after moves.
 
 This review inspected repository files only. Public proxy URLs, service-account names and deployment paths are examples to adapt; the repository cannot prove the live server configuration, external consumers, Google access/quota or voice quality.
+
+- [Runtime failure corrections and regression evidence](reviews/2026-10-07-runtime-failure-corrections.md)
