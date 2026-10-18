@@ -4,17 +4,18 @@ const { createT2AServiceDefinition } = require('./t2a');
 function createServiceRegistry({
   parseEnvBoundedInteger,
   parseEnvMilliseconds,
-  providerCapabilities = {}
+  providerCapabilities = {},
+  providerCapabilitiesForService
 }) {
   const rewriteService = createRewriteServiceDefinition({
     parseEnvBoundedInteger,
     parseEnvMilliseconds,
-    providerCapabilities
+    providerCapabilities: providerCapabilitiesForService?.('rewrite') || providerCapabilities
   });
   const t2aService = createT2AServiceDefinition({
     parseEnvBoundedInteger,
     parseEnvMilliseconds,
-    providerCapabilities
+    providerCapabilities: providerCapabilitiesForService?.('t2a') || providerCapabilities
   });
 
   const services = [rewriteService, t2aService].map((service) => ({

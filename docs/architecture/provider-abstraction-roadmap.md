@@ -5,11 +5,11 @@ not a claim that the implementation or VPS acceptance has happened.
 
 ## Immediate boundary
 
-Finish and merge the documentation/planning PR #130 first. The operator will then
-update the VPS to that main commit, verify the existing services, and record the
-exact deployed commit as the production base. Its deployment state is not known
-from this repository. No step-2 implementation PR or later development stage is
-authorized by this documentation update; wait for the operator's next instruction.
+PR #130 was merged as `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
+The operator planned to verify that commit on the VPS and pin it as production;
+this repository does not establish whether that deployment occurred. Step-2 PR
+creation was subsequently authorized. Its implementation changes registered
+rewrite/T2A construction only; deployment and stages 3–6 remain separate actions.
 
 Use an immutable commit or release as the production base, not a moving branch.
 Retain the previously working VPS version until this base passes acceptance.

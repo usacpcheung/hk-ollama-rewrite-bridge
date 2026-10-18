@@ -1,6 +1,7 @@
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
 const { createProviderLifecycle } = require('./lifecycle');
+const { createProviderRegistry } = require('../lib/provider-registry');
 
 
 function ensureServiceHandlers(provider) {
@@ -18,15 +19,6 @@ function ensureServiceHandlers(provider) {
   };
 }
 
-const PROVIDER_CAPABILITIES = {
-  ollama: {
-    streaming: true
-  },
-  minimax: {
-    streaming: true
-  }
-};
-
 function createUnsupportedProvider({ provider }) {
   return {
     name: provider,
@@ -42,59 +34,62 @@ function createUnsupportedProvider({ provider }) {
   };
 }
 
-function createProvider({
-  serviceConfig,
-  ollamaUrl,
-  ollamaPsUrl,
-  ollamaKeepAlive,
-  minimaxApiKey,
-  minimaxSystemPrompt,
-  minimaxUserTemplate,
-  debugLog
-}) {
-  const serviceId = serviceConfig?.id || 'rewrite';
-  const provider = serviceConfig?.provider?.selected || 'ollama';
-  const selectedRuntime = serviceConfig?.provider?.runtime || {};
-  const maxCompletionTokens = serviceId === 'rewrite'
-    ? serviceConfig?.provider?.maxCompletionTokens
-    : undefined;
-  const rewritePromptConfig = serviceId === 'rewrite'
-    ? {
-      minimaxSystemPrompt,
-      minimaxUserTemplate
-    }
-    : {};
-
-  if (provider === 'ollama') {
-    return ensureServiceHandlers(createOllamaProvider({
-      generateUrl: selectedRuntime.generateUrl || ollamaUrl,
-      psUrl: selectedRuntime.psUrl || ollamaPsUrl,
-      model: selectedRuntime.model,
-      keepAlive: ollamaKeepAlive,
-      maxCompletionTokens,
-      debugLog
-    }));
-  }
-
-  if (provider === 'minimax') {
-    return ensureServiceHandlers(createMinimaxProvider({
-      apiUrl: selectedRuntime.apiUrl,
-      model: selectedRuntime.model,
-      apiFormat: selectedRuntime.apiFormat,
-      anthropicBaseUrl: selectedRuntime.anthropicBaseUrl,
-      apiKey: minimaxApiKey,
-      systemPrompt: rewritePromptConfig.minimaxSystemPrompt,
-      userTemplate: rewritePromptConfig.minimaxUserTemplate,
-      maxCompletionTokens,
-      debugLog
-    }));
-  }
-
-  if (serviceId === 't2a') {
-    return ensureServiceHandlers(createUnsupportedProvider({ provider }));
-  }
-
-  throw new Error(`Unsupported provider: ${provider}`);
+function buildOllama({ serviceConfig, ollamaUrl, ollamaPsUrl, ollamaKeepAlive, debugLog }) {
+  const runtime = serviceConfig.provider.runtime || {};
+  return ensureServiceHandlers(createOllamaProvider({
+    generateUrl: runtime.generateUrl || ollamaUrl,
+    psUrl: runtime.psUrl || ollamaPsUrl,
+    model: runtime.model,
+    keepAlive: ollamaKeepAlive,
+    maxCompletionTokens: serviceConfig.provider.maxCompletionTokens,
+    debugLog
+  }));
 }
 
-module.exports = { createProvider, createProviderLifecycle, PROVIDER_CAPABILITIES };
+function buildMinimax({ serviceConfig, minimaxApiKey, minimaxSystemPrompt, minimaxUserTemplate, debugLog }) {
+  const runtime = serviceConfig.provider.runtime || {};
+  const rewrite = serviceConfig.id === 'rewrite';
+  return ensureServiceHandlers(createMinimaxProvider({
+    apiUrl: runtime.apiUrl,
+    model: runtime.model,
+    apiFormat: runtime.apiFormat,
+    anthropicBaseUrl: runtime.anthropicBaseUrl,
+    apiKey: minimaxApiKey,
+    systemPrompt: rewrite ? minimaxSystemPrompt : undefined,
+    userTemplate: rewrite ? minimaxUserTemplate : undefined,
+    maxCompletionTokens: rewrite ? serviceConfig.provider.maxCompletionTokens : undefined,
+    debugLog
+  }));
+}
+
+const providerRegistry = createProviderRegistry([
+  { provider: 'ollama', serviceId: 'rewrite', create: buildOllama,
+    capabilities: { sync: true, streaming: true, lifecycle: 'active_probe' } },
+  { provider: 'minimax', serviceId: 'rewrite', create: buildMinimax,
+    capabilities: { sync: true, streaming: true, lifecycle: 'passive_remote' } },
+  { provider: 'minimax', serviceId: 't2a', create: buildMinimax,
+    capabilities: { sync: true, streaming: false, lifecycle: 'none',
+      audioFormats: ['mp3', 'wav', 'pcm'], legacyVoiceControls: true } }
+]);
+
+// Compatibility export for direct rewrite configuration consumers. Production
+// composition uses capabilitiesFor(serviceId), never a provider-wide capability.
+const PROVIDER_CAPABILITIES = providerRegistry.capabilitiesFor('rewrite');
+
+function createProvider(options = {}, registry = providerRegistry) {
+  const serviceId = options.serviceConfig?.id || 'rewrite';
+  const provider = options.serviceConfig?.provider?.selected || 'ollama';
+  if (!registry.supports(provider, serviceId)) {
+    // Preserve request-time rejection for unsupported T2A selections. Rewrite
+    // selections still fail startup; neither path silently selects another provider.
+    if (serviceId === 't2a') return createUnsupportedProvider({ provider });
+    throw new Error(`Unsupported provider: ${provider}`);
+  }
+  return registry.create({
+    ...options,
+    serviceConfig: { ...options.serviceConfig, id: serviceId,
+      provider: { ...options.serviceConfig?.provider, selected: provider } }
+  });
+}
+
+module.exports = { createProvider, createProviderLifecycle, providerRegistry, PROVIDER_CAPABILITIES };

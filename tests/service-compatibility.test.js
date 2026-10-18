@@ -359,3 +359,20 @@ test('compatibility: MiniMax WAV bytes and public audio metadata agree', async t
   assert.deepEqual(Buffer.from(body.audio, 'base64'), AUDIO);
   assert.ok(f.calls.every(call => call.body.audio_setting.format === 'wav'));
 });
+
+test('compatibility: unregistered Ollama T2A preserves validation order and does not affect rewrite', async t => {
+  const f = await fixture(t, { env: { T2A_PROVIDER: 'ollama' } });
+  for (const route of ['/t2a', '/api/t2a']) {
+    await expectError(await f.request(route, { headers: {} }), 401, 'AUTH_REQUIRED');
+    await expectError(await f.request(route, { body: { text: '' } }), 400, 'INVALID_INPUT');
+    await expectError(await f.request(route, { body: { text: '', stream: true } }), 501, 'STREAMING_UNSUPPORTED');
+    await expectError(await f.request(route, { body: { text: 'x'.repeat(201) } }), 413, 'TOO_LONG');
+    await expectError(await f.request(route), 501, 'UNSUPPORTED_PROVIDER');
+    await expectError(await f.request(route, { body: { text: '測試', voice_choice: 'cantonese_male_1' } }), 501, 'UNSUPPORTED_PROVIDER');
+  }
+  assert.equal(f.calls.length, 0);
+  const rewrite = await f.request('/rewrite');
+  assert.equal(rewrite.status, 200);
+  assert.deepEqual(await rewrite.json(), { ok: true, result: '正式文字' });
+  assert.equal(f.calls.length, 1);
+});
