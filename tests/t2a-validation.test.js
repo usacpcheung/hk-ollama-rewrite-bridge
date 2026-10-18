@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createT2AServiceDefinition } = require('../services/t2a');
+const { createT2AServiceDefinition } = require('../configuration/services');
 
 function parseBounded(rawValue, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(rawValue);
@@ -101,16 +101,16 @@ test('t2a validation rejects invalid voice controls and audio options', () => {
   assert.equal(invalidSampleRate.message, 'sample_rate must be an integer between 8000 and 48000');
 });
 
-test('t2a validation resolves language_boost from the request or current default', () => {
+test('t2a validation leaves defaults to the adapter and normalizes explicit legacy controls', () => {
   const service = createService();
 
   const defaultResult = service.validateRequest({ body: { text: '你好' } });
   assert.equal(defaultResult.ok, true);
-  assert.equal(defaultResult.value.languageBoost, 'Chinese,Yue');
+  assert.deepEqual(defaultResult.value.voiceSelection, { kind: 'default' });
 
   const overrideResult = service.validateRequest({ body: { text: 'Hello', language_boost: ' English ' } });
   assert.equal(overrideResult.ok, true);
-  assert.equal(overrideResult.value.languageBoost, 'English');
+  assert.deepEqual(overrideResult.value.voiceSelection, { kind: 'legacy', controls: { languageBoost: 'English' } });
 });
 
 test('t2a validation rejects invalid response mode', () => {

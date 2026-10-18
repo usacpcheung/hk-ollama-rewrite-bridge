@@ -2,7 +2,7 @@
 
 - Status: Implemented for rewrite/T2A; broader route orchestration remains partial
 - Date: 2026-05-07
-- Implementation updated: step-2 PR based on main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`
+- Implementation updated: step-3 branch stacked on PR #132
 
 ## Context
 
@@ -32,9 +32,14 @@ and validates factory handler declarations. Runtime capabilities combine that
 descriptor with existing configured service capabilities. Lifecycle descriptors
 are informational in this stage; the existing lifecycle factory still selects policy.
 
+Service-owned requests now carry rewrite intent or T2A voice selection/audio options;
+provider-owned translation applies native prompts, presets and legacy defaults.
+Environment readers live in `configuration/`. See [step 3](../provider-abstraction-step-3.md)
+for contracts, extension proofs and the transcription input-planning prototype.
+
 ## Current limits of the boundary
 
-- `server.js` still owns startup state, readiness gates, timeout selection and provider-specific rewrite branches, including MiniMax cooldown/missing-key handling and prompt selection.
+- `server.js` still owns startup state, readiness gates, timeout selection and provider-specific rewrite branches, including MiniMax cooldown/missing-key handling. Native prompt assembly now belongs to adapters.
 - T2A route logic explicitly checks its supported provider and MiniMax API key. Only MiniMax T2A is supported; provider selection does not imply automatic fallback.
 - Admission is shared per provider key, not an aggregate limit across all services/providers.
 - [`services/transcription.js`](../../../services/transcription.js) is created independently of the rewrite/T2A registry. It uses the shared provider adapter and result contract, but owns upload, media conversion, Google deadlines, cleanup and separate capacity limits.

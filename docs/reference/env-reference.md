@@ -278,3 +278,11 @@ The scripts in `scripts/` are optional diagnostics, not runtime configuration lo
 | `minimax-anthropic-stream-smoke.js` | Same `ANTHROPIC_*` keys, direct streaming call; defaults to `MiniMax-M2.5` and 1,000 output tokens. |
 
 The `ANTHROPIC_*` and `MINIMAX_GROUP_API_KEY` names above are script-only. They do not configure the bridge's rewrite/T2A providers. Test-only `TEST_FFMPEG_PATH` and `TEST_FFPROBE_PATH` select binaries for `tests/transcription-media.test.js`, not production media processing.
+
+## Configuration implementation boundary
+
+Rewrite/T2A readers now live in `configuration/rewrite.js` and `configuration/t2a.js`;
+`configuration/services.js` composes them with service definitions. This move changes
+no environment names, precedence, defaults or supported selections. Arbitrary new
+provider names are not enabled merely by registering an adapter. See the
+[step-3 design](../architecture/provider-abstraction-step-3.md) for remaining configuration work.

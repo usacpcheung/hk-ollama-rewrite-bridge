@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { resolveT2AConfig } = require('../services/t2a');
+const { resolveT2AConfig } = require('../configuration/t2a');
 
 function parseBounded(rawValue, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   const parsed = Number(rawValue);

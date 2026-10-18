@@ -1,6 +1,8 @@
 # Provider abstraction — step 2 scope and acceptance gates
 
-Status: implemented in this step-2 PR; pending review/merge, not deployed.
+Status: implemented in PR #131 with corrective work in PR #132; both remain
+open in the acceptance stack. Step 3 is separately authorized; see its
+[scope and contracts](provider-abstraction-step-3.md). No deployment is implied.
 Implementation base: main `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
 The operator's VPS deployment state has not been inspected. This PR does not
 change the production pin or authorize deployment or later refactor stages.
@@ -74,8 +76,8 @@ those boundaries. Design configuration/lifecycle interfaces now so later work fi
 | Proposed later change | Evidence required before changing production flow |
 |---|---|
 | Step-2 rewrite/T2A factory wiring (required in this stage) | Tests for existing configuration precedence/defaults, unsupported selections, disabled-service initialization, capability selection, and unchanged error timing; run the HTTP contracts before completing step 2. |
-| Transcription composition or provider selection | Add an actual-server success path with fake recognition (no live cloud), complementing current component tests. Preserve upload/media bounds, separate capacity, cancellation ownership, late-result discard and cleanup-before-success/failure latching. |
-| Rewrite startup/lifecycle extraction | Add deterministic HTTP coverage of the `MODEL_WARMUP_STARTED` startup branch and relevant state transitions, supplementing existing on-demand/degraded/passive tests. |
+| Transcription composition or provider selection | Retain/extend the actual-server success path with fake recognition added in PR #132 (`tests/transcription-composition.test.js`), complementing component tests. Preserve upload/media bounds, separate capacity, cancellation ownership, late-result discard and cleanup-before-success/failure latching. |
+| Rewrite startup/lifecycle extraction | Retain/extend deterministic HTTP coverage of `MODEL_WARMUP_STARTED` added in PR #132 (`tests/warmup-composition.test.js`) and relevant state transitions, supplementing on-demand/degraded/passive tests. |
 | New T2A provider or raw-control policy | Specify supported formats, preset mappings and exact unsupported-control status/code/validation order. Keep current MiniMax consumers working; never silently substitute a voice. |
 | Raw-ID retirement | Separate consumer migration evidence and explicit removal decision; no date or removal is implied here. |
 

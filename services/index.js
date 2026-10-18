@@ -1,11 +1,12 @@
-const { createRewriteServiceDefinition } = require('./rewrite');
-const { createT2AServiceDefinition } = require('./t2a');
+const { createRewriteServiceDefinition } = require('../configuration/services');
+const { createT2AServiceDefinition } = require('../configuration/services');
 
 function createServiceRegistry({
   parseEnvBoundedInteger,
   parseEnvMilliseconds,
   providerCapabilities = {},
-  providerCapabilitiesForService
+  providerCapabilitiesForService,
+  additionalServices = []
 }) {
   const rewriteService = createRewriteServiceDefinition({
     parseEnvBoundedInteger,
@@ -18,7 +19,15 @@ function createServiceRegistry({
     providerCapabilities: providerCapabilitiesForService?.('t2a') || providerCapabilities
   });
 
-  const services = [rewriteService, t2aService].map((service) => ({
+  const definitions = [rewriteService, t2aService, ...additionalServices];
+  const ids = new Set();
+  for (const service of definitions) {
+    if (typeof service?.id !== 'string' || !service.id.trim() || service.id !== service.id.trim() || ids.has(service.id)) {
+      throw new TypeError('Service IDs must be non-empty, unique names without surrounding whitespace');
+    }
+    ids.add(service.id);
+  }
+  const services = definitions.map((service) => ({
     ...service,
     postProcessOutput: typeof service.postProcessOutput === 'function'
       ? service.postProcessOutput

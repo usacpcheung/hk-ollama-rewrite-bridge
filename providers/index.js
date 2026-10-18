@@ -3,21 +3,8 @@ const { createMinimaxProvider } = require('./minimax');
 const { createProviderLifecycle } = require('./lifecycle');
 const { createProviderRegistry } = require('../lib/provider-registry');
 
-
-function ensureServiceHandlers(provider) {
-  const services = provider?.services ? { ...provider.services } : {};
-  if (!services.rewrite && (provider?.rewrite || provider?.rewriteStream)) {
-    services.rewrite = {
-      ...(typeof provider.rewrite === 'function' ? { sync: provider.rewrite } : {}),
-      ...(typeof provider.rewriteStream === 'function' ? { stream: provider.rewriteStream } : {})
-    };
-  }
-
-  return {
-    ...provider,
-    services
-  };
-}
+const { MINIMAX_USER_TEMPLATE, withRewriteService } = require('./service-requests');
+const { resolveMinimaxSpeechRequest } = require('./minimax-t2a-compatibility');
 
 function createUnsupportedProvider({ provider }) {
   return {
@@ -36,30 +23,33 @@ function createUnsupportedProvider({ provider }) {
 
 function buildOllama({ serviceConfig, ollamaUrl, ollamaPsUrl, ollamaKeepAlive, debugLog }) {
   const runtime = serviceConfig.provider.runtime || {};
-  return ensureServiceHandlers(createOllamaProvider({
+  return withRewriteService(createOllamaProvider({
     generateUrl: runtime.generateUrl || ollamaUrl,
     psUrl: runtime.psUrl || ollamaPsUrl,
     model: runtime.model,
     keepAlive: ollamaKeepAlive,
     maxCompletionTokens: serviceConfig.provider.maxCompletionTokens,
     debugLog
-  }));
+  }), '原文：{TEXT}');
 }
 
-function buildMinimax({ serviceConfig, minimaxApiKey, minimaxSystemPrompt, minimaxUserTemplate, debugLog }) {
+function buildMinimax({ serviceConfig, minimaxApiKey, debugLog }) {
   const runtime = serviceConfig.provider.runtime || {};
   const rewrite = serviceConfig.id === 'rewrite';
-  return ensureServiceHandlers(createMinimaxProvider({
+  const native = createMinimaxProvider({
     apiUrl: runtime.apiUrl,
     model: runtime.model,
     apiFormat: runtime.apiFormat,
     anthropicBaseUrl: runtime.anthropicBaseUrl,
     apiKey: minimaxApiKey,
-    systemPrompt: rewrite ? minimaxSystemPrompt : undefined,
-    userTemplate: rewrite ? minimaxUserTemplate : undefined,
+    systemPrompt: rewrite ? serviceConfig.instructions : undefined,
+    userTemplate: rewrite ? MINIMAX_USER_TEMPLATE : undefined,
     maxCompletionTokens: rewrite ? serviceConfig.provider.maxCompletionTokens : undefined,
     debugLog
-  }));
+  });
+  if (rewrite) return withRewriteService(native, MINIMAX_USER_TEMPLATE);
+  return { ...native, services: { t2a: { sync: request => native.t2a(request.voiceSelection
+    ? { ...request, ...resolveMinimaxSpeechRequest(request, runtime.defaults) } : request) } } };
 }
 
 const providerRegistry = createProviderRegistry([
