@@ -1,8 +1,8 @@
 # ADR 0002: Service and Provider Runtime Boundary
 
-- Status: Implemented for rewrite/T2A; broader route orchestration remains partial
+- Status: Provider boundaries implemented for rewrite/T2A/transcription; broader configuration/lifecycle orchestration remains partial
 - Date: 2026-05-07
-- Implementation updated: step-3 branch stacked on PR #132
+- Implementation updated: step-4 branch stacked on PR #133
 
 ## Context
 
@@ -35,14 +35,14 @@ are informational in this stage; the existing lifecycle factory still selects po
 Service-owned requests now carry rewrite intent or T2A voice selection/audio options;
 provider-owned translation applies native prompts, presets and legacy defaults.
 Environment readers live in `configuration/`. See [step 3](../provider-abstraction-step-3.md)
-for contracts, extension proofs and the transcription input-planning prototype.
+for request contracts and [step 4](../provider-abstraction-step-4.md) for production transcription integration.
 
 ## Current limits of the boundary
 
 - `server.js` still owns startup state, readiness gates, timeout selection and provider-specific rewrite branches, including MiniMax cooldown/missing-key handling. Native prompt assembly now belongs to adapters.
 - T2A route logic explicitly checks its supported provider and MiniMax API key. Only MiniMax T2A is supported; provider selection does not imply automatic fallback.
 - Admission is shared per provider key, not an aggregate limit across all services/providers.
-- [`services/transcription.js`](../../../services/transcription.js) is created independently of the rewrite/T2A registry. It uses the shared provider adapter and result contract, but owns upload, media conversion, Google deadlines, cleanup and separate capacity limits.
+- [`services/transcription.js`](../../../services/transcription.js) is created independently of the rewrite/T2A registry. Its composition now uses the common provider factory/registry, dispatch and result contract, while the service owns upload, input planning, media conversion, neutral recognition deadlines, cleanup and separate capacity limits. Google request/configuration details stay behind composition and its adapter.
 - Model status and `/readyz` describe rewrite. They do not establish T2A or Google readiness.
 - Image generation and automatic discovery of new services are not implemented. Further generalization is a future design choice, not a committed implementation step.
 

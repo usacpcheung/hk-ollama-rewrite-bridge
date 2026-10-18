@@ -53,7 +53,10 @@ function createGoogleSpeechProvider(config, { createClient } = {}) {
     name: 'google-speech',
     getInfo: () => ({ provider: 'google-speech' }),
     mapError: mapGoogleSpeechError,
-    services: { transcription: { sync: async ({ content, signal, timeoutMs }) => {
+    services: { transcription: {
+      inputRequirements: Object.freeze({ encoding: 'flac', sampleRate: 16000, channels: 1,
+        delivery: 'inline', cancellation: 'deadline-only', maxDurationSeconds: 60, maxPreparedBytes: 4 * 1024 * 1024 }),
+      sync: async ({ audio, content, signal, timeoutMs }) => {
       try {
         checkAbort(signal);
         const speech = getClient();
@@ -67,11 +70,19 @@ function createGoogleSpeechProvider(config, { createClient } = {}) {
         const [response] = await speech.recognize({
           recognizer: `projects/${config.project}/locations/${config.location}/recognizers/_`,
           config: { autoDecodingConfig: {}, model: config.model, languageCodes: [config.language] },
-          content
+          content: audio ? audio.content : content
         }, { timeout: remainingMs, retry: null });
         // This SDK's public promise is not cancellable. Keep admission until the RPC
         // settles or its deadline expires, then discard results for a disconnected client.
         checkAbort(signal);
+        if (!response || typeof response !== 'object' || Array.isArray(response) ||
+            (response.results !== undefined && !Array.isArray(response.results)) ||
+            (response.results || []).some(result => !result || typeof result !== 'object' || Array.isArray(result) ||
+              (result.alternatives !== undefined && !Array.isArray(result.alternatives)) ||
+              (result.alternatives || []).some(alternative => !alternative || typeof alternative !== 'object' ||
+                Array.isArray(alternative) || (alternative.transcript !== undefined && typeof alternative.transcript !== 'string')))) {
+          throw new TranscriptionError(502, 'TRANSCRIPTION_FAILED', 'Transcription failed. Please try again later.');
+        }
         const text = (response.results || []).map(result => result.alternatives?.[0]?.transcript?.trim() || '').filter(Boolean).join('\n');
         if (!text) throw new TranscriptionError(422, 'NO_SPEECH', 'No speech was recognized. Please try a clearer recording.');
         return successResult({ response: text });

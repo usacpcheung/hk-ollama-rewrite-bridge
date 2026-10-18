@@ -8,6 +8,11 @@ This document reflects the current server implementation and is intended for dow
 
 ## Transcription
 
+Step 4 preserves the Google service and public formats while moving production
+audio preparation/recognition behind the [provider contract](../architecture/provider-abstraction-step-4.md).
+Malformed adapter results or native transcript fields return controlled
+`502 TRANSCRIPTION_FAILED`; valid empty recognition remains `422 NO_SPEECH`.
+
 Public route: `POST /api/rewrite-bridge/transcriptions`, proxied to internal
 `POST /transcriptions` (also available as `/api/transcriptions`). Uses the same
 trusted-header authentication and domain policy as rewrite. Google credentials
@@ -79,7 +84,15 @@ No automatic retries: ambiguous failures can already have incurred charges.
 Errors use `{ ok: false, error: { code, message } }`, with `requestId` where assigned.
 Enabled-handler 429/503 responses include `Retry-After: 10`; disabled-mode 503
 does not set that header. Request-rate limiting uses its window's remaining time.
-Upload rejection can close the connection.
+Upload rejection can close the connection. Filesystem failures while writing an
+upload (for example disk full or permission denied) return 503
+`TRANSCRIPTION_UNAVAILABLE`, not 400 `INVALID_UPLOAD`.
+
+The total deadline remains active during cleanup. If an error was already selected,
+it is sent by that deadline even if deletion is still pending; otherwise the
+deadline returns 504. Capacity and file ownership remain held until outstanding
+work and cleanup settle. Recognition deadlines cover both resolved and rejected
+operations; an earlier cancellation reason retains precedence.
 
 The shared JSON parser and baseline limiter run before transcription's route
 middleware. Their rejections can therefore lack `Cache-Control: no-store` and

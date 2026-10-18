@@ -17,9 +17,12 @@ the existing contracts. This is actual production wiring, not an unused registry
 | Ollama / rewrite | sync, stream | `active_probe` | Not applicable |
 | MiniMax / rewrite | sync, stream; legacy or Anthropic protocol | `passive_remote` | Not applicable |
 | MiniMax / T2A | sync only | `none` | MP3/WAV/PCM; existing raw voice controls |
+| Google Speech / transcription | sync only | `none` | Inline FLAC/16 kHz/mono; deadline-only recognition |
 
-No Google registration is added. Disabled transcription does not initialize the
-Google SDK, and enabled transcription continues through its independent service.
+Step 4 adds `google-speech/transcription` through the same registry.
+`configuration/transcription.js` selects the registered adapter, while its service
+retains independent upload/conversion/admission/cleanup. Disabled transcription
+does not construct a provider or initialize the Google SDK. See [step 4](provider-abstraction-step-4.md).
 The exported `PROVIDER_CAPABILITIES` is a rewrite-only compatibility view for direct
 configuration consumers; server composition uses per-service views.
 
@@ -75,8 +78,8 @@ still requires an explicit supported configuration/mapping integration in later
 stages; registration alone does not bypass validation or route gates.
 
 Credential/model/protocol interpretation remains in provider-specific factory
-functions. Payload normalization, audio metadata corrections, transcription
-capacity/cleanup and startup orchestration are not rewritten here. Cancellation
+functions. Transcription capacity/cleanup retain their service-owned lifecycle; startup
+orchestration remains incomplete. Cancellation
 and deadlines remain service/adapter responsibilities under the existing flows;
 the registry adds no retries, failover or lifecycle state machine.
 
@@ -100,5 +103,5 @@ The PR's Node 22/24 CI is the merge-time verification for its final commit.
 Factories now translate service-owned rewrite/T2A requests into native payloads.
 The pure T2A compatibility policy is composed in `configuration/services.js`.
 See [step 3](provider-abstraction-step-3.md) for payloads, preset intent, alternative
-adapter proofs and the transcription contract prototype. Config/lifecycle selection
+adapter proofs and the transcription contract (integrated into production in step 4). Config/lifecycle selection
 is still incomplete; registration alone does not add a supported env selection.

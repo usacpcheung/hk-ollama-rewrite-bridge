@@ -17,7 +17,7 @@ and a restart. Registration alone does not yet complete that operator experience
 
 This step migrates rewrite and T2A request construction, establishes contracts for
 all three services, and proves different adapter designs with local fixtures.
-Transcription production composition/media migration is step 4. Remaining provider
+Transcription production composition/media migration is implemented in [step 4](provider-abstraction-step-4.md). Remaining provider
 configuration and lifecycle orchestration are step 5. See the standing
 [stack and acceptance sequence](provider-abstraction-roadmap.md#development-and-testing-sequence).
 
@@ -31,7 +31,7 @@ configuration and lifecycle orchestration are step 5. See the standing
 | T2A service | `services/t2a.js` validates text/output options and stable voice choices. An injected, pure request policy validates legacy controls and declares preset support. |
 | Rewrite adapters | `providers/service-requests.js` assembles the existing Ollama/MiniMax prompts; native adapters own protocol/model calls and response parsing. |
 | T2A adapter | `providers/minimax-t2a-compatibility.js` applies MiniMax defaults/raw controls; `providers/minimax-voices.js` owns all nine native preset mappings. |
-| Transcription | Existing independent production workflow remains unchanged. The input-planning prototype and contract tests define the next boundary. |
+| Transcription | Step 3 defined the input-planning contract. Step 4 now integrates it into production while retaining the independent lifecycle. |
 
 The output contract remains [ADR 0001](adr/0001-internal-bridge-contract.md).
 Providers return normalized results/events; public JSON, NDJSON and audio encoding
@@ -109,38 +109,18 @@ The eventual retirement must remove the compatibility policy and callers through
 an explicitly reviewed migration, without making voice IDs mandatory in the core
 service. Do not silently reinterpret an old provider's raw voice ID for a new one.
 
-### Transcription: contract now, production migration in step 4
+### Transcription: contract integrated in step 4
 
-[`lib/transcription-input-plan.js`](../../lib/transcription-input-plan.js) is a
-pure, tested prototype, not wired into the current route. A provider declares
-prepared-audio requirements: `encoding`, `sampleRate`, `channels`, `delivery`,
-`cancellation`, `maxDurationSeconds` and `maxPreparedBytes`. The prototype supports
-inline FLAC, PCM s16le or WAV, mono/stereo, and abortable or deadline-only calls.
-Unsupported delivery modes fail explicitly; live streaming and asynchronous jobs
-are not promised by this contract.
+Step 3 established the input requirements/limits/cancellation contract and tested
+alternative adapters. Step 4 now connects it to production registration, media
+preparation and recognition. See the [step-4 architecture](provider-abstraction-step-4.md)
+for the current contract, ownership rules and extension evidence.
 
-The service computes the stricter duration/prepared-byte limit, owns upload,
-validation, conversion, temporary files and cleanup, and will pass prepared bytes
-plus their audio description to the adapter. Uploaded-byte limits are separate
-from prepared-byte limits. Provider requirements cannot relax upload/media/privacy
-limits, supply executable commands, choose temporary paths or take over auth.
-Configuration, model/language, SDK authentication and the native recognition request
-belong behind the provider boundary.
-
-The contract fixture compares current Google-compatible mono 16 kHz FLAC with a
-48 kHz stereo PCM adapter, normalized transcript output, and both cancellation
-modes. The current Google adapter is exercised with a mocked SDK; native work that
-ignores abort retains capacity until settlement and cannot return late success.
-These are contract proofs, not a claim that the generic input planner already
-controls FFmpeg or the transcription handler.
-
-Current production remains Google V2 `chirp_3` / `yue-Hant-HK`, normalized FLAC,
-existing deadlines, independent per-user/conversion/admission limits, and
-cleanup-before-success. Transcription never inherits rewrite text conversion.
-PR #132 already closed the named actual-server success coverage gate with
-`tests/transcription-composition.test.js`. Step 4 must retain and extend that
-coverage while migrating this workflow using these contracts, including real-media,
-disconnect, deadline, privacy and cleanup tests. See the [baseline](compatibility-baseline.md).
+The original contract supports inline FLAC, PCM s16le or WAV, mono/stereo, and
+abortable or deadline-only calls. Provider requirements cannot relax service limits.
+Google retains V2 `chirp_3` / `yue-Hant-HK`, FLAC/16 kHz/mono, ADC, independent
+admission/conversion and cleanup-before-success. Transcription never applies rewrite
+text conversion. PR #132's actual-server success tests remain part of the gate.
 
 ## Extension and remaining change impact
 
@@ -148,7 +128,7 @@ disconnect, deadline, privacy and cleanup tests. See the [baseline](compatibilit
 |---|---|---|
 | Rewrite provider/protocol | Adapter factory, native request/response translation, normalized streaming/errors and tests | Integrate supported configuration and current readiness/key gates; step 5 removes remaining hardcoded orchestration. |
 | T2A provider/model | Adapter, pure request policy, documented preset mappings/capabilities, output normalization and tests | Integrate config/policy selection and key gate; prove format support and raw-control rejection before exposure. |
-| Transcription provider/model | Implement the agreed input requirements, recognition/result and cancellation contract | Step 4 production integration and step 5 configuration/lifecycle completion. |
+| Transcription provider/model | Implement the agreed input requirements, recognition/result and cancellation contract | Step 4 integration is implemented; step 5 configuration/lifecycle completion remains. |
 | New service | Definition, validation/request/output contract and provider registration; `additionalServices` in `services/index.js` reuses runtime/invocation | Explicit HTTP route, auth/rate/admission policy, output writer, configuration, documentation and contract tests. Registration does not publish a route. |
 | Remove provider | Remove registration/config selection/mappings after clients migrate | Announce unsupported settings and legacy controls; preserve unrelated services and test failure timing. |
 
@@ -176,7 +156,7 @@ Before proceeding: run the full suite and real-FFmpeg tests without skips, local
 actual-server curl smoke checks, and Node 22/24 CI; inspect the assembled branch
 and PR base. Keep this PR and its parents open. No live cloud credentials, paid
 provider calls, VPS deployment or acoustic quality evaluation are established by
-local fixtures. Step 4 requires separate implementation authorization.
+local fixtures. Step 4 was subsequently authorized; see its linked architecture and validation record.
 
 ### Initial verification recorded 2026-10-07 (before adversarial follow-up)
 
