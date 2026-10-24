@@ -6,6 +6,17 @@ This document reflects the current server implementation and is intended for dow
 - Typical public namespace via reverse proxy: `/api/rewrite-bridge/*`
 - Protected routes: `POST /rewrite`, `POST /t2a`, `POST /transcriptions` (and their `/api/` aliases)
 
+## Rewrite policy selection
+
+`REWRITE_POLICY=current-v1|hk-school-v1|hk-school-v2` is a server administrator setting,
+resolved at startup independently of provider selection. Absent means `current-v1`
+(the original instructions); invalid/empty values fail startup. A restart is
+required to change or roll back policy. There is no public policy selector.
+Body, query and header values claiming to choose policy have no effect; existing
+unknown-field handling, auth, limits and errors are unchanged. Both rewrite aliases
+use the same policy in JSON and NDJSON modes. Output envelopes and OpenCC conversion
+are unchanged. School wording is opt-in and requires live human language acceptance.
+
 ## Provider selection and compatibility
 
 Provider choice is server configuration, not a per-request native-provider switch.
@@ -745,3 +756,16 @@ streaming headers have been sent, the HTTP status remains 200 and the terminal
 NDJSON `error` contains status 502. Callers must check terminal errors even when
 earlier chunks contained valid text. Valid role/metadata/reasoning events remain
 supported; they are not treated as rewritten text.
+
+### School-policy quotation preservation
+
+With either `hk-school-v1` or `hk-school-v2`, exact balanced input quotations that remain
+unchanged in model output are preserved through character conversion, in both JSON
+and streaming responses. Translated/changed quotations are not automatically
+restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
+[quotation specification](hk-school-rewrite-specification.md).
+
+`hk-school-v2` is the experimentally evaluated candidate B. It requests verbatim
+quotations even for ordinary dialogue. Model compliance is not guaranteed; remaining
+meaning/quotation issues make this an operator-authorized limited trial, not full
+language acceptance. No request parameter selects it. Default remains current-v1.

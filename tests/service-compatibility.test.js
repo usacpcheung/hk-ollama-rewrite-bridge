@@ -376,3 +376,112 @@ test('compatibility: unregistered Ollama T2A preserves validation order and does
   assert.deepEqual(await rewrite.json(), { ok: true, result: '正式文字' });
   assert.equal(f.calls.length, 1);
 });
+
+for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
+  for (const [provider, apiFormat] of [['minimax', 'legacy-chat'], ['minimax', 'anthropic'], ['ollama', 'legacy-chat']]) {
+    test(`policy: ${provider}/${apiFormat}/${policy} keeps server selection through aliases, streaming and concurrent calls`, async t => {
+      const expected = require('../services/rewrite-policies').resolveRewritePolicy(policy).instructions;
+      const f = await fixture(t, { env: {
+        REWRITE_PROVIDER: provider, REWRITE_POLICY: policy, REWRITE_OLLAMA_MODEL: 'policy-model',
+        REWRITE_MINIMAX_API_FORMAT: apiFormat
+      }, handle: (req, res, body) => {
+        if (req.url === '/ps') { json(res, 200, { models: [{ name: 'policy-model' }] }); return true; }
+        if (req.url === '/anthropic/v1/messages') {
+          if (body.stream) {
+            res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+            const events = [
+              { type: 'message_start', message: { id: 'policy-fixture', type: 'message', role: 'assistant', model: 'fixture', content: [], usage: { input_tokens: 1, output_tokens: 0 } } },
+              { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '广东话' } },
+              { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+              { type: 'message_stop' }
+            ];
+            res.end(events.map(e => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join(''));
+          } else json(res, 200, { content: [{ type: 'text', text: '广东话' }], stop_reason: 'end_turn' });
+          return true;
+        }
+        if (!['/rewrite', '/generate'].includes(req.url)) return false;
+        if (body.stream) {
+          res.writeHead(200, { 'Content-Type': provider === 'ollama' ? 'application/x-ndjson' : 'text/event-stream' });
+          res.end(provider === 'ollama'
+            ? '{"response":"广东话","done":false}\n{"response":"","done":true}\n'
+            : 'data: {"choices":[{"delta":{"content":"广东话"}}]}\n\ndata: [DONE]\n\n');
+        } else json(res, 200, provider === 'ollama' ? { response: '广东话', done: true } : { reply: '广东话' });
+        return true;
+      } });
+      const headers = { ...AUTH, 'X-Rewrite-Policy': 'override', REWRITE_POLICY: 'override' };
+      for (const route of ['/rewrite', '/api/rewrite']) {
+        const results = await Promise.all([false, true].map(stream => f.request(`${route}?policy=override&REWRITE_POLICY=override`, {
+          headers, body: { text: '測試', stream, policy: 'override', rewrite_policy: 'override', REWRITE_POLICY: 'override', instructions: 'override' }
+        })));
+        assert.equal(results[0].status, 200);
+        assert.deepEqual(await results[0].json(), { ok: true, result: '廣東話' });
+        assert.equal(results[1].status, 200);
+        const events = (await results[1].text()).trim().split('\n').map(JSON.parse);
+        assert.equal(events.filter(e => !e.done).map(e => e.response).join(''), '廣東話');
+        assert.equal(events.filter(e => e.done).length, 1);
+        assert.equal(events.at(-1).done, true);
+        assert.ok(events.every(e => !e.error));
+      }
+      const calls = f.calls.filter(call => ['/rewrite', '/generate', '/anthropic/v1/messages'].includes(call.path));
+      assert.equal(calls.length, 4);
+      for (const { body } of calls) {
+        if (provider === 'minimax') {
+          assert.equal(apiFormat === 'anthropic' ? body.system : body.messages.find(m => m.role === 'system').content, expected);
+          assert.deepEqual(body.messages.find(m => m.role === 'user').content, apiFormat === 'anthropic'
+            ? [{ type: 'text', text: '把下方文字改寫為繁體書面語：\n測試' }] : '把下方文字改寫為繁體書面語：\n測試');
+        } else {
+          assert.ok(body.prompt.includes(expected));
+          assert.ok(body.prompt.includes('測試'));
+          assert.ok(!body.prompt.includes('override'));
+        }
+      }
+      await expectError(await f.request('/rewrite', { headers: {} }), 401, 'AUTH_REQUIRED');
+      await expectError(await f.request('/api/rewrite', { body: { text: '' } }), 400, 'INVALID_INPUT');
+      assert.equal(f.calls.filter(c => ['/rewrite', '/generate', '/anthropic/v1/messages'].includes(c.path)).length, 4);
+      const audio = await f.request('/api/t2a');
+      assert.equal(audio.status, 200);
+      assert.deepEqual(Buffer.from(await audio.arrayBuffer()), AUDIO);
+    });
+  }
+}
+
+for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
+  test(`quotations: ${policy} preserves alias and JSON/stream equivalence`, async t => {
+    const raw = '老师写「唔該晒」，然后说「係」。';
+    const f = await fixture(t, { env: { REWRITE_POLICY: policy }, handle: (req, res, body) => {
+      if (req.url !== '/rewrite') return false;
+      if (!body.stream) { json(res, 200, { reply: raw }); return true; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const content of raw.split('')) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+      res.end('data: [DONE]\n\n'); return true;
+    } });
+    for (const route of ['/rewrite','/api/rewrite']) {
+      const text = '老師寫「唔該晒」，然後說「係」。';
+      const sync = await f.request(route, { body: { text } });
+      const expected = policy !== 'current-v1' ? '老師寫「唔該晒」，然後説「係」。' : '老師寫「唔該曬」，然後説「係」。';
+      assert.equal(sync.status, 200); assert.equal((await sync.json()).result, expected);
+      const stream = await f.request(route, { body: { text, stream: true } });
+      assert.equal(stream.status, 200);
+      const events = (await stream.text()).trim().split('\n').map(JSON.parse);
+      assert.equal(events.filter(e => !e.done).map(e => e.response).join(''), expected);
+      assert.equal(events.filter(e => e.done).length, 1);
+      assert.ok(events.every(e => !e.error));
+    }
+  });
+}
+test('quotations: cancelling a partial quote cannot contaminate the next HTTP request', async t => {
+  const f = await fixture(t, { env: { REWRITE_POLICY: 'hk-school-v1' }, handle: (req, res, body) => {
+    if (req.url !== '/rewrite') return false;
+    if (!body.stream) { json(res, 200, { reply: '「唔該晒」' }); return true; }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"前文「唔該"}}]}\n\n');
+    return true; // Hold upstream until the client cancellation aborts it.
+  } });
+  const first = await f.request('/rewrite', { body: { text: '「唔該晒」', stream: true } });
+  const reader = first.body.getReader();
+  assert.equal((await reader.read()).done, false);
+  await reader.cancel();
+  const next = await f.request('/api/rewrite', { body: { text: '沒有引文' } });
+  assert.equal(next.status, 200);
+  assert.equal((await next.json()).result, '「唔該曬」');
+});
