@@ -437,9 +437,61 @@ test('active T2A disconnect aborts its upstream and preserves rewrite capacity',
   assert.equal((await f.request('/rewrite')).status, 200);
 });
 
+test('rewrite and T2A share a strict three-invocation cap without cancellation', async (t) => {
+  const held = new Map();
+  let active = 0;
+  let peak = 0;
+  let firstWaveStarted;
+  const firstWave = new Promise(resolve => { firstWaveStarted = resolve; });
+  const f = await fixture(t, {
+    env: { MINIMAX_MAX_CONCURRENCY: '3', MINIMAX_MAX_QUEUE_SIZE: '0' },
+    handle: (req, res, body) => {
+      const match = JSON.stringify(body).match(/held-(\d+)/);
+      if (!match) return false;
+      const id = Number(match[1]);
+      active++;
+      peak = Math.max(peak, active);
+      held.set(id, () => {
+        active--;
+        if (req.url === '/rewrite') json(res, 200, { reply: `held-${id}` });
+        else json(res, 200, { data: { audio: AUDIO.toString('hex'), format: 'mp3' } });
+      });
+      if (held.size === 3) firstWaveStarted();
+      // A broken cap should fail with an unexpected response, not a hung test.
+      if (id === 99) held.get(id)();
+      return true;
+    },
+  });
+  const requests = ['/rewrite', '/t2a', '/api/rewrite'].map((route, id) =>
+    f.request(route, { body: { text: `held-${id}` } }).then(async res => {
+      const status = res.status;
+      await res.arrayBuffer();
+      return status;
+    }));
+  // The mock retains all three responses until explicitly released. Additional
+  // requests must be rejected, not timed out or counted through remote close events.
+  await firstWave;
+  for (const route of ['/rewrite', '/api/rewrite', '/t2a', '/api/t2a']) {
+    const excess = await f.request(route, { body: { text: 'held-99' } });
+    assert.equal(excess.status, 503);
+    assert.equal((await excess.json()).error.code, 'ADMISSION_OVERLOADED');
+  }
+  assert.equal(held.size, 3);
+  assert.equal(peak, 3);
+  held.get(0)();
+  assert.equal(await requests[0], 200);
+  // Two responses remain held: this successful request proves the released slot
+  // is reusable while the other two invocations still own their slots.
+  assert.equal((await f.request('/api/t2a')).status, 200);
+  held.get(1)();
+  held.get(2)();
+  assert.deepEqual(await Promise.all(requests), [200, 200, 200]);
+  assert.equal(active, 0);
+});
+
 test('mixed slow successes, upstream failures and cancelled sessions preserve capacity and response identity', async (t) => {
-  let active = 0,
-    peak = 0;
+  let active = 0;
+  const upstreamSettlements = [];
   const f = await fixture(t, {
     env: {
       MINIMAX_MAX_CONCURRENCY: '3',
@@ -454,12 +506,14 @@ test('mixed slow successes, upstream failures and cancelled sessions preserve ca
       if (!match) return false;
       const id = Number(match[1]);
       active++;
-      peak = Math.max(peak, active);
+      let settled;
+      upstreamSettlements.push(new Promise(resolve => { settled = resolve; }));
       let finished = false;
       const finish = () => {
         if (!finished) {
           finished = true;
           active--;
+          settled();
         }
       };
       res.on('close', finish);
@@ -508,12 +562,14 @@ test('mixed slow successes, upstream failures and cancelled sessions preserve ca
       }
     }),
   );
-  await pause(150);
   assert.ok(
     outcomes.includes('success') && outcomes.includes('provider-error') && outcomes.includes('cancelled'),
   );
-  assert.ok(peak <= 3, `upstream concurrency reached ${peak}`);
-  assert.equal(active, 0);
   assert.equal((await f.request('/rewrite')).status, 200);
   assert.equal((await f.request('/t2a')).status, 200);
+  // Remote close observation can lag local cancellation settlement. The strict
+  // cap is covered separately; here wait for cleanup instead of assuming a
+  // cross-process event order or sleeping a fixed number of milliseconds.
+  await Promise.all(upstreamSettlements);
+  assert.equal(active, 0);
 });
