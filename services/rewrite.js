@@ -1,6 +1,7 @@
 const OpenCC = require('opencc-js');
 const { createRewriteStreamConverter } = require('../lib/rewrite-stream-converter');
 const toHK = OpenCC.Converter({ from: 'cn', to: 'hk' });
+const { createQuotePreservingConverter } = require('../lib/rewrite-quote-converter');
 const { resolveRewritePolicy } = require('./rewrite-policies');
 function createRewriteServiceDefinition({ config: resolvedConfig }) {
   const maxTextLength = resolvedConfig.maxTextLength;
@@ -34,16 +35,19 @@ function createRewriteServiceDefinition({ config: resolvedConfig }) {
       coldMs: resolvedConfig.timeouts.coldMs
     },
     buildRequest: ({ trimmedText }) => ({ text: trimmedText, instructions: policy.instructions, outputBudget: resolvedConfig.maxCompletionTokens }),
-    createStreamConverter: createRewriteStreamConverter,
-    postProcessOutput: ({ payload }) => {
+    createStreamConverter: ({ inputText } = {}) => policy.id === 'hk-school-v1'
+      ? createQuotePreservingConverter(inputText) : createRewriteStreamConverter(),
+    postProcessOutput: ({ payload, inputText }) => {
       if (!payload || typeof payload !== 'object') {
         return payload;
       }
 
+      const convert = text => policy.id === 'hk-school-v1'
+        ? createQuotePreservingConverter(inputText).write(text, true) : toHK(text);
       return {
         ...payload,
-        ...(typeof payload.response === 'string' ? { response: toHK(payload.response) } : {}),
-        ...(typeof payload.result === 'string' ? { result: toHK(payload.result) } : {})
+        ...(typeof payload.response === 'string' ? { response: convert(payload.response) } : {}),
+        ...(typeof payload.result === 'string' ? { result: convert(payload.result) } : {})
       };
     },
     validateRequest: ({ body }) => {

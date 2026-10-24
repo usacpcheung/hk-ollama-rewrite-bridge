@@ -444,3 +444,44 @@ for (const policy of ['current-v1', 'hk-school-v1']) {
     });
   }
 }
+
+for (const policy of ['current-v1', 'hk-school-v1']) {
+  test(`quotations: ${policy} preserves alias and JSON/stream equivalence`, async t => {
+    const raw = '老师写「唔該晒」，然后说「係」。';
+    const f = await fixture(t, { env: { REWRITE_POLICY: policy }, handle: (req, res, body) => {
+      if (req.url !== '/rewrite') return false;
+      if (!body.stream) { json(res, 200, { reply: raw }); return true; }
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      for (const content of raw.split('')) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`);
+      res.end('data: [DONE]\n\n'); return true;
+    } });
+    for (const route of ['/rewrite','/api/rewrite']) {
+      const text = '老師寫「唔該晒」，然後說「係」。';
+      const sync = await f.request(route, { body: { text } });
+      const expected = policy === 'hk-school-v1' ? '老師寫「唔該晒」，然後説「係」。' : '老師寫「唔該曬」，然後説「係」。';
+      assert.equal(sync.status, 200); assert.equal((await sync.json()).result, expected);
+      const stream = await f.request(route, { body: { text, stream: true } });
+      assert.equal(stream.status, 200);
+      const events = (await stream.text()).trim().split('\n').map(JSON.parse);
+      assert.equal(events.filter(e => !e.done).map(e => e.response).join(''), expected);
+      assert.equal(events.filter(e => e.done).length, 1);
+      assert.ok(events.every(e => !e.error));
+    }
+  });
+}
+test('quotations: cancelling a partial quote cannot contaminate the next HTTP request', async t => {
+  const f = await fixture(t, { env: { REWRITE_POLICY: 'hk-school-v1' }, handle: (req, res, body) => {
+    if (req.url !== '/rewrite') return false;
+    if (!body.stream) { json(res, 200, { reply: '「唔該晒」' }); return true; }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"前文「唔該"}}]}\n\n');
+    return true; // Hold upstream until the client cancellation aborts it.
+  } });
+  const first = await f.request('/rewrite', { body: { text: '「唔該晒」', stream: true } });
+  const reader = first.body.getReader();
+  assert.equal((await reader.read()).done, false);
+  await reader.cancel();
+  const next = await f.request('/api/rewrite', { body: { text: '沒有引文' } });
+  assert.equal(next.status, 200);
+  assert.equal((await next.json()).result, '「唔該曬」');
+});

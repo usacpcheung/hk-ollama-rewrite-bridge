@@ -35,7 +35,8 @@ operator approval. Do not retarget or merge Gemini as part of this rollout.
   path; future adapters consume the same service instructions. No provider default
   change, automatic fallback or extra model calls.
 - Both aliases and JSON/NDJSON modes keep validation, authentication, admission,
-  timeouts, usage/output envelopes and OpenCC conversion. The school prompt is
+  timeouts, usage/output envelopes. School-policy OpenCC conversion protects unchanged input
+  quotations; current-v1 conversion is unchanged. The school prompt is
   longer and can increase input-token cost; measure latency and quality rather than
   assuming improvement. Existing input and output budgets are not raised. Public body/query/header
   policy-like fields cannot override server selection.
@@ -72,3 +73,24 @@ operator approval. Do not retarget or merge Gemini as part of this rollout.
    PR; there is no automatic expiry.
 
 No new deployment or paid evaluation was performed by this implementation PR.
+
+## First live evaluation and corrective increment
+
+The operator supplied a 60-case MiniMax-M3/Anthropic run of initial PR #144 commit
+9588f3077071253d892333279463e65f727bd3c9: 60 requests completed, no failures,
+median 1.30 seconds and maximum 3.838 seconds. Assistant language review classified
+43 acceptable, 10 needing improvement, and 7 failing meaning/quotation requirements.
+This is not operator/teacher acceptance. The initial school policy must not be
+enabled in production on that evidence alone.
+
+Corrections strengthen degree/negation, reported speakers, contextual English and
+written register. Existing OpenCC cn→hk was independently shown to convert
+「唔該晒」 to 「唔該曬」. New school-only request-local quotation protection handles
+that deterministic conflict; model-altered quotations remain visible. The previous
+report lacks raw model output, so it cannot attribute every difference to the model.
+
+The revised external evaluator records raw and final output, explicit policy/code
+hashes and quote warnings for human review. First reevaluate flagged cases
+007, 008, 010, 011, 013, 014, 015, 018, 020, 027, 036, 038, 042, 053, 054, 055, 060.
+After reviewing them, rerun all 60 without replacing the approved fixtures or old
+reports. No automatic retries; no production configuration change for evaluation.

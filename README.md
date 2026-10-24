@@ -421,3 +421,11 @@ are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
 `data.wrapper.payload` variant is retained. Existing direct response candidates remain
 supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
 fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.
+
+### School-policy quotation preservation
+
+With `REWRITE_POLICY=hk-school-v1`, exact balanced input quotations that remain
+unchanged in model output are preserved through character conversion, in both JSON
+and streaming responses. Translated/changed quotations are not automatically
+restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
+[quotation specification](docs/reference/hk-school-rewrite-specification.md).

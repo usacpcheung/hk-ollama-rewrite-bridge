@@ -756,3 +756,11 @@ streaming headers have been sent, the HTTP status remains 200 and the terminal
 NDJSON `error` contains status 502. Callers must check terminal errors even when
 earlier chunks contained valid text. Valid role/metadata/reasoning events remain
 supported; they are not treated as rewritten text.
+
+### School-policy quotation preservation
+
+With `REWRITE_POLICY=hk-school-v1`, exact balanced input quotations that remain
+unchanged in model output are preserved through character conversion, in both JSON
+and streaming responses. Translated/changed quotations are not automatically
+restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
+[quotation specification](hk-school-rewrite-specification.md).

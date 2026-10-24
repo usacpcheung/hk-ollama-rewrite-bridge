@@ -81,3 +81,8 @@ extension proofs. [Step 5](provider-abstraction-step-5.md) completes registered
 configuration, credential availability and mode-driven rewrite lifecycle selection.
 Production acceptance remains Step 6. PR #132 recorded 306 passing tests before
 this increment; earlier counts above are historical checkpoints.
+
+School-policy output processing receives only the validated original input as
+request-local context. `lib/rewrite-quote-converter.js` protects exact balanced
+quotations against OpenCC changes; each streaming request owns its buffer.
+The original current-v1 conversion path is unchanged.

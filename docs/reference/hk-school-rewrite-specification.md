@@ -81,3 +81,18 @@ Character conversion (OpenCC) is supplementary; it cannot repair misunderstood
 Cantonese, lost English terms or invented meaning. Text evaluation does not prove
 speech-recognition accuracy: recording → transcription → rewrite needs separate
 end-to-end acceptance with non-sensitive recordings.
+
+## Exact quotation conversion
+
+For `hk-school-v1`, a balanced output quotation that exactly matches a balanced
+input quotation is preserved through OpenCC conversion. Supported delimiters are
+「」, 『』, “”, ‘’, and ASCII double quotes; backslash-escaped delimiters are
+ignored. ASCII apostrophes are not delimiters because they occur in contractions.
+Nested and repeated literal quotations are supported. Changed quotations are not
+restored or repaired; the model still has to follow the semantic rules above.
+Unquoted text and nonmatching quotations receive normal character conversion.
+Unclosed delimiters are not themselves protected. Streaming uses a per-request
+buffer bounded by the longest input quotation (at most twice the configured input
+code-point limit in UTF-16 units, plus one unit), preserving eligible nested
+quotations when an outer quotation exceeds that bound. JSON and NDJSON use the
+same conversion algorithm. `current-v1` retains its original OpenCC behaviour.
