@@ -1,9 +1,11 @@
 # Repository documentation
 
-Active references describe the Step 5 refactor branch, including registered provider
-configuration/lifecycle. See the [Step 5 validation record](reviews/2026-10-11-step-5-validation.md)
-for its review scope and the [roadmap](architecture/provider-abstraction-roadmap.md)
-for the still-pending production acceptance gate.
+Active references describe the implemented provider abstraction merged into main.
+The operator reported successful VPS and worksheet acceptance of
+`9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` after the dependency fixes.
+See the [Gemini migration plan](architecture/gemini-rewrite-migration.md) for the
+attributed baseline and new, not-yet-implemented rewrite migration. Historical
+validation records retain the limits applicable when they were written.
 
 The repository-wide document disposition was reviewed against main commit
 `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
@@ -16,6 +18,9 @@ or active references.
 
 | Folder / document | Purpose |
 |---|---|
+| [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Proposed PR stack, administrator-only policies and rollout gates |
+| [School rewrite specification](reference/hk-school-rewrite-specification.md) | Approved future behaviour; not current runtime |
+| [Rewrite evaluation](evaluation/README.md) | 60 approved cases and human evaluation protocol |
 | [Project README](../README.md) | Service overview and quick start |
 | [API reference](reference/api-reference.md) | Current endpoints, fields, response shapes and errors |
 | [Environment reference](reference/env-reference.md) | Runtime defaults, aliases, precedence and diagnostic-script settings |
