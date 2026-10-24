@@ -50,13 +50,14 @@ update and acceptance; the initial audit finding below is historical.
 
 ## Initial dependency finding (resolved by PR #141)
 
-`npm audit --omit=dev` reports **one high-severity body-parser vulnerability**:
+The initial `npm audit --omit=dev` reported **one high-severity body-parser vulnerability**:
 [GHSA-27r3-jxmh-p828](https://github.com/advisories/GHSA-27r3-jxmh-p828), denial
 of service with trailing bytes after a compressed request body, affected versions
-below 1.20.9. The locked body-parser entry is identical to main; this PR neither
-introduces nor fixes it. The separately authorized main-targeted security PR updated the lock and added
-request-body/auth regression tests before propagation into this stack. Audit output is not an exploitability
-assessment of the deployed proxy/bridge.
+below 1.20.9. At the initial review, the locked entry matched main and the
+first PR 2 commit did not fix it. The separately authorized main-targeted security
+PR #141 subsequently updated the lock and added request-body/auth regression
+tests; that fix is now incorporated into this stack. The initial audit alone
+was not an exploitability assessment of the deployed proxy/bridge.
 
 ## Remaining acceptance / limitations
 
