@@ -4,7 +4,21 @@ Status: sequence recorded in PR #130, amended in PR #132 on 2026-10-07 to keep
 the refactor stacked until VPS acceptance and operator approval. This is a plan,
 not a claim that the implementation or VPS acceptance has happened.
 
-## Immediate boundary
+## Accepted release and next migration (2026-10-24)
+
+The original stack #131–#135 and dependency fixes #136/#138 are merged into main
+at `9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc`. The operator reported 41 automated
+VPS checks, worksheet web acceptance and a clean dependency audit. Earlier open-PR
+and pending-acceptance statements below describe the historical sequence, not
+current GitHub status. This is attributed evidence, not a fresh VPS inspection.
+
+The next authorized work is documentation-only PR 1 of the
+[Gemini rewrite migration](gemini-rewrite-migration.md), based on current main.
+Future PRs stack on that new plan branch and subsequent latest open tip, not the
+old Step 5 branch. Keep the new stack open until its acceptance and operator merge
+approval. No Gemini implementation is authorized by the historical roadmap.
+
+## Historical immediate boundary
 
 PR #130 was merged as `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
 The operator planned to verify that commit on the VPS and pin it as production;
