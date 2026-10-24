@@ -8,7 +8,7 @@ This document reflects the current server implementation and is intended for dow
 
 ## Rewrite policy selection
 
-`REWRITE_POLICY=current-v1|hk-school-v1` is a server administrator setting,
+`REWRITE_POLICY=current-v1|hk-school-v1|hk-school-v2` is a server administrator setting,
 resolved at startup independently of provider selection. Absent means `current-v1`
 (the original instructions); invalid/empty values fail startup. A restart is
 required to change or roll back policy. There is no public policy selector.
@@ -759,8 +759,13 @@ supported; they are not treated as rewritten text.
 
 ### School-policy quotation preservation
 
-With `REWRITE_POLICY=hk-school-v1`, exact balanced input quotations that remain
+With either `hk-school-v1` or `hk-school-v2`, exact balanced input quotations that remain
 unchanged in model output are preserved through character conversion, in both JSON
 and streaming responses. Translated/changed quotations are not automatically
 restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
 [quotation specification](hk-school-rewrite-specification.md).
+
+`hk-school-v2` is the experimentally evaluated candidate B. It requests verbatim
+quotations even for ordinary dialogue. Model compliance is not guaranteed; remaining
+meaning/quotation issues make this an operator-authorized limited trial, not full
+language acceptance. No request parameter selects it. Default remains current-v1.

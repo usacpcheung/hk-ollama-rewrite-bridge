@@ -377,7 +377,7 @@ test('compatibility: unregistered Ollama T2A preserves validation order and does
   assert.equal(f.calls.length, 1);
 });
 
-for (const policy of ['current-v1', 'hk-school-v1']) {
+for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
   for (const [provider, apiFormat] of [['minimax', 'legacy-chat'], ['minimax', 'anthropic'], ['ollama', 'legacy-chat']]) {
     test(`policy: ${provider}/${apiFormat}/${policy} keeps server selection through aliases, streaming and concurrent calls`, async t => {
       const expected = require('../services/rewrite-policies').resolveRewritePolicy(policy).instructions;
@@ -445,7 +445,7 @@ for (const policy of ['current-v1', 'hk-school-v1']) {
   }
 }
 
-for (const policy of ['current-v1', 'hk-school-v1']) {
+for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
   test(`quotations: ${policy} preserves alias and JSON/stream equivalence`, async t => {
     const raw = '老师写「唔該晒」，然后说「係」。';
     const f = await fixture(t, { env: { REWRITE_POLICY: policy }, handle: (req, res, body) => {
@@ -458,7 +458,7 @@ for (const policy of ['current-v1', 'hk-school-v1']) {
     for (const route of ['/rewrite','/api/rewrite']) {
       const text = '老師寫「唔該晒」，然後說「係」。';
       const sync = await f.request(route, { body: { text } });
-      const expected = policy === 'hk-school-v1' ? '老師寫「唔該晒」，然後説「係」。' : '老師寫「唔該曬」，然後説「係」。';
+      const expected = policy !== 'current-v1' ? '老師寫「唔該晒」，然後説「係」。' : '老師寫「唔該曬」，然後説「係」。';
       assert.equal(sync.status, 200); assert.equal((await sync.json()).result, expected);
       const stream = await f.request(route, { body: { text, stream: true } });
       assert.equal(stream.status, 200);

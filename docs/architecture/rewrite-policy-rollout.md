@@ -1,7 +1,8 @@
 # Independent rewrite policy rollout
 
-Status: implementation and offline engineering review; live language acceptance
-pending. Decision accepted 2026-10-24. This supersedes the policy PR's dependency
+Status: limited candidate B production trial authorized; full language acceptance
+pending. The trial decision below supersedes the earlier full-set acceptance gate
+for this trial only. Decision accepted 2026-10-24. This supersedes the policy PR's dependency
 on Gemini described in open draft PR #139; it does not authorize merging Gemini.
 
 ## Baseline and branch sequence
@@ -94,3 +95,17 @@ hashes and quote warnings for human review. First reevaluate flagged cases
 007, 008, 010, 011, 013, 014, 015, 018, 020, 027, 036, 038, 042, 053, 054, 055, 060.
 After reviewing them, rerun all 60 without replacing the approved fixtures or old
 reports. No automatic retries; no production configuration change for evaluation.
+
+## Operator-authorized candidate B trial
+
+After reviewing the 20-request A/B run, the operator chose to try B with actual
+worksheet use before further reasoning experiments/full-set evaluation. B is now
+selectable as `hk-school-v2`; existing IDs/defaults remain unchanged. Known errors
+include HKS-027 uncertainty and HKS-055 translated quotations. No claim of full
+language acceptance is made. Gemini and reasoning-enabled testing remain paused.
+
+Follow the [trial runbook](../runbooks/rewrite-policy-b-trial.md). Pin the exact PR
+head, prepare and verify rollback before stopping the service, and perform both
+automated/API and worksheet smoke checks during maintenance. Explicitly record
+the trial's actual model, policy, token limit and commit. Do not merge this PR
+automatically as part of the trial.

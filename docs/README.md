@@ -61,3 +61,5 @@ This review inspected repository files only. Public proxy URLs, service-account 
 - [Administrator-selected policy rollout](architecture/rewrite-policy-rollout.md) — independent of paused Gemini work.
 - [Hong Kong school specification](reference/hk-school-rewrite-specification.md).
 - [Approved language evaluation cases and rubric](evaluation/README.md).
+
+- [Candidate B limited production trial](runbooks/rewrite-policy-b-trial.md) — deployment, rollback and observation.

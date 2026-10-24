@@ -6,6 +6,7 @@ const { resolveRewritePolicy } = require('./rewrite-policies');
 function createRewriteServiceDefinition({ config: resolvedConfig }) {
   const maxTextLength = resolvedConfig.maxTextLength;
   const policy = resolveRewritePolicy(resolvedConfig.policy);
+  const preserveQuotes = ['hk-school-v1', 'hk-school-v2'].includes(policy.id);
 
   return {
     id: 'rewrite',
@@ -35,14 +36,14 @@ function createRewriteServiceDefinition({ config: resolvedConfig }) {
       coldMs: resolvedConfig.timeouts.coldMs
     },
     buildRequest: ({ trimmedText }) => ({ text: trimmedText, instructions: policy.instructions, outputBudget: resolvedConfig.maxCompletionTokens }),
-    createStreamConverter: ({ inputText } = {}) => policy.id === 'hk-school-v1'
+    createStreamConverter: ({ inputText } = {}) => preserveQuotes
       ? createQuotePreservingConverter(inputText) : createRewriteStreamConverter(),
     postProcessOutput: ({ payload, inputText }) => {
       if (!payload || typeof payload !== 'object') {
         return payload;
       }
 
-      const convert = text => policy.id === 'hk-school-v1'
+      const convert = text => preserveQuotes
         ? createQuotePreservingConverter(inputText).write(text, true) : toHK(text);
       return {
         ...payload,

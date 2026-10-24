@@ -96,3 +96,14 @@ buffer bounded by the longest input quotation (at most twice the configured inpu
 code-point limit in UTF-16 units, plus one unit), preserving eligible nested
 quotations when an outer quotation exceeds that bound. JSON and NDJSON use the
 same conversion algorithm. `current-v1` retains its original OpenCC behaviour.
+
+## Candidate B trial variant
+
+`hk-school-v2` implements the exact candidate B evaluated in the A/B experiment
+(prompt SHA256 `51f7fd33ac9c1b719124f524aa63d5a1906c816ec4b671fd7b252527381a260a`).
+It changes the dialogue rule above: all balanced quotations should remain verbatim,
+including ordinary dialogue. Existing school-only output protection applies, but
+it cannot restore quotations the model already changed. Candidate B improved some
+known cases but still failed 027 (obligation/uncertainty) and 055 (quoted words).
+The operator authorized a limited production trial despite these limitations;
+this does not constitute full language acceptance or make B the default.
