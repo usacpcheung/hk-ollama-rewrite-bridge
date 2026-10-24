@@ -37,6 +37,12 @@ send a timely response, but it must not accept late success when execution resum
 
 ## Transcription
 
+Rejected transcription uploads retain their existing HTTP status and JSON error.
+The bridge discards a remaining upload tail with a 64 KiB byte budget and a
+250 ms deadline after sending the response, then closes unfinished connections. Large or stalled
+rejected uploads can still end with a transport error; this is bounded cleanup,
+not permission to continue processing the audio.
+
 Step 4 preserves the Google service and public formats while moving production
 audio preparation/recognition behind the [provider contract](../architecture/provider-abstraction-step-4.md).
 `TRANSCRIPTION_PROVIDER` defaults to `google-speech`. Operators may configure

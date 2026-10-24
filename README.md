@@ -10,6 +10,12 @@ This README is the top-level operator and integrator guide. Start with the [docu
 
 ## Worksheet audio transcription (opt-in)
 
+Rejected transcription uploads retain their existing HTTP status and JSON error.
+The bridge discards a remaining upload tail with a 64 KiB byte budget and a
+250 ms deadline after sending the response, then closes unfinished connections. Large or stalled
+rejected uploads can still end with a transport error; this is bounded cleanup,
+not permission to continue processing the audio.
+
 Authenticated callers upload multipart field `audio` to public
 `POST /api/rewrite-bridge/transcriptions` (internal `/transcriptions` or
 `/api/transcriptions`). Success returns `{ ok: true, result, durationSeconds,
