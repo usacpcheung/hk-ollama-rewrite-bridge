@@ -36,15 +36,26 @@ An initial sandbox run could not bind loopback (EPERM); tests were rerun with
 network permission. A manual smoke attempt while the full suite owned port 3001
 failed to start; the isolated rerun passed. Neither was a provider test failure.
 
-## Dependency finding
+## Security follow-up incorporated
+
+PR #141 patched body-parser to 1.20.9 on main at
+`d0654c6e1d57ea00ee2a74490207030e1856cd3f`. Main was merged into #139,
+then #139 into this branch; both Gemini PRs remain open with their original bases.
+The combined tree passed **405 tests, zero failures/skips** on Node 24.19.0 and
+`npm audit --omit=dev` reported **zero vulnerabilities**. Its executable files,
+lockfile and tests match the integration tree tested before propagation.
+The standalone security fix passed 377 tests locally on Node 22/24 and both
+GitHub CI jobs before merging. Production still requires the operator's VPS
+update and acceptance; the initial audit finding below is historical.
+
+## Initial dependency finding (resolved by PR #141)
 
 `npm audit --omit=dev` reports **one high-severity body-parser vulnerability**:
 [GHSA-27r3-jxmh-p828](https://github.com/advisories/GHSA-27r3-jxmh-p828), denial
 of service with trailing bytes after a compressed request body, affected versions
 below 1.20.9. The locked body-parser entry is identical to main; this PR neither
-introduces nor fixes it. A separate stacked dependency corrective PR should
-update the lock to a compatible patched version and rerun request-body/auth and
-full regression tests before deployment. Audit output is not an exploitability
+introduces nor fixes it. The separately authorized main-targeted security PR updated the lock and added
+request-body/auth regression tests before propagation into this stack. Audit output is not an exploitability
 assessment of the deployed proxy/bridge.
 
 ## Remaining acceptance / limitations
