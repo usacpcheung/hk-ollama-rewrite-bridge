@@ -1,3 +1,4 @@
+const { installRejectedUploadCleanup } = require('../lib/rejected-upload');
 const { readProviderAvailability } = require('../lib/provider-availability');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -14,7 +15,8 @@ const { normalizeAudio } = require('../lib/transcription-media');
 
 function createTranscriptionService({ config, provider, normalize = normalizeAudio } = {}) {
   const paths = ['/transcriptions', '/api/transcriptions'];
-  if (!config.enabled) return { paths, middleware: [(_req, res) => res.status(503).json({
+  const cleanupUpload = (req, res, next) => { installRejectedUploadCleanup(req, res); next(); };
+  if (!config.enabled) return { paths, middleware: [cleanupUpload, (_req, res) => res.status(503).json({
     ok: false, error: { code: 'TRANSCRIPTION_DISABLED', message: 'Transcription is not enabled.' }
   })] };
   const adapter = createProviderAdapter(provider);
@@ -42,12 +44,6 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
     function sendError(error) {
       if (res.destroyed || res.writableEnded) return;
       if ([429, 503].includes(error.status)) res.set('Retry-After', '10');
-      // Early rejection must not leave an unbounded unread upload on a keep-alive socket.
-      if (!req.complete) {
-        req.pause();
-        res.set('Connection', 'close');
-        res.once('finish', () => req.destroy());
-      }
       res.status(error.status).json({ ok: false, error: { code: error.code, message: error.message }, requestId });
     }
     if (!user) return sendError(new TranscriptionError(401, 'AUTH_REQUIRED', 'Login required'));
@@ -120,6 +116,6 @@ function createTranscriptionService({ config, provider, normalize = normalizeAud
       if (responseError) sendError(responseError);
     }
   }
-  return { paths, middleware: [limiter, handler] };
+  return { paths, middleware: [cleanupUpload, limiter, handler] };
 }
 module.exports = { createTranscriptionService };

@@ -1,3 +1,4 @@
+const { installRejectedUploadCleanup } = require('./lib/rejected-upload');
 const express = require('express');
 const crypto = require('crypto');
 const { createProvider, createProviderLifecycle, providerRegistry } = require('./providers');
@@ -1137,7 +1138,7 @@ const transcriptionService = createTranscriptionService();
 app.post(transcriptionService.paths, (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   // Covers auth, rate-limit and disabled-service rejections before body consumption.
-  res.once('finish', () => { if (!req.complete) req.destroy(); });
+  installRejectedUploadCleanup(req, res);
   next();
 }, rewriteHeaderAuth, ...transcriptionService.middleware);
 
