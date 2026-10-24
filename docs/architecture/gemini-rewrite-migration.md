@@ -1,9 +1,11 @@
 # Gemini rewrite migration and administrator-selected policies
 
-Status: accepted design, PR 1 documentation/evaluation fixtures only (2026-10-24).
-No Gemini rewrite adapter or policy selector is implemented by this PR. Proposed
-settings below must not be copied into production until their implementation and
-acceptance are complete. [Current runtime](runtime.md) remains authoritative.
+Status: PR 2 implements the Gemini adapter/configuration on top of PR 1 (#139).
+The existing provider default and rewrite instruction text are unchanged. School
+policy selection and the evaluator remain future PR 3 work. Implementation is not
+VPS acceptance; keep production unchanged until the gates below pass.
+[Current runtime](runtime.md) and [environment settings](../reference/env-reference.md#google-gemini-rewrite)
+describe implemented behaviour.
 
 ## Purpose and boundaries
 
@@ -35,16 +37,19 @@ it does not certify streaming, sustained quota or full language quality. Global
 is not a Hong Kong data-residency guarantee. Reconfirm model lifecycle, pricing,
 location and data-processing suitability before deployment.
 
-## Administrator-only configuration contract (proposed)
+## Administrator-only configuration contract
 
 | Setting | Intended meaning |
 |---|---|
 | `REWRITE_PROVIDER=google-gemini` | Select the new registered rewrite provider; retain existing provider default during migration |
-| `REWRITE_GOOGLE_MODEL=gemini-3.8-flash` | Initial evaluated model; validate against implemented native protocol |
+| `REWRITE_GOOGLE_MODEL=gemini-3.8-flash` | Initial smoke-tested model; validate against implemented native protocol |
 | `REWRITE_GOOGLE_PROJECT` | Operator's Google Cloud project |
 | `REWRITE_GOOGLE_LOCATION=global` | Initial verified endpoint location |
 | `REWRITE_POLICY=current-v1` | Exact existing production instruction text; initial default when absent |
 | `REWRITE_POLICY=hk-school-v1` | Approved school policy in the linked specification |
+
+The provider settings above are implemented in PR 2. The two `REWRITE_POLICY`
+settings in the table describe planned PR 3 behaviour, not a supported setting yet.
 
 Policy is resolved at startup and applies consistently until restart. Invalid
 values fail startup with a clear configuration error. Public body/query/header
@@ -80,7 +85,7 @@ validation or output contracts. Existing APIs remain defined by the
 Future corrective increments stack on the latest open tip, never independently
 on main. Verify ancestry and GitHub base each time; ask if unclear. Keep the stack
 open until final maintenance-window acceptance and explicit merge approval.
-Only PR 1 is authorized now; later implementation requires separate authorization.
+PRs 1 and 2 are authorized; PR 3 requires separate authorization.
 The previous provider-abstraction stack is already merged and is not this stack's
 parent. See the [original roadmap](provider-abstraction-roadmap.md) for history.
 

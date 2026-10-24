@@ -8,6 +8,29 @@ Node.js Express bridge that exposes AI services behind shared authentication and
 
 This README is the top-level operator and integrator guide. Start with the [documentation index](docs/README.md), or use the [API reference](docs/reference/api-reference.md) for exact endpoint contracts.
 
+## Gemini rewriting (opt-in)
+
+`REWRITE_PROVIDER=google-gemini` selects Gemini on Vertex AI after restart.
+Set `REWRITE_GOOGLE_PROJECT`; model and location default to `gemini-3.8-flash`
+and `global`. Supply server-side Application Default Credentials (the existing
+Google credential file may be reused with appropriate IAM permissions). Keep
+`GOOGLE_SDK_NODE_LOGGING` unset. No API keys or provider selection go to clients.
+
+Ollama remains the default, and MiniMax remains supported. Existing rewrite
+instructions, OpenCC conversion, public JSON/NDJSON, T2A and transcription are
+unchanged. Streaming still requires `REWRITE_STREAMING_ENABLED=true`. Gemini
+uses LOW thinking; the existing 300-token default output budget may be too small
+because thinking also consumes the budget. Truncated output fails explicitly.
+Select a tested budget using `REWRITE_MAX_COMPLETION_TOKENS` (maximum 8192).
+
+There are no paid startup probes, inference retries or automatic fallback.
+Readiness does not verify Google permissions, quota or model availability. The
+school policy selector/evaluator is **not implemented yet**. Keep production on
+its tested configuration until maintenance acceptance; provider rollback means
+restoring the previous provider configuration and restarting. See the
+[migration plan](docs/architecture/gemini-rewrite-migration.md) and
+[Gemini environment reference](docs/reference/env-reference.md#google-gemini-rewrite).
+
 ## Worksheet audio transcription (opt-in)
 
 Rejected transcription uploads retain their existing HTTP status and JSON error.
@@ -99,6 +122,7 @@ See the [review record](docs/reviews/2026-10-11-step-5-validation.md).
 - Node.js 22+ (CI tests Node 22 and 24)
 - For rewrite with Ollama: Ollama reachable at `127.0.0.1:11434` and the configured model pulled
 - For rewrite or T2A with Minimax: outbound network access and `MINIMAX_API_KEY`
+- For Gemini rewrite: Vertex AI API access, a permitted Google identity and server-side ADC
 - For enabled transcription: FFmpeg/FFprobe, Google Cloud Speech-to-Text access and server-side ADC
 
 ## Install

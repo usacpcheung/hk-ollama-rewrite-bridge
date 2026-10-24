@@ -1,12 +1,12 @@
 # Current runtime and request flows
 
-Updated for the step-5 provider completion branch stacked on PR #134. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
+Updated for the Gemini rewrite adapter increment stacked on PR #139. This describes code in the repository, not the live deployment. See the [API reference](../reference/api-reference.md) and [environment reference](../reference/env-reference.md) for external contracts and settings.
 
 ## Startup
 
 [`server.js`](../../server.js) creates an Express listener at the fixed address `127.0.0.1:3001`. It loads the rewrite/T2A definitions from [`services/index.js`](../../services/index.js), constructs their runtimes through [`lib/service-runtime.js`](../../lib/service-runtime.js), and independently creates transcription through [`services/transcription.js`](../../services/transcription.js).
 
-The rewrite/T2A runtimes contain the service, provider name, adapter, capabilities, timeouts and lifecycle. Rewrite defaults to Ollama; MiniMax can use legacy chat or the opt-in Anthropic Messages interface. T2A ships a MiniMax integration and defaults to `speech-2.6-hd`. Transcription is disabled unless explicitly enabled; its default Google V2 profile is `chirp_3` / `yue-Hant-HK` in configured `us` or `eu`.
+The rewrite/T2A runtimes contain the service, provider name, adapter, capabilities, timeouts and lifecycle. Rewrite defaults to Ollama; MiniMax can use legacy chat or the opt-in Anthropic Messages interface. Gemini is opt-in through `google-gemini` with lazy ADC, native REST JSON/SSE translation and passive readiness (no paid probes). T2A ships a MiniMax integration and defaults to `speech-2.6-hd`. Transcription is disabled unless explicitly enabled; its default Google V2 profile is `chirp_3` / `yue-Hant-HK` in configured `us` or `eu`.
 
 Provider construction now resolves a `(provider, service)` registration in
 [`providers/index.js`](../../providers/index.js) through
@@ -32,9 +32,9 @@ The “global” request policy is a baseline per resolved identity, not an aggr
 Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 
 1. [`services/rewrite.js`](../../services/rewrite.js) trims and validates text, counts Unicode code points, selects streaming capability and builds `{ text, instructions, outputBudget }`. Provider-owned request translation assembles native prompts.
-2. `server.js` applies rewrite readiness/warmup/recovery gates and selects ready/cold timeout. Ollama uses active readiness probes and warmup; MiniMax uses passive state based on API-key presence and observed requests, without synthetic paid probes.
+2. `server.js` applies rewrite readiness/warmup/recovery gates and selects ready/cold timeout. Ollama uses active readiness probes and warmup; MiniMax uses passive state based on API-key presence and observed requests, without synthetic paid probes. Gemini uses the same passive lifecycle with lazy ADC rather than an API-key availability check.
 3. [`lib/service-invoker.js`](../../lib/service-invoker.js) acquires admission by provider, invokes the adapter's sync/stream handler, and records lifecycle success/failure.
-4. [`providers/ollama.js`](../../providers/ollama.js) or [`providers/minimax.js`](../../providers/minimax.js) parses transport responses into the [internal contract](adr/0001-internal-bridge-contract.md).
+4. [`providers/ollama.js`](../../providers/ollama.js), [`providers/minimax.js`](../../providers/minimax.js) or [`providers/google-gemini.js`](../../providers/google-gemini.js) parses transport responses into the [internal contract](adr/0001-internal-bridge-contract.md).
 5. [`lib/service-output-writer.js`](../../lib/service-output-writer.js) applies HK Traditional Chinese conversion and writes public JSON or NDJSON. Streaming uses request-local phrase state from [`lib/rewrite-stream-converter.js`](../../lib/rewrite-stream-converter.js) and flushes pending text before completion. Rewrite JSON contains `ok`, `result` and optional `usage`; internal artifacts are not exposed.
 
 `/readyz` and `/model-status` describe this rewrite lifecycle. Neither proves T2A or Google connectivity, nor guarantees the next request succeeds.
