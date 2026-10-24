@@ -1163,6 +1163,7 @@ app.listen(PORT, HOST, () => {
       level: 'info',
       msg: 'Effective provider config',
       ...providerInfo,
+      rewritePolicy: rewriteService.policyId,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
       t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,

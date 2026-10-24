@@ -8,6 +8,23 @@ Node.js Express bridge that exposes AI services behind shared authentication and
 
 This README is the top-level operator and integrator guide. Start with the [documentation index](docs/README.md), or use the [API reference](docs/reference/api-reference.md) for exact endpoint contracts.
 
+## Administrator-selected rewrite policy
+
+`REWRITE_POLICY` defaults to `current-v1`, preserving the existing instructions
+verbatim. Administrators may opt into `hk-school-v1` for faithful Cantonese and
+mixed Chinese/English rewriting in natural Hong Kong school written Chinese.
+Policy is independent of `REWRITE_PROVIDER`; this rollout evaluates MiniMax.
+The repository's provider default remains Ollama; retain your existing MiniMax
+configuration. No public request parameter, header or query selects policy.
+
+Selection is fixed until restart. Unknown or empty values fail startup. To roll
+back policy, set `REWRITE_POLICY=current-v1` and restart during maintenance.
+The school policy is implemented but awaits live language review and VPS acceptance;
+do not enable it in production solely because automated tests pass.
+See the [policy rollout](docs/architecture/rewrite-policy-rollout.md),
+[specification](docs/reference/hk-school-rewrite-specification.md) and
+[evaluation cases](docs/evaluation/README.md).
+
 ## Worksheet audio transcription (opt-in)
 
 Rejected transcription uploads retain their existing HTTP status and JSON error.

@@ -31,7 +31,7 @@ The “global” request policy is a baseline per resolved identity, not an aggr
 
 Both `/rewrite` and `/api/rewrite` run the rewrite limiter, shared auth, then:
 
-1. [`services/rewrite.js`](../../services/rewrite.js) trims and validates text, counts Unicode code points, selects streaming capability and builds `{ text, instructions, outputBudget }`. Provider-owned request translation assembles native prompts.
+1. [`services/rewrite.js`](../../services/rewrite.js) trims and validates text, counts Unicode code points, selects streaming capability and builds `{ text, instructions, outputBudget }`. The administrator-selected policy is captured at startup from `services/rewrite-policies.js` (`current-v1` by default, opt-in `hk-school-v1`). Provider-owned request translation assembles native prompts; callers cannot select instructions.
 2. `server.js` applies rewrite readiness/warmup/recovery gates and selects ready/cold timeout. Ollama uses active readiness probes and warmup; MiniMax uses passive state based on API-key presence and observed requests, without synthetic paid probes.
 3. [`lib/service-invoker.js`](../../lib/service-invoker.js) acquires admission by provider, invokes the adapter's sync/stream handler, and records lifecycle success/failure.
 4. [`providers/ollama.js`](../../providers/ollama.js) or [`providers/minimax.js`](../../providers/minimax.js) parses transport responses into the [internal contract](adr/0001-internal-bridge-contract.md).

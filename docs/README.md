@@ -55,3 +55,9 @@ or active references.
 This review inspected repository files only. Public proxy URLs, service-account names and deployment paths are examples to adapt; the repository cannot prove the live server configuration, external consumers, Google access/quota or voice quality.
 
 - [Runtime failure corrections and regression evidence](reviews/2026-10-07-runtime-failure-corrections.md)
+
+## Rewrite policy upgrade
+
+- [Administrator-selected policy rollout](architecture/rewrite-policy-rollout.md) — independent of paused Gemini work.
+- [Hong Kong school specification](reference/hk-school-rewrite-specification.md).
+- [Approved language evaluation cases and rubric](evaluation/README.md).

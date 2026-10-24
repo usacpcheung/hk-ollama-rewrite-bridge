@@ -6,6 +6,17 @@ This document reflects the current server implementation and is intended for dow
 - Typical public namespace via reverse proxy: `/api/rewrite-bridge/*`
 - Protected routes: `POST /rewrite`, `POST /t2a`, `POST /transcriptions` (and their `/api/` aliases)
 
+## Rewrite policy selection
+
+`REWRITE_POLICY=current-v1|hk-school-v1` is a server administrator setting,
+resolved at startup independently of provider selection. Absent means `current-v1`
+(the original instructions); invalid/empty values fail startup. A restart is
+required to change or roll back policy. There is no public policy selector.
+Body, query and header values claiming to choose policy have no effect; existing
+unknown-field handling, auth, limits and errors are unchanged. Both rewrite aliases
+use the same policy in JSON and NDJSON modes. Output envelopes and OpenCC conversion
+are unchanged. School wording is opt-in and requires live human language acceptance.
+
 ## Provider selection and compatibility
 
 Provider choice is server configuration, not a per-request native-provider switch.
