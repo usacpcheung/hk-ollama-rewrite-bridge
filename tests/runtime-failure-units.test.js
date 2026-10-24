@@ -179,6 +179,8 @@ test('cancelled callers retain active admission until provider settles and do no
   const c = createAdmissionController({ globalLimits: { maxConcurrency: 1 } });
   const controller = new AbortController();
   let complete;
+  let started;
+  const providerStarted = new Promise(resolve => { started = resolve; });
   let lifecycleCalls = 0;
   let calledSignal;
   const adapter = createProviderAdapter({
@@ -188,6 +190,7 @@ test('cancelled callers retain active admission until provider settles and do no
           calledSignal = signal;
           return new Promise((resolve) => {
             complete = resolve;
+            started();
           });
         },
       },
@@ -219,13 +222,18 @@ test('cancelled callers retain active admission until provider settles and do no
       }
     },
   });
-  await new Promise((resolve) => setImmediate(resolve));
+  await providerStarted;
   controller.abort();
   assert.equal(calledSignal, controller.signal);
   assert.equal(c.getState().inFlight, 1);
+  const next = c.acquire({ providerName: 'fake' });
+  assert.deepEqual(c.getState().byProvider.fake, { inFlight: 1, queueDepth: 1 });
   const rejected = assert.rejects(operation, { name: 'AbortError' });
   complete({ ok: true });
   await rejected;
+  const nextTicket = await next;
+  assert.deepEqual(c.getState().byProvider.fake, { inFlight: 1, queueDepth: 0 });
+  nextTicket.release();
   assert.equal(c.getState().inFlight, 0);
   assert.equal(lifecycleCalls, 0);
 });
