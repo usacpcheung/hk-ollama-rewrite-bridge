@@ -35,6 +35,31 @@ change to the already-sent HTTP 200. Caller cancellation takes precedence, and
 admission remains held until provider work settles. A blocked event loop cannot
 send a timely response, but it must not accept late success when execution resumes.
 
+## Gemini rewrite compatibility
+
+With administrator selection `REWRITE_PROVIDER=google-gemini`, both rewrite
+aliases retain their existing input, auth, JSON and NDJSON contracts. Public
+requests cannot select a model or change the rewrite instructions. Successful
+Gemini completion maps STOP to `stop`; reasoning parts are excluded. Optional
+usage contains whitelisted nonnegative native token counts (`promptTokenCount`,
+`candidatesTokenCount`, `totalTokenCount`, `thoughtsTokenCount`,
+`cachedContentTokenCount`), not provider response objects.
+
+| Error | Status | Meaning |
+|---|---|---|
+| `GEMINI_AUTH_ERROR` | 503 | ADC failure or upstream 401/403; inspect server credentials, IAM and billing controls. |
+| `GEMINI_QUOTA_EXCEEDED` | 429 | Upstream 429; quota/cap may have rejected the call. No automatic retry or fallback. |
+| `GEMINI_OUTPUT_TRUNCATED` | 502 | MAX_TOKENS; incomplete rewrite is not success. |
+| `GEMINI_CONTENT_BLOCKED` | 422 | Prompt blocked or non-STOP/non-MAX_TOKENS finish. |
+| `GEMINI_INVALID_RESPONSE` | 502 | Malformed, empty, oversized or unfinished response. |
+| `GEMINI_ERROR` | 502 | Other upstream HTTP/transport failure, sanitized. |
+| `MODEL_TIMEOUT` | 504 | Invocation deadline (existing cold-start mapping may apply). |
+
+Streaming can deliver text before a subsequent controlled terminal error; clients
+must not treat partial text as completed output. There is exactly one success
+terminal only after STOP and nonempty text. Readiness is passive and does not
+verify Google access. T2A and transcription remain independently selected.
+
 ## Transcription
 
 Step 4 preserves the Google service and public formats while moving production

@@ -1,3 +1,4 @@
+const { createGoogleGeminiProvider } = require('./google-gemini');
 const { createGoogleSpeechProvider } = require('./google-speech');
 const { createOllamaProvider } = require('./ollama');
 const { createMinimaxProvider } = require('./minimax');
@@ -39,6 +40,10 @@ function buildMinimax({ serviceConfig, minimaxApiKey, debugLog, env = process.en
 }
 
 module.exports = [
+  { provider: 'google-gemini', serviceId: 'rewrite',
+    create: ({ serviceConfig }) => createGoogleGeminiProvider(serviceConfig.provider.runtime),
+    readConfiguration: require('./configuration/google-rewrite').readConfiguration,
+    capabilities: { sync: true, streaming: true, lifecycle: 'passive_remote' } },
   { provider: 'google-speech', serviceId: 'transcription',
     create: ({ serviceConfig }) => createGoogleSpeechProvider(serviceConfig.provider.runtime),
     readConfiguration: require('./configuration/google-transcription').readConfiguration,

@@ -12,8 +12,9 @@ VPS checks, worksheet web acceptance and a clean dependency audit. Earlier open-
 and pending-acceptance statements below describe the historical sequence, not
 current GitHub status. This is attributed evidence, not a fresh VPS inspection.
 
-The next authorized work is documentation-only PR 1 of the
-[Gemini rewrite migration](gemini-rewrite-migration.md), based on current main.
+The new [Gemini rewrite migration](gemini-rewrite-migration.md) starts with
+documentation PR 1 (#139), based on current main. The separately authorized PR 2
+adds the opt-in Gemini adapter on that branch; policy selection remains PR 3 work.
 Future PRs stack on that new plan branch and subsequent latest open tip, not the
 old Step 5 branch. Keep the new stack open until its acceptance and operator merge
 approval. No Gemini implementation is authorized by the historical roadmap.

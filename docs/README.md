@@ -1,10 +1,10 @@
 # Repository documentation
 
-Active references describe the implemented provider abstraction merged into main.
+Active references describe the implemented provider abstraction and this branch's opt-in Gemini rewrite adapter.
 The operator reported successful VPS and worksheet acceptance of
 `9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` after the dependency fixes.
 See the [Gemini migration plan](architecture/gemini-rewrite-migration.md) for the
-attributed baseline and new, not-yet-implemented rewrite migration. Historical
+attributed baseline and staged rewrite migration; school policy selection remains future work. Historical
 validation records retain the limits applicable when they were written.
 
 The repository-wide document disposition was reviewed against main commit
@@ -19,6 +19,7 @@ or active references.
 | Folder / document | Purpose |
 |---|---|
 | [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Proposed PR stack, administrator-only policies and rollout gates |
+| [Gemini adapter validation](reviews/2026-10-24-gemini-provider.md) | PR 2 tests, simulations, dependency finding and live acceptance limits |
 | [School rewrite specification](reference/hk-school-rewrite-specification.md) | Approved future behaviour; not current runtime |
 | [Rewrite evaluation](evaluation/README.md) | 60 approved cases and human evaluation protocol |
 | [Project README](../README.md) | Service overview and quick start |

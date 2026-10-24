@@ -77,7 +77,7 @@ not silently fall back to another provider.
 
 | Variable | Default | Meaning |
 |---|---:|---|
-| `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
+| `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`, `google-gemini`. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–4,000; invalid or out-of-range settings fall back to 200. Worksheet starting profile: 2,000. |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192, invalid/out-of-range values fall back to 300. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
@@ -315,3 +315,37 @@ Registered rewrite/T2A providers also receive `<PROVIDER>_MAX_CONCURRENCY`,
 `<PROVIDER>_MAX_QUEUE_SIZE` and `<PROVIDER>_MAX_WAIT_MS` admission overrides.
 Uppercase the ID and replace non-alphanumeric characters with underscores.
 T2A-only registrations are included; transcription admission remains separate.
+
+## Google Gemini rewrite
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REWRITE_GOOGLE_PROJECT` | Required when selected | Google project ID or number; no inference from transcription configuration. |
+| `REWRITE_GOOGLE_LOCATION` | `global` | Vertex location; global uses `aiplatform.googleapis.com`, regional locations use `<location>-aiplatform.googleapis.com`. Syntax validation does not establish model availability or data residency. |
+| `REWRITE_GOOGLE_MODEL` | `gemini-3.8-flash` | Gemini model ID supporting the implemented generateContent/streamGenerateContent protocol and LOW thinking. Other model selections require compatibility testing. |
+| `GOOGLE_APPLICATION_CREDENTIALS` | ADC discovery | Optional credential-file path, shared with other Google services; never commit credentials. |
+| `GOOGLE_SDK_NODE_LOGGING` | Unset | Any nonempty value blocks selected Gemini startup to prevent SDK credential logging. |
+
+Select with `REWRITE_PROVIDER=google-gemini`; existing provider default remains
+`ollama`. Enable `aiplatform.googleapis.com` in the selected project and grant
+the service identity suitable Vertex AI permissions (for example
+`roles/aiplatform.user`). Native settings are validated when the adapter is constructed; an
+unselected provider needs no credentials or project. ADC is first used on a
+rewrite request, never startup/readiness/warmup. Google credential discovery is
+coalesced: at most one credential operation per adapter remains pending when
+callers cancel/time out; inference is never dispatched for an expired waiter.
+An SDK credential operation cannot itself be cancelled through this interface.
+
+Existing rewrite input limits, invocation deadlines and streaming opt-in apply.
+`REWRITE_MAX_COMPLETION_TOKENS` controls Gemini `maxOutputTokens`, including
+thinking; default 300, maximum 8192. The adapter fixes thinking to LOW and requests
+one candidate. A truncation is a controlled error; increase a tested budget rather
+than accepting incomplete text. Responses are limited to 1 MiB per invocation.
+`GOOGLE_GEMINI_MAX_CONCURRENCY`, `GOOGLE_GEMINI_MAX_QUEUE_SIZE` and
+`GOOGLE_GEMINI_MAX_WAIT_MS` override the usual `ADMISSION_*` pool defaults.
+
+Passive readiness uses the shared lifecycle defaults: 10-minute readiness grace,
+fail-open on idle, three consecutive failures and 15-second recovery cooldown.
+It makes no paid probe and cannot certify credentials, enabled APIs or quota.
+Cloud billing caps are external and delayed; there is no local monthly ledger.
+Do not set `REWRITE_POLICY`: policy selection belongs to the future PR 3.
