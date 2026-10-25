@@ -390,7 +390,14 @@ A similar `202` contract may also use `MODEL_WARMUP_STARTED`.
 - Use streaming only when you explicitly need progressive rendering and your environment enables it.
 - Always handle `202` and `503` gracefully; do not assume the model is immediately ready after process start.
 - Provider model and protocol changes, including opt-in MiniMax M3, are internal to the bridge and do not change this request or response contract.
-- MiniMax thinking/reasoning fields are not exposed to callers.
+- MiniMax thinking/reasoning fields are not exposed to callers. Administrators may
+  select `REWRITE_MINIMAX_THINKING=disabled|adaptive` (default disabled); adaptive
+  requires MiniMax-M3/Anthropic. It is fixed at startup and independent of policy.
+  Public body/query/header settings cannot override it. JSON/NDJSON envelopes,
+  authentication, cancellation, timeouts and existing truncation semantics remain
+  unchanged. Thinking-only responses have the existing empty-content error;
+  partial text can still be successful, with `max_tokens` visible on stream terminals.
+  The configured token budget includes reasoning and answer tokens.
 
 ## 2) `POST /t2a`
 

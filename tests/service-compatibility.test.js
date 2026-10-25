@@ -378,12 +378,12 @@ test('compatibility: unregistered Ollama T2A preserves validation order and does
 });
 
 for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
-  for (const [provider, apiFormat] of [['minimax', 'legacy-chat'], ['minimax', 'anthropic'], ['ollama', 'legacy-chat']]) {
-    test(`policy: ${provider}/${apiFormat}/${policy} keeps server selection through aliases, streaming and concurrent calls`, async t => {
+  for (const [provider, apiFormat, thinking = 'disabled'] of [['minimax', 'legacy-chat'], ['minimax', 'anthropic'], ['minimax', 'anthropic', 'adaptive'], ['ollama', 'legacy-chat']]) {
+    test(`policy: ${provider}/${apiFormat}/${policy}/${thinking} keeps server selection through aliases, streaming and concurrent calls`, async t => {
       const expected = require('../services/rewrite-policies').resolveRewritePolicy(policy).instructions;
       const f = await fixture(t, { env: {
         REWRITE_PROVIDER: provider, REWRITE_POLICY: policy, REWRITE_OLLAMA_MODEL: 'policy-model',
-        REWRITE_MINIMAX_API_FORMAT: apiFormat
+        REWRITE_MINIMAX_API_FORMAT: apiFormat, REWRITE_MINIMAX_MODEL: 'MiniMax-M3', REWRITE_MINIMAX_THINKING: thinking
       }, handle: (req, res, body) => {
         if (req.url === '/ps') { json(res, 200, { models: [{ name: 'policy-model' }] }); return true; }
         if (req.url === '/anthropic/v1/messages') {
@@ -411,7 +411,7 @@ for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
       const headers = { ...AUTH, 'X-Rewrite-Policy': 'override', REWRITE_POLICY: 'override' };
       for (const route of ['/rewrite', '/api/rewrite']) {
         const results = await Promise.all([false, true].map(stream => f.request(`${route}?policy=override&REWRITE_POLICY=override`, {
-          headers, body: { text: '測試', stream, policy: 'override', rewrite_policy: 'override', REWRITE_POLICY: 'override', instructions: 'override' }
+          headers, body: { text: '測試', stream, policy: 'override', rewrite_policy: 'override', REWRITE_POLICY: 'override', instructions: 'override', thinking: { type: 'override' }, REWRITE_MINIMAX_THINKING: 'override' }
         })));
         assert.equal(results[0].status, 200);
         assert.deepEqual(await results[0].json(), { ok: true, result: '廣東話' });
@@ -426,6 +426,7 @@ for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
       assert.equal(calls.length, 4);
       for (const { body } of calls) {
         if (provider === 'minimax') {
+          if (apiFormat === 'anthropic') assert.deepEqual(body.thinking, { type: thinking });
           assert.equal(apiFormat === 'anthropic' ? body.system : body.messages.find(m => m.role === 'system').content, expected);
           assert.deepEqual(body.messages.find(m => m.role === 'user').content, apiFormat === 'anthropic'
             ? [{ type: 'text', text: '把下方文字改寫為繁體書面語：\n測試' }] : '把下方文字改寫為繁體書面語：\n測試');

@@ -1,3 +1,4 @@
+const { resolveMinimaxThinking } = require('./minimax-thinking');
 const { readWithLegacyFallback, parseEnumValue } = require('../../configuration/values');
 const DEFAULT_MINIMAX_API_FORMAT = 'legacy-chat';
 const DEFAULT_MINIMAX_ANTHROPIC_BASE_URL = 'https://api.minimax.io/anthropic';
@@ -53,6 +54,10 @@ function readConfiguration({ env = process.env, warnLegacyUsage = () => {} } = {
     warningLabel: 'minimaxAnthropicBaseUrl'
   });
 
-  return { runtime: { model: minimaxModelResolution.value, apiUrl: minimaxApiUrlResolution.value, apiFormat: minimaxApiFormatResolution.value, anthropicBaseUrl: minimaxAnthropicBaseUrlResolution.value }, sources: { minimaxModel: minimaxModelResolution.source, minimaxApiUrl: minimaxApiUrlResolution.source, minimaxApiFormat: minimaxApiFormatResolution.source, minimaxAnthropicBaseUrl: minimaxAnthropicBaseUrlResolution.source } };
+  const thinking = resolveMinimaxThinking(env.REWRITE_MINIMAX_THINKING, {
+    model: minimaxModelResolution.value, apiFormat: minimaxApiFormatResolution.value
+  });
+
+  return { runtime: { thinking, model: minimaxModelResolution.value, apiUrl: minimaxApiUrlResolution.value, apiFormat: minimaxApiFormatResolution.value, anthropicBaseUrl: minimaxAnthropicBaseUrlResolution.value }, sources: { minimaxThinking: env.REWRITE_MINIMAX_THINKING === undefined ? { type: 'default' } : { type: 'env', key: 'REWRITE_MINIMAX_THINKING' }, minimaxModel: minimaxModelResolution.source, minimaxApiUrl: minimaxApiUrlResolution.source, minimaxApiFormat: minimaxApiFormatResolution.source, minimaxAnthropicBaseUrl: minimaxAnthropicBaseUrlResolution.source } };
 }
 module.exports = { readConfiguration };

@@ -303,6 +303,16 @@ remain supported and emit startup warnings when used. The code defines no
 removal date or release window; retirement needs a separate migration decision. The docs intentionally avoid duplicating the full env table here so that
 operators have one source of truth.
 
+### Optional MiniMax reasoning
+
+`REWRITE_MINIMAX_THINKING=disabled` is the default. Administrators can opt into
+`adaptive` with MiniMax-M3 and the Anthropic-compatible protocol. Invalid settings
+or unsupported adaptive model/protocol combinations fail startup. The setting
+applies to JSON and streaming, is independent of `REWRITE_POLICY`, and cannot be
+selected by public callers. Changing it requires a restart. Keep the current
+4096-token budget and timeout for the initial trial; thinking shares that budget
+with the answer. See [deployment and rollback](docs/runbooks/minimax-thinking-trial.md).
+
 ### Opt-in MiniMax M3 rewrite
 
 MiniMax M3 is supported through MiniMax's recommended Anthropic-compatible
