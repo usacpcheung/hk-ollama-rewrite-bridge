@@ -315,12 +315,14 @@ test('legacy rewrite treats non-zero base_resp status as a controlled provider f
   assert.equal(result.error.status, 502);
 });
 
-test('anthropic rewrite uses the SDK base URL, disables thinking, and returns text blocks only', async (t) => {
+for (const thinkingMode of ['disabled', 'adaptive']) {
+test(`anthropic sync ${thinkingMode} preserves text-only response and debug privacy`, async (t) => {
   const originalFetch = global.fetch;
   t.after(() => {
     global.fetch = originalFetch;
   });
 
+  const privacyLogs = [];
   let capturedUrl = null;
   let capturedBody = null;
   global.fetch = async (url, options) => {
@@ -349,8 +351,10 @@ test('anthropic rewrite uses the SDK base URL, disables thinking, and returns te
     anthropicBaseUrl: 'http://minimax.test/anthropic',
     model: 'MiniMax-M3',
     apiFormat: 'anthropic',
+    thinking: thinkingMode,
     apiKey: 'test-key',
-    systemPrompt: '你是改寫助手'
+    systemPrompt: '你是改寫助手',
+    debugLog: event => privacyLogs.push(event)
   });
 
   const result = await provider.rewrite({
@@ -359,12 +363,13 @@ test('anthropic rewrite uses the SDK base URL, disables thinking, and returns te
     timeoutMs: 5_000
   });
 
+  assert.equal(JSON.stringify(privacyLogs).includes('hidden reasoning'), false);
   assert.equal(result.ok, true);
   assert.equal(result.data.response, '正式書面語');
   assert.deepEqual(result.data.usage, { input_tokens: 8, output_tokens: 7 });
   assert.equal(result.data.doneReason, 'end_turn');
   assert.equal(capturedUrl, 'http://minimax.test/anthropic/v1/messages');
-  assert.deepEqual(capturedBody.thinking, { type: 'disabled' });
+  assert.deepEqual(capturedBody.thinking, { type: thinkingMode });
   assert.equal(capturedBody.stream, false);
   assert.equal(capturedBody.max_tokens, 300);
   assert.equal(capturedBody.system, '你是改寫助手');
@@ -375,12 +380,13 @@ test('anthropic rewrite uses the SDK base URL, disables thinking, and returns te
   assert.equal(provider.getInfo().minimaxAnthropicBaseUrl, 'http://minimax.test/anthropic');
 });
 
-test('anthropic streaming emits text deltas, ignores thinking, and preserves usage', async (t) => {
+test(`anthropic stream ${thinkingMode} ignores reasoning and preserves usage`, async (t) => {
   const originalFetch = global.fetch;
   t.after(() => {
     global.fetch = originalFetch;
   });
 
+  const privacyLogs = [];
   let capturedUrl = null;
   let capturedBody = null;
   const debugEvents = [];
@@ -448,6 +454,7 @@ test('anthropic streaming emits text deltas, ignores thinking, and preserves usa
     anthropicBaseUrl: 'http://minimax.test/anthropic',
     model: 'MiniMax-M3',
     apiFormat: 'anthropic',
+    thinking: thinkingMode,
     apiKey: 'test-key',
     debugLog: (event) => debugEvents.push(event)
   });
@@ -459,9 +466,10 @@ test('anthropic streaming emits text deltas, ignores thinking, and preserves usa
     onChunk: async (event) => events.push(event)
   });
 
+  assert.equal(JSON.stringify(privacyLogs).includes('hidden reasoning'), false);
   assert.equal(result.ok, true);
   assert.equal(capturedUrl, 'http://minimax.test/anthropic/v1/messages');
-  assert.deepEqual(capturedBody.thinking, { type: 'disabled' });
+  assert.deepEqual(capturedBody.thinking, { type: thinkingMode });
   assert.equal(capturedBody.stream, true);
   assert.deepEqual(
     events.filter((event) => event.type === 'text').map((event) => event.text),
@@ -474,8 +482,11 @@ test('anthropic streaming emits text deltas, ignores thinking, and preserves usa
   });
   assert.equal(events.find((event) => event.type === 'done')?.reason, 'end_turn');
   assert.equal(result.data.response, '正式書面語');
+  assert.equal(JSON.stringify(debugEvents).includes('hidden reasoning'), false);
   assert.equal(debugEvents.some((event) => event.eventType === 'provider_reasoning_ignored'), true);
 });
+
+}
 
 test('anthropic rewrite maps authentication failures to the existing provider auth error', async (t) => {
   const originalFetch = global.fetch;
@@ -532,6 +543,7 @@ test('anthropic rewrite maps empty text blocks to controlled provider error', as
     anthropicBaseUrl: 'http://minimax.test/anthropic',
     model: 'MiniMax-M3',
     apiFormat: 'anthropic',
+    thinking: 'adaptive',
     apiKey: 'test-key'
   });
 
@@ -560,6 +572,7 @@ test('anthropic rewrite maps an aborted SDK request to model timeout', async (t)
     anthropicBaseUrl: 'http://minimax.test/anthropic',
     model: 'MiniMax-M3',
     apiFormat: 'anthropic',
+    thinking: 'adaptive',
     apiKey: 'test-key'
   });
 
@@ -1274,4 +1287,80 @@ test('t2a reads metadata along the selected audio ancestry without mixing siblin
     assert.equal(result.data.output.meta.provider.sourcePath, sourcePath);
     assert.deepEqual(result.data.output.meta.audio, audio);
   });
+});
+
+for (const stream of [false, true]) {
+  test(`adaptive ${stream ? 'stream' : 'sync'} cancels an in-flight SDK request without retry`, async t => {
+    const originalFetch = global.fetch;
+    t.after(() => { global.fetch = originalFetch; });
+    const caller = new AbortController();
+    let calls = 0;
+    global.fetch = async (_url, options) => {
+      calls++;
+      assert.equal(JSON.parse(options.body).thinking.type, 'adaptive');
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        caller.abort();
+      });
+    };
+    const provider = createMinimaxProvider({ model: 'MiniMax-M3', apiFormat: 'anthropic', thinking: 'adaptive', apiKey: 'test-key' });
+    const events = [];
+    const result = await provider[stream ? 'rewriteStream' : 'rewrite']({ prompt: 'test', signal: caller.signal, timeoutMs: 5000, onChunk: async event => events.push(event) });
+    assert.equal(result.ok, false);
+    assert.equal(calls, 1);
+    assert.equal(events.filter(e => e.type === 'done').length, 0);
+  });
+}
+
+test('adaptive sync preserves existing partial-text max_tokens semantics without exposing thinking', async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => new Response(JSON.stringify({ content: [{ type: 'thinking', thinking: 'private' }, { type: 'text', text: '部分' }], stop_reason: 'max_tokens', usage: { output_tokens: 4096 } }), { headers: { 'Content-Type': 'application/json' } });
+  const provider = createMinimaxProvider({ model: 'MiniMax-M3', apiFormat: 'anthropic', thinking: 'adaptive', apiKey: 'test-key' });
+  const result = await provider.rewrite({ prompt: 'test', timeoutMs: 5000, maxTokens: 4096 });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.response, '部分');
+  assert.equal(result.data.doneReason, 'max_tokens');
+  assert.equal(JSON.stringify(result).includes('private'), false);
+});
+
+for (const text of ['', '部分']) {
+  test(`adaptive stream max_tokens with ${text ? 'partial text' : 'thinking only'} preserves terminal behavior`, async t => {
+    const originalFetch = global.fetch;
+    t.after(() => { global.fetch = originalFetch; });
+    global.fetch = async () => new Response(createAnthropicSseStream([
+      { type: 'message_start', message: { id: 'truncated', type: 'message', role: 'assistant', model: 'MiniMax-M3', content: [], usage: { input_tokens: 1, output_tokens: 0 } } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'private reasoning' } },
+      ...(text ? [{ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text } }] : []),
+      { type: 'message_delta', delta: { stop_reason: 'max_tokens' }, usage: { output_tokens: 4096 } },
+      { type: 'message_stop' }
+    ].map(data => ({ event: data.type, data }))), { headers: { 'Content-Type': 'text/event-stream' } });
+    const logs = [], events = [];
+    const provider = createMinimaxProvider({ model: 'MiniMax-M3', apiFormat: 'anthropic', thinking: 'adaptive', apiKey: 'test-key', debugLog: e => logs.push(e) });
+    const result = await provider.rewriteStream({ prompt: 'test', timeoutMs: 5000, onChunk: async e => events.push(e) });
+    assert.equal(result.ok, Boolean(text));
+    assert.equal(JSON.stringify({ result, logs, events }).includes('private reasoning'), false);
+    if (text) assert.equal(events.find(e => e.type === 'done').reason, 'max_tokens');
+    else { assert.equal(result.error.code, 'PROVIDER_ERROR'); assert.equal(events.some(e => e.type === 'done'), false); }
+  });
+}
+
+test('adaptive stream deadline aborts stalled reasoning without terminal success', async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let calls = 0;
+  global.fetch = async (_url, options) => {
+    calls++;
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private"}}\n\n'));
+      options.signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
+    } }), { headers: { 'Content-Type': 'text/event-stream' } });
+  };
+  const provider = createMinimaxProvider({ model: 'MiniMax-M3', apiFormat: 'anthropic', thinking: 'adaptive', apiKey: 'test-key' });
+  const events = [];
+  const result = await provider.rewriteStream({ prompt: 'test', timeoutMs: 30, onChunk: async e => events.push(e) });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, 'MODEL_TIMEOUT');
+  assert.equal(calls, 1);
+  assert.equal(events.some(e => e.type === 'done'), false);
 });

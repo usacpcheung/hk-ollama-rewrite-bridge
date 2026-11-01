@@ -1,3 +1,4 @@
+const { resolveMinimaxThinking } = require('./configuration/minimax-thinking');
 const { createInvocationAbort } = require('../lib/invocation-abort');
 const { randomUUID } = require('crypto');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -18,6 +19,7 @@ function createMinimaxProvider({
   apiUrl,
   model,
   apiFormat = 'legacy-chat',
+  thinking = 'disabled',
   anthropicBaseUrl = 'https://api.minimax.io/anthropic',
   apiKey,
   systemPrompt,
@@ -25,6 +27,7 @@ function createMinimaxProvider({
   maxCompletionTokens = 300,
   debugLog
 }) {
+  const thinkingMode = resolveMinimaxThinking(thinking, { model, apiFormat });
   const t2aFormat = 'mp3';
   const probeBody = buildMinimaxRewriteBody({
     model,
@@ -608,7 +611,7 @@ function createMinimaxProvider({
       model,
       max_tokens: maxTokens,
       temperature: 0.15,
-      thinking: { type: 'disabled' },
+      thinking: { type: thinkingMode },
       messages: [
         {
           role: 'user',
@@ -667,7 +670,7 @@ function createMinimaxProvider({
         payload: {
           requestId: requestId || null,
           stream: false,
-          response: message
+          response: { type: message?.type, stop_reason: message?.stop_reason, usage: message?.usage }
         }
       });
 
@@ -793,6 +796,8 @@ function createMinimaxProvider({
         }
       }
 
+      // The SDK can end iteration quietly when its fetch signal is aborted.
+      if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
       if (!sawValidEvent || !sawMessageStop) {
         const error = mapError(new Error('incomplete_stream'), { kind: 'invalid_json' });
         await emit(streamErrorEvent({ error }));
@@ -827,7 +832,8 @@ function createMinimaxProvider({
         doneReason
       });
     } catch (err) {
-      const mappedError = mapAnthropicError(err);
+      const mappedError = mapAnthropicError(controller.signal.aborted
+        ? new DOMException('Aborted', 'AbortError') : err);
       await emit(streamErrorEvent({ error: mappedError }));
       return failureResult(mappedError);
     } finally {
@@ -957,6 +963,7 @@ function createMinimaxProvider({
       minimaxApiUrl: apiUrl,
       minimaxModel: model,
       minimaxApiFormat: apiFormat,
+      minimaxThinking: thinkingMode,
       minimaxAnthropicBaseUrl: anthropicBaseUrl,
       minimaxApiKeySet: Boolean(apiKey),
       minimaxSystemPrompt: systemPrompt || null,

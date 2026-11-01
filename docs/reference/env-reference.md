@@ -111,6 +111,7 @@ not silently fall back to another provider.
 | `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate Minimax rewrite model key. |
 | `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax rewrite endpoint. |
 | `REWRITE_PROVIDER_MINIMAX_API_URL` | same | Alternate Minimax rewrite endpoint key. |
+| `REWRITE_MINIMAX_THINKING` | `disabled` | Exact `disabled` or `adaptive`; empty/invalid values fail startup. Adaptive requires `MiniMax-M3` and `anthropic`. Read at startup; no public request override. |
 | `REWRITE_MINIMAX_API_FORMAT` | `legacy-chat` | Minimax rewrite protocol. Supported: `legacy-chat`, `anthropic`. |
 | `REWRITE_PROVIDER_MINIMAX_API_FORMAT` | `legacy-chat` | Alternate Minimax rewrite protocol key. |
 | `REWRITE_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimax.io/anthropic` | Base URL for the Anthropic SDK; the SDK appends `/v1/messages`. |
@@ -133,8 +134,22 @@ REWRITE_MINIMAX_MODEL=MiniMax-M3
 ```
 
 The legacy model, endpoint, and protocol remain the defaults. API format is
-never inferred from the model name. M3 thinking is explicitly disabled by the
-rewrite transport and is not configurable.
+never inferred from the model name. M3 thinking defaults to disabled. Set `REWRITE_MINIMAX_THINKING=adaptive` only
+with `MiniMax-M3` and `anthropic`; unsupported combinations fail startup. There is
+no low-effort or separate reasoning-budget setting in this integration. Restart
+is required after changing configuration. T2A and transcription do not use it.
+
+`REWRITE_MAX_COMPLETION_TOKENS` is shared by thinking and answer tokens on the
+Anthropic-compatible API. Keep the evaluated 4096 budget and existing timeout;
+values above the bridge maximum 8192 fall back to 300. A thinking-only response
+has the existing empty-content error; partial text retains existing success
+semantics (`max_tokens` terminal reason on streams), so a successful HTTP response
+alone is not proof of complete output. The JSON envelope has no new finish field.
+
+The adapter sends temperature 0.15 for compatibility, but MiniMax's current
+[API documentation](https://platform.minimax.io/docs/api-reference/text-anthropic-api)
+says M3 ignores it and uses 1. Reasoning content is excluded from response/debug
+payloads. See the [thinking trial runbook](../runbooks/minimax-thinking-trial.md).
 
 ## T2A Service And Minimax Provider
 
