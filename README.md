@@ -8,6 +8,31 @@ Node.js Express bridge that exposes AI services behind shared authentication and
 
 This README is the top-level operator and integrator guide. Start with the [documentation index](docs/README.md), or use the [API reference](docs/reference/api-reference.md) for exact endpoint contracts.
 
+## Administrator-selected rewrite policy
+
+`REWRITE_POLICY=hk-school-v2` selects candidate B from the reviewed MiniMax-M3
+A/B experiment. It uses shorter ordered instructions and asks the model to keep
+all balanced quotations verbatim, including ordinary dialogue. It is available
+for an operator-authorized limited trial, not fully language-accepted: quoted
+word changes and obligation/uncertainty errors remain known limitations. Default
+`current-v1` and the earlier `hk-school-v1` remain available. See the
+[trial runbook](docs/runbooks/rewrite-policy-b-trial.md).
+
+`REWRITE_POLICY` defaults to `current-v1`, preserving the existing instructions
+verbatim. Administrators may opt into `hk-school-v1` for faithful Cantonese and
+mixed Chinese/English rewriting in natural Hong Kong school written Chinese.
+Policy is independent of `REWRITE_PROVIDER`; this rollout evaluates MiniMax.
+The repository's provider default remains Ollama; retain your existing MiniMax
+configuration. No public request parameter, header or query selects policy.
+
+Selection is fixed until restart. Unknown or empty values fail startup. To roll
+back policy, set `REWRITE_POLICY=current-v1` and restart during maintenance.
+The school policy is implemented but awaits live language review and VPS acceptance;
+do not enable it in production solely because automated tests pass.
+See the [policy rollout](docs/architecture/rewrite-policy-rollout.md),
+[specification](docs/reference/hk-school-rewrite-specification.md) and
+[evaluation cases](docs/evaluation/README.md).
+
 ## Worksheet audio transcription (opt-in)
 
 Rejected transcription uploads retain their existing HTTP status and JSON error.
@@ -404,3 +429,11 @@ are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
 `data.wrapper.payload` variant is retained. Existing direct response candidates remain
 supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
 fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.
+
+### School-policy quotation preservation
+
+With either `hk-school-v1` or `hk-school-v2`, exact balanced input quotations that remain
+unchanged in model output are preserved through character conversion, in both JSON
+and streaming responses. Translated/changed quotations are not automatically
+restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
+[quotation specification](docs/reference/hk-school-rewrite-specification.md).

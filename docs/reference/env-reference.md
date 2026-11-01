@@ -77,6 +77,7 @@ not silently fall back to another provider.
 
 | Variable | Default | Meaning |
 |---|---:|---|
+| `REWRITE_POLICY` | `current-v1` | Exact policy ID: `current-v1` (original instructions), `hk-school-v1` (earlier school prompt A), or `hk-school-v2` (candidate B; shorter prompt, all quotes requested verbatim). Administrator-only, independent of provider, read at startup; restart required. Empty/unknown values fail startup, without fallback. No trimming or case normalization. School policies are not fully language-accepted; hk-school-v2 is available for the explicitly authorized limited trial. See the [trial runbook](../runbooks/rewrite-policy-b-trial.md). |
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`. |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–4,000; invalid or out-of-range settings fall back to 200. Worksheet starting profile: 2,000. |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192, invalid/out-of-range values fall back to 300. Worksheet starting profile: 4,096. Tokens are not characters. |
