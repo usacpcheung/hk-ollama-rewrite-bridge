@@ -80,8 +80,11 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
     const started = performance.now();
     const { controller, dispose } = createInvocationAbort(request.signal, timeoutMs);
     const signal = controller.signal;
-    const checkDeadline = () => {
+    const expireDeadline = () => {
       if (!signal.aborted && performance.now() - started >= timeoutMs) controller.abort();
+    };
+    const checkDeadline = () => {
+      expireDeadline();
       signal.throwIfAborted();
     };
     let reader;
@@ -112,6 +115,10 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
       if (!response.body) throw fault();
       reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8', { fatal: true });
+      const decodeBytes = (bytes, options) => {
+        try { return decoder.decode(bytes, options); }
+        catch { throw fault(); }
+      };
       let buffer = '';
       let received = 0;
       let text = '';
@@ -137,12 +144,12 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
         const next = await reader.read();
         checkDeadline();
         if (next.done) {
-          buffer += decoder.decode();
+          buffer += decodeBytes();
           break;
         }
         received += next.value.byteLength;
         if (received > LIMIT) throw fault();
-        buffer += decoder.decode(next.value, { stream: true });
+        buffer += decodeBytes(next.value, { stream: true });
         if (streaming) {
           let boundary;
           while (!done && (boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer))) {
@@ -161,7 +168,8 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
       if (streaming) await emit(streamDoneEvent({ reason: 'stop', usage }));
       return successResult({ response: text, usage, doneReason: 'stop' });
     } catch (error) {
-      const malformed = error instanceof SyntaxError || (error instanceof TypeError && reader);
+      expireDeadline();
+      const malformed = error instanceof SyntaxError;
       return failureResult(mapError(signal.aborted ? signal.reason : malformed ? fault() : error));
     } finally {
       dispose();

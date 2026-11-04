@@ -188,3 +188,72 @@ test('Gemini obtains a fresh credential result for successive invocations withou
   assert.equal((await p.services.rewrite.sync(request)).ok, true);
   assert.deepEqual(tokens, ['Bearer token-1', 'Bearer token-2']);
 });
+
+for (const streaming of [false, true]) {
+  test(`Gemini late transport rejection remains a timeout (streaming=${streaming})`, async () => {
+    const p = provider(async () => {
+      const until = performance.now() + 35;
+      while (performance.now() < until) {}
+      throw new TypeError('private transport details');
+    });
+    const r = await p.services.rewrite[streaming ? 'stream' : 'sync']({ ...request, timeoutMs: 10 });
+    assert.equal(r.error.code, 'MODEL_TIMEOUT');
+    assert.equal(r.error.status, 504);
+  });
+  test(`Gemini real connection reset is a transport error (streaming=${streaming})`, async t => {
+    const http = require('node:http');
+    const server = http.createServer((req, res) => {
+      req.resume();
+      res.writeHead(200);
+      res.write(streaming ? frame(payload('partial', null)) : '{');
+      setTimeout(() => res.destroy(), 30);
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    t.after(() => { server.closeAllConnections(); server.close(); });
+    const events = [];
+    const p = provider((_url, options) => fetch(`http://127.0.0.1:${server.address().port}`, options));
+    const r = await p.services.rewrite[streaming ? 'stream' : 'sync']({ ...request, onChunk: e => events.push(e) });
+    assert.equal(r.error.code, 'GEMINI_ERROR');
+    assert.equal(r.error.status, 502);
+    assert.ok(!events.some(e => e.type === 'done'));
+  });
+  test(`Gemini invalid UTF8 remains a malformed response (streaming=${streaming})`, async () => {
+    const p = provider(async () => new Response(Uint8Array.of(0xff)));
+    const r = await p.services.rewrite[streaming ? 'stream' : 'sync'](request);
+    assert.equal(r.error.code, 'GEMINI_INVALID_RESPONSE');
+  });
+}
+
+test('Gemini cancellation of one credential waiter does not cancel its concurrent peer', async () => {
+  let resolveToken; let acquisitions = 0; let calls = 0;
+  const pending = new Promise(resolve => { resolveToken = resolve; });
+  const p = createGoogleGeminiProvider({ project: 'test-project', getAccessToken: () => { acquisitions++; return pending; },
+    fetchImpl: async () => { calls++; return new Response(JSON.stringify(payload())); } });
+  const controller = new AbortController();
+  const cancelled = p.services.rewrite.sync({ ...request, signal: controller.signal });
+  const survivor = p.services.rewrite.sync(request);
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.equal((await cancelled).error.code, 'MODEL_TIMEOUT');
+  resolveToken('token');
+  assert.equal((await survivor).ok, true);
+  assert.equal(acquisitions, 1);
+  assert.equal(calls, 1);
+});
+
+test('Gemini cancels unread error bodies without waiting for provider EOF', async t => {
+  const http = require('node:http');
+  let closed;
+  const closing = new Promise(resolve => { closed = resolve; });
+  const server = http.createServer((req, res) => {
+    req.resume(); res.on('close', closed);
+    res.writeHead(429); res.write('private quota details');
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const p = provider((_url, options) => fetch(`http://127.0.0.1:${server.address().port}`, options));
+  const r = await p.services.rewrite.sync(request);
+  assert.equal(r.error.code, 'GEMINI_QUOTA_EXCEEDED');
+  assert.ok(!JSON.stringify(r).includes('private'));
+  await closing;
+});

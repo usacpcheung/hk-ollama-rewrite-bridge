@@ -100,3 +100,33 @@ for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
     }
   });
 }
+
+test('Gemini HTTP failures release admission and preserve sanitized JSON/stream error contracts', async t => {
+  const f = await fixture(t, { env: { ...env, GOOGLE_GEMINI_MAX_CONCURRENCY: '1' }, handle(req, res, body) {
+    if (!req.url.startsWith('/gemini')) return false;
+    const text = body.contents[0].parts[0].text.split('\n').at(-1);
+    if (text === 'auth') { res.writeHead(403); res.end('private credentials'); }
+    else if (text === 'quota') { res.writeHead(429); res.end('private billing'); }
+    else if (text === 'reset') {
+      res.writeHead(200); res.write(req.url === '/gemini-stream' ? 'data: ' + JSON.stringify(result('partial', null)) + '\n\n' : '{');
+      setTimeout(() => res.destroy(), 25);
+    } else if (req.url === '/gemini-stream') res.end('data: ' + JSON.stringify(result('恢復')) + '\n\n');
+    else json(res, 200, result('恢復'));
+    return true;
+  } });
+  for (const route of ['/rewrite', '/api/rewrite']) {
+    for (const stream of [false, true]) {
+      for (const [text, code] of [['auth', 'GEMINI_AUTH_ERROR'], ['quota', 'GEMINI_QUOTA_EXCEEDED'], ['reset', 'GEMINI_ERROR']]) {
+        const response = await f.request(route, { body: { text, stream } });
+        const body = await response.text();
+        assert.ok(body.includes(code), body);
+        assert.ok(!body.includes('private'));
+        if (!stream) assert.equal(JSON.parse(body).ok, false);
+        const recovery = await f.request(route, { body: { text: 'recover', stream } });
+        const recovered = await recovery.text();
+        const output = stream ? recovered.trim().split('\n').map(JSON.parse).filter(x => !x.done).map(x => x.response).join('') : JSON.parse(recovered).result;
+        assert.equal(output, '恢復', recovered);
+      }
+    }
+  }
+});

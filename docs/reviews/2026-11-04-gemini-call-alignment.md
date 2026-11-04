@@ -55,3 +55,27 @@ pending: keep MiniMax production unchanged, test the candidate on MiniMax first,
 then Gemini global with policyB/4096/60000ms and streaming enabled; demonstrate
 configuration rollback. Model quotation changes and ambiguous meaning remain
 language-review concerns. No code can guarantee improved provider availability.
+
+## Follow-up review and corrections
+
+Two confirmed adapter defects were reproduced before correction:
+
+1. **Late rejected operations bypassed elapsed deadline classification.** A fetch
+   rejection after the invocation budget, with the timer callback delayed by event
+   loop work, returned GEMINI_ERROR/502 rather than MODEL_TIMEOUT/504. The catch
+   path now checks the same monotonic deadline as the success path before mapping
+   errors. Reproductions cover both JSON and streaming with a deliberately delayed
+   transport rejection; no inference retry is introduced.
+2. **Interrupted response bodies were misclassified as malformed content.** Native
+   fetch throws TypeError when the peer drops a connection during body reading.
+   The adapter previously classified every such TypeError as invalid Gemini data.
+   UTF-8 decoding errors are now caught at the decoder itself, while connection
+   errors remain GEMINI_ERROR/502. Loopback servers reproduce a socket reset after
+   headers/partial content, for both JSON and SSE. Invalid UTF-8 still yields
+   GEMINI_INVALID_RESPONSE, and incomplete streams never emit successful done.
+
+The broader pass covers concurrent credential waiters with independent cancellation,
+quota errors with never-ending bodies, response cleanup, public HTTP authentication/
+quota/connection errors and admission recovery. Production and external providers
+are not involved in these simulations. These fixes improve error accuracy; they
+cannot eliminate upstream latency or connection failures.
