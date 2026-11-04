@@ -26,6 +26,7 @@ function buildMinimax({ serviceConfig, minimaxApiKey, debugLog, env = process.en
     apiUrl: runtime.apiUrl,
     model: runtime.model,
     apiFormat: runtime.apiFormat,
+    thinking: rewrite ? runtime.thinking : undefined,
     anthropicBaseUrl: runtime.anthropicBaseUrl,
     apiKey: minimaxApiKey ?? env.MINIMAX_API_KEY,
     systemPrompt: rewrite ? serviceConfig.instructions : undefined,
