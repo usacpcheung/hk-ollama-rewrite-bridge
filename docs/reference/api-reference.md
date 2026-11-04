@@ -801,3 +801,14 @@ restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
 quotations even for ordinary dialogue. Model compliance is not guaranteed; remaining
 meaning/quotation issues make this an operator-authorized limited trial, not full
 language acceptance. No request parameter selects it. Default remains current-v1.
+
+### Gemini evaluated request profile
+
+Gemini's provider-owned request formatting prefixes validated input with
+`把下方文字改寫為繁體書面語：\n`. The selected service policy remains the system
+instruction. Temperature 0.15 and LOW thinking are fixed adapter settings;
+output budget remains server-configured. Public fields claiming to select model,
+provider, temperature, budget, thinking or policy do not override server settings.
+JSON and NDJSON use the same profile and existing postprocessing. Request deadlines
+include authentication waiting; no new public timeout or retry behavior is added.
+See the [alignment report](../reviews/2026-11-04-gemini-call-alignment.md).
