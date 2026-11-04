@@ -3,9 +3,9 @@
 The [JSON fixture](hk-school-rewrite-cases.json) contains all 60 user-approved
 cases from the planning conversation, recorded 2026-10-24. Cases 1–15 were approved
 first (case 7 terminology explicitly accepted), followed by 16–60. Approval means
-agreement on requirements/examples, not successful execution against Gemini.
+agreement on requirements/examples, not successful execution against any provider.
 [Specification](../reference/hk-school-rewrite-specification.md) ·
-[Migration and rollout](../architecture/gemini-rewrite-migration.md).
+[Migration and rollout](../architecture/rewrite-policy-rollout.md).
 
 ## Fixture contract
 
@@ -43,17 +43,20 @@ case-specific invariants and rejection examples, not exhaustive correctness proo
 Teacher/operator judgment decides linguistic acceptance; an LLM judge may assist
 but cannot be the only authority. Record disagreements and their resolution.
 
-## Planned execution (runner belongs to PR 3)
+## Planned live execution (separate acceptance preparation)
 
-No runner, live calls or results are included in PR 1. Begin with approximately ten
+This policy PR carries the approved cases unchanged; no live calls or language
+results are included. Prepare a bounded evaluation runner separately before paid
+execution; it must not change the production policy or send hidden retries. Begin with approximately ten
 varied cases (suggested: 2, 3, 6, 7, 10, 12, 14, 41, 56, 60), review, then run all
 60. Estimate cost from current model pricing and remaining allowance before
 explicitly authorized paid batches. Bound input/output, concurrency and calls; no
 automatic retries. A cost cap may reject requests: record infrastructure failures
 separately from language failures; do not fabricate outputs or mark them passed.
 
-Compare Gemini/current-v1 and Gemini/hk-school-v1 on useful subsets and obtain
-current-provider comparisons where affordable. Record immutable code revision,
+Compare MiniMax/current-v1 and MiniMax/hk-school-v1 on useful subsets.
+Gemini provider-trial evaluation has resumed separately; see the
+[Gemini trial plan](../architecture/gemini-rewrite-migration.md). It does not change the policy rollout. Record immutable code revision,
 provider/model/location, policy ID and prompt digest, generation parameters, case
 ID, output, finish reason, latency, usage including reported reasoning tokens,
 request error, reviewer, verdict and rationale. Track estimated charges separately

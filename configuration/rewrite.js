@@ -1,3 +1,4 @@
+const { resolveRewritePolicy } = require('../services/rewrite-policies');
 const DEFAULT_MAX_TEXT_LENGTH = 200;
 const ABSOLUTE_MAX_TEXT_LENGTH = 4000;
 const DEFAULT_MAX_COMPLETION_TOKENS = 300;
@@ -15,6 +16,7 @@ function resolveRewriteConfig({
   selectedOnly = false
 }) {
   const serviceId = 'REWRITE';
+  const policy = resolveRewritePolicy(env.REWRITE_POLICY).id;
   const supportedProviders = [...new Set([...registry.providersFor('rewrite'), ...registry.providersFor('t2a')])];
 
   const warnLegacyUsage = ({ legacyKey, preferredKeys, warningLabel }) => {
@@ -182,6 +184,7 @@ function resolveRewriteConfig({
 
   return {
     provider,
+    policy,
     maxCompletionTokens: maxCompletionTokensResolution.value,
     maxTextLength: maxTextLengthResolution.value,
     timeouts: {

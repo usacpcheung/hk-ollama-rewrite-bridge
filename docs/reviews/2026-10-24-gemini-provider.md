@@ -1,5 +1,9 @@
 # Gemini rewrite adapter — PR 2 validation
 
+Historical evidence for the original adapter only. The 2026-11-04 reconciliation
+does not make these old commit pins or acceptance conclusions current. See the
+[resumed plan](../architecture/gemini-rewrite-migration.md) for remaining gates.
+
 Base: PR #139, `codex/gemini-rewrite-plan` at
 `562859ce45d4da70d0f0cc15717aa2f753641ddd`. This increment targets that branch,
 not main. Keep the stack unmerged pending maintenance acceptance and operator

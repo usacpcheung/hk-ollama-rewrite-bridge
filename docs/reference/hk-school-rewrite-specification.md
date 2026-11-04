@@ -1,8 +1,8 @@
 # Hong Kong school rewrite specification
 
-Status: user-approved requirements recorded 2026-10-24; not implemented by this PR.
-The current runtime still uses its existing policy. See the
-[migration plan](../architecture/gemini-rewrite-migration.md) and
+Status: user-approved requirements recorded 2026-10-24; implemented as opt-in
+`hk-school-v1`, pending live language acceptance. Default remains `current-v1`. See the
+[migration plan](../architecture/rewrite-policy-rollout.md) and
 [60 approved evaluation cases](../evaluation/hk-school-rewrite-cases.json).
 
 ## Purpose
@@ -81,3 +81,29 @@ Character conversion (OpenCC) is supplementary; it cannot repair misunderstood
 Cantonese, lost English terms or invented meaning. Text evaluation does not prove
 speech-recognition accuracy: recording → transcription → rewrite needs separate
 end-to-end acceptance with non-sensitive recordings.
+
+## Exact quotation conversion
+
+For `hk-school-v1`, a balanced output quotation that exactly matches a balanced
+input quotation is preserved through OpenCC conversion. Supported delimiters are
+「」, 『』, “”, ‘’, and ASCII double quotes; backslash-escaped delimiters are
+ignored. ASCII apostrophes are not delimiters because they occur in contractions.
+Nested and repeated literal quotations are supported. Changed quotations are not
+restored or repaired; the model still has to follow the semantic rules above.
+Unquoted text and nonmatching quotations receive normal character conversion.
+Unclosed delimiters are not themselves protected. Streaming uses a per-request
+buffer bounded by the longest input quotation (at most twice the configured input
+code-point limit in UTF-16 units, plus one unit), preserving eligible nested
+quotations when an outer quotation exceeds that bound. JSON and NDJSON use the
+same conversion algorithm. `current-v1` retains its original OpenCC behaviour.
+
+## Candidate B trial variant
+
+`hk-school-v2` implements the exact candidate B evaluated in the A/B experiment
+(prompt SHA256 `51f7fd33ac9c1b719124f524aa63d5a1906c816ec4b671fd7b252527381a260a`).
+It changes the dialogue rule above: all balanced quotations should remain verbatim,
+including ordinary dialogue. Existing school-only output protection applies, but
+it cannot restore quotations the model already changed. Candidate B improved some
+known cases but still failed 027 (obligation/uncertainty) and 055 (quoted words).
+The operator authorized a limited production trial despite these limitations;
+this does not constitute full language acceptance or make B the default.

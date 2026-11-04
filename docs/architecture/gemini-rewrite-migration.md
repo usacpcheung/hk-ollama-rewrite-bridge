@@ -1,167 +1,123 @@
-# Gemini rewrite migration and administrator-selected policies
+# Gemini rewrite provider trial plan
 
-Status: PR 2 implements the Gemini adapter/configuration on top of PR 1 (#139).
-The existing provider default and rewrite instruction text are unchanged. School
-policy selection and the evaluator remain future PR 3 work. Implementation is not
-VPS acceptance; keep production unchanged until the gates below pass.
-[Current runtime](runtime.md) and [environment settings](../reference/env-reference.md#google-gemini-rewrite)
-describe implemented behaviour.
+Status: resumed planning and branch reconciliation, 2026-11-04. PR #139 targets
+main; PR #140 targets `codex/gemini-rewrite-plan`. Both remain unmerged drafts.
+This document is a plan, not permission to switch production.
 
-## Purpose and boundaries
+## Accepted baseline and scope
 
-Consolidate operations on Google Cloud one service at a time, starting with
-rewriting, while improving Cantonese understanding and Hong Kong school register.
-Keep the provider-agnostic architecture: service policy supplies instructions;
-adapters translate native requests, authentication, results and errors. Gemini
-selection must not change the public API or require worksheet changes.
+Main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d` includes administrator-selected
+rewrite policies (#144), MiniMax adaptive thinking (#145), and qs 6.16.2 (#146).
+The operator reported successful deployment, 43 live acceptance checks and manual
+worksheet acceptance, followed by the identical-file-tree main switch.
+Production uses MiniMax-M3/Anthropic, `hk-school-v2`, adaptive thinking, 4096
+output tokens and a 60000 ms ready invocation deadline. These are deployment
+settings, not new repository defaults. Reverify the actual VPS before rollout.
 
-Transcription already uses Google Speech; keep it unchanged. MiniMax T2A, all nine
-voice presets, raw voice compatibility and current formats remain unchanged.
-Google TTS migration is a separate future decision. No automatic provider fallback,
-hot reload, provisioned capacity or custom exact-dollar accounting is included.
+The goal is one accepted release in which the administrator can switch rewrite
+between MiniMax and Gemini by configuration and restart. Keep public JSON/NDJSON
+interfaces, authentication, MiniMax T2A formats/voices/legacy compatibility, and
+Google transcription unchanged. No automatic fallback, inference retry, hot
+reload, Google TTS migration, or prompt revision belongs to this work.
 
-## Verified baseline and evidence limits
+Policies are already implemented and service-owned. Retain `current-v1`,
+`hk-school-v1`, and `hk-school-v2`; the trial uses the existing candidate B policy.
+See [policy rollout](rewrite-policy-rollout.md),
+[specification](../reference/hk-school-rewrite-specification.md), and
+[evaluation protocol](../evaluation/README.md). Do not reimplement a future policy
+PR or replace the accepted 60 fixtures.
 
-Repository base: `9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` (main after PRs
-131–135, 136 and 138). The operator reported final VPS automated acceptance:
-41 passed, zero failures/skips, successful worksheet web tests and zero npm audit
-vulnerabilities. This is operator-reported deployment evidence from the prior
-rollout, not a new inspection of the VPS. Recheck the actual running revision,
-configuration and deployment automation before the next release.
+## Evidence and its limits
 
-During preparation the operator confirmed the generative API was enabled, the
-VPS service identity had Speech Client and Vertex AI User roles, and one direct
-VPS request to `gemini-3.8-flash` at `global` returned HTTP 200, STOP, 38 prompt and
-9 candidate tokens with ON_DEMAND usage. This proves that request's access only;
-it does not certify streaming, sustained quota or full language quality. Global
-is not a Hong Kong data-residency guarantee. Reconfirm model lifecycle, pricing,
-location and data-processing suitability before deployment.
+Earlier direct Gemini calls had intermittent long delays. On 2026-11-04 the
+operator's global 60-case diagnostic completed 60/60 within a 60-second deadline,
+without retries: median 1.5135 s, mean 2.8072 s, maximum 29.455 s. Two requests
+exceeded 10 s (26.865 s and 29.455 s). This is one run, not sustained reliability
+proof or bridge acceptance. Its policy B SHA256 was
+`51f7fd33ac9c1b719124f524aa63d5a1906c816ec4b671fd7b252527381a260a`.
+The diagnostic used fresh HTTPS connections, a Chinese user-message prefix,
+temperature 0.15, 4096 output tokens and LOW thinking.
 
-## Administrator-only configuration contract
+Known quality concerns remain: HKS-055 changed quoted answer forms; HKS-034 used
+an accusatory translation of copying; HKS-040 narrowed an ambiguous button to a
+right-click. Review these during any limited trial. Technical success does not
+mean linguistic acceptance. Quote conversion cannot restore model-altered quotes.
+No new paid calls are authorized by editing this plan.
 
-| Setting | Intended meaning |
-|---|---|
-| `REWRITE_PROVIDER=google-gemini` | Select the new registered rewrite provider; retain existing provider default during migration |
-| `REWRITE_GOOGLE_MODEL=gemini-3.8-flash` | Initial smoke-tested model; validate against implemented native protocol |
-| `REWRITE_GOOGLE_PROJECT` | Operator's Google Cloud project |
-| `REWRITE_GOOGLE_LOCATION=global` | Initial verified endpoint location |
-| `REWRITE_POLICY=current-v1` | Exact existing production instruction text; initial default when absent |
-| `REWRITE_POLICY=hk-school-v1` | Approved school policy in the linked specification |
+## Remaining implementation gates
 
-The provider settings above are implemented in PR 2. The two `REWRITE_POLICY`
-settings in the table describe planned PR 3 behaviour, not a supported setting yet.
+The existing #140 adapter accepts service instructions, uses ADC, handles JSON/SSE,
+normalizes results and excludes thoughts. Before deployment:
 
-Policy is resolved at startup and applies consistently until restart. Invalid
-values fail startup with a clear configuration error. Public body/query/header
-fields cannot select or override it. Preserve current unknown-field handling;
-do not add an API parameter or accidentally reject previously tolerated fields.
-A policy-like caller field has no effect. Log the policy ID, not submitted text.
+- Integrate main's policy selection, quote conversion, adaptive MiniMax and security
+  changes; preserve accepted behavior when Gemini is unselected.
+- Reconcile the evaluated request with the adapter: the old adapter omits the
+  diagnostic's temperature and user prefix. Test the chosen exact wire payload.
+  Keep semantic rewrite policy in the service, not hardcoded into the adapter.
+- Prevent the misleading `us` configuration from constructing the previously
+  rejected `us-aiplatform.googleapis.com` hostname. Use verified `global` for this
+  trial; syntax-valid regional names do not prove model availability.
+- Verify all policy/provider combinations, ignored public overrides, streaming
+  quote conversion, slow bodies/reasoning, deadlines, cancellation, concurrent
+  isolation, credential refresh/recovery, quota errors and truncated answers.
+- Run complete Node 22/24 tests, audit dependencies, review comments and verify
+  unchanged T2A/transcription and authentication contracts.
 
-Both policies are service-owned and available to compatible rewrite adapters.
-Provider and policy selection are independent. Test each proposed rollback
-combination; success with Gemini does not prove school-policy quality elsewhere.
+## Intended operator profiles
 
-Preserve current-v1 verbatim from `services/rewrite.js` at the baseline revision,
-including instruction ordering and punctuation. Preserve existing OpenCC
-postprocessing and JSON/NDJSON shapes. Prompt changes cannot alter auth, limits,
-validation or output contracts. Existing APIs remain defined by the
-[API reference](../reference/api-reference.md).
+| Setting | Production/rollback | Gemini trial |
+|---|---|---|
+| `REWRITE_PROVIDER` | `minimax` | `google-gemini` |
+| `REWRITE_POLICY` | `hk-school-v2` | `hk-school-v2` |
+| `REWRITE_MAX_COMPLETION_TOKENS` | `4096` | `4096` |
+| `REWRITE_READY_INVOKE_TIMEOUT_MS` | `60000` | `60000` |
+| MiniMax model/protocol/thinking | Existing M3/Anthropic/adaptive settings | Retain for rollback; must not affect Gemini |
+| `REWRITE_GOOGLE_PROJECT` | Not needed by MiniMax | Operator's project |
+| `REWRITE_GOOGLE_LOCATION` | Not needed by MiniMax | `global` |
+| `REWRITE_GOOGLE_MODEL` | Not needed by MiniMax | `gemini-3.8-flash` |
+| Google authentication | Existing Speech credentials unchanged | Existing ADC/service identity, with verified access |
 
-## Ordered PR stack
+LOW thinking is fixed in the existing Gemini adapter; it is not an administrator
+reasoning-level selector. Preserve existing timeout and streaming settings and
+verify their resolved values. Explicitly enable streaming for streaming acceptance.
+The ready invocation deadline includes credential waiting inside the adapter;
+queue/proxy/browser limits are separate. Passive readiness proves neither billing
+access nor successful inference. Global does not guarantee Hong Kong residency.
 
-1. **PR 1 (this plan):** specification, 60 approved evaluation fixtures, rubric,
-   administrator-only selection design, migration/rollback/retirement gates.
-   Base latest verified main; no source, dependencies, tests or workflows changed.
-2. **PR 2:** branch from and target PR 1's branch. Add lazy Gemini registration,
-   configuration and ADC authentication, sync/stream translation, sanitized
-   errors, cancellation/deadline/admission behaviour and compatibility tests.
-   Keep existing prompt/default provider. Unselected Gemini must not require
-   credentials or initialize its SDK. No paid startup probes or hidden retries.
-3. **PR 3:** branch from and target PR 2's branch. Implement current-v1 and
-   hk-school-v1, administrator configuration and a bounded offline evaluator.
-   This PR must update API/env guidance and root README to distinguish the new
-   supported configuration from unchanged public requests.
+## Ordered development and rollout
 
-Future corrective increments stack on the latest open tip, never independently
-on main. Verify ancestry and GitHub base each time; ask if unclear. Keep the stack
-open until final maintenance-window acceptance and explicit merge approval.
-PRs 1 and 2 are authorized; PR 3 requires separate authorization.
-The previous provider-abstraction stack is already merged and is not this stack's
-parent. See the [original roadmap](provider-abstraction-roadmap.md) for history.
+1. Reconcile #139 with main, preserving current policy specifications and fixtures.
+2. Incorporate that branch into #140; resolve documentation conflicts without
+   discarding current production behavior. Keep both PRs as drafts.
+3. Complete the implementation gates above and prepare a pinned acceptance kit
+   that checks running provider, policy, revision, credentials privately and Node.
+4. In maintenance, back up code, dependencies, environment, systemd and proxy
+   configuration with restrictive permissions and checksums. Deploy the candidate
+   with MiniMax adaptive first; run automated and worksheet acceptance.
+5. Switch to Gemini during maintenance, restart, and run bounded live JSON,
+   streaming, concurrent, auth, T2A and transcription checks plus worksheet tests.
+6. Demonstrate switching back to MiniMax adaptive successfully.
+7. Only after explicit operator merge approval, merge #139 then retarget #140 to
+   main, verify its diff and fresh CI, merge and compare final main's file tree
+   with the accepted candidate before the VPS main switch.
+8. Keep MiniMax as the production profile until the operator chooses a limited
+   real-life Gemini trial with spending, latency and rollback criteria.
 
-## Engineering and language acceptance
+Future corrective PRs stack on the latest open tip. Do not merge the stack merely
+because the direct-provider diagnostic passed. Every restart briefly interrupts
+all services in the process. Failed activation restores the prior configuration;
+a release rollback restores dependencies as well as code. Avoid `umask 077` for
+application checkout/install; use it only for private backups/configuration.
 
-Run the full suite for implementation PRs, including real FFmpeg where available.
-Add Gemini tests for JSON and streaming, final framing, usage, authentication,
-quota/cap rejection, safety blocks, empty/malformed output, slow responses,
-disconnects, elapsed deadlines, concurrency isolation and capacity recovery.
-Do not expose provider reasoning as rewritten text. Treat cap/quota errors as
-controlled failures without retrying or falling back to another paid provider.
-A terminal truncation must not be reported as a complete successful rewrite.
+## Costs, observation and retirement
 
-Policy tests cover absent/current/school/invalid settings, caller attempts to
-select policy, independent provider selection and restart behaviour. Verify
-original current-v1 instructions exactly. Run regressions for existing providers,
-TTS, transcription, auth and all route aliases and response formats.
+Recheck current model pricing, project access and billing controls before paid
+trials. Earlier screenshots showed a $1 Vertex cap and $2 alerts-only overall
+budget; those are historical operator evidence, not a verified current allowance.
+Vertex controls do not automatically cover Speech charges, and delayed enforcement
+is not an exact combined spending guarantee. Do not disable project billing.
 
-Use the [evaluation protocol](../evaluation/README.md) and
-[approved specification](../reference/hk-school-rewrite-specification.md).
-Start with about ten varied cases, review, then execute all 60 with explicit paid
-call authorization. Compare Gemini/current and Gemini/school on a bounded subset;
-use existing-provider comparisons where useful and affordable. Full triple runs
-are not mandatory. Human language acceptance is required; exact matching or an
-LLM judge alone is insufficient. Rerun affected and previously passing cases after
-policy revisions. No unresolved meaning failures at acceptance.
-
-## Spending controls
-
-Operator screenshots show a $1 monthly Vertex AI cap in Configured state and a
-$2 alerts-only overall budget. The latter includes savings and appears billing-
-account scoped; currency and precise scope should be reconfirmed. These are
-reported controls, not settings managed by this repository. Cap alerts use
-50/80/100%; the shown overall alerts use 50/90/100%.
-
-Vertex AI cap does not cover Speech-to-Text. Enforcement is not instantaneous and
-in-flight requests can accrue charges. There is no guaranteed combined $2 ceiling.
-Do not disable project billing. Estimate evaluation costs using current prices,
-including billable reasoning where applicable, and confirm remaining allowance
-before each live batch. Rate, input, output and concurrency bounds supplement
-billing controls. Do not implement a custom monthly ledger in these PRs.
-
-References (recheck when deploying):
-- [Google spend cap scope and limitations](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
-- [Gemini model guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash)
-
-## Maintenance rollout and rollback
-
-Development and offline evaluation do not replace the running bridge or bind its
-port. Paid evaluation shares project quota/budget. Before deployment, verify no
-automatic pull/restart deployment will move production unexpectedly.
-
-Record exact running commit/configuration; preserve source, dependency, systemd,
-proxy and private-configuration backups with restrictive permissions and checksums.
-Prepare exact release and configuration rollback commands before stopping service.
-Update the acceptance launcher's pinned SHA and review provider-specific
-assumptions; do not bypass its process/checksum guards.
-
-Restrict traffic and drain active requests including transcription. Stop bridge,
-deploy exact reviewed commit, install locked dependencies, select Gemini and the
-accepted policy, and restart. This briefly interrupts all services in this process;
-it is not a zero-downtime plan. Run automated acceptance and normal worksheet
-OIDC/rewrite/TTS/transcription tests. On failure keep maintenance active and restore
-configuration or the previous release/dependencies as appropriate. End maintenance
-only after successful acceptance. With operator approval, merge PRs in order using
-history-preserving merges and verify final main's file tree equals the tested tree.
-
-## Observation and retirement
-
-Keep current-v1 and the previous provider available for an operator-chosen period
-of a few months; there is no automatic expiry. Preserve rollback credentials and
-backups securely. Configuration rollback requires restart; release rollback must
-restore dependencies as well as code/configuration.
-
-Retirement requires a separate approved PR after reviewing production quality,
-remaining users and rollback needs. Update default/migration documentation;
-explicit selection of a removed ID must fail clearly, not silently switch policy.
-Keep historical specifications/evaluation evidence. Remove compatibility code only
-after inspecting its callers/tests. TTS migration is separately planned afterward.
+Observe provider/model/policy, latency, sanitized errors and available token usage
+without logging student text or reasoning by default. Retain rollback credentials,
+profiles and backups. No automatic retirement of MiniMax or current-v1 is planned;
+retirement requires a separate decision and compatibility review.

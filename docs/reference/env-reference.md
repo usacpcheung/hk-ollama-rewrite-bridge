@@ -78,6 +78,8 @@ not silently fall back to another provider.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `REWRITE_PROVIDER` | `ollama` | Rewrite backend provider. Supported today: `ollama`, `minimax`, `google-gemini`. |
+
+| `REWRITE_POLICY` | `current-v1` | Exact policy ID: `current-v1` (original instructions), `hk-school-v1` (earlier school prompt A), or `hk-school-v2` (candidate B; shorter prompt, all quotes requested verbatim). Administrator-only, independent of provider, read at startup; restart required. Empty/unknown values fail startup, without fallback. No trimming or case normalization. School policies are not fully language-accepted; hk-school-v2 is available for the explicitly authorized limited trial. See the [trial runbook](../runbooks/rewrite-policy-b-trial.md). |
 | `REWRITE_MAX_TEXT_LENGTH` | `200` | Application input budget for usage and spending, not a provider capability limit; counts Unicode code points after trimming. Range 1–4,000; invalid or out-of-range settings fall back to 200. Worksheet starting profile: 2,000. |
 | `REWRITE_MAX_COMPLETION_TOKENS` | `300` | Completion-token budget sent to rewrite providers; range 1–8,192, invalid/out-of-range values fall back to 300. Worksheet starting profile: 4,096. Tokens are not characters. |
 | `REWRITE_READY_INVOKE_TIMEOUT_MS` | `30000` | Provider invocation timeout when rewrite is considered ready. |
@@ -110,6 +112,7 @@ not silently fall back to another provider.
 | `REWRITE_PROVIDER_MINIMAX_MODEL` | `M2-her` | Alternate Minimax rewrite model key. |
 | `REWRITE_MINIMAX_API_URL` | `https://api.minimax.io/v1/text/chatcompletion_v2` | Minimax rewrite endpoint. |
 | `REWRITE_PROVIDER_MINIMAX_API_URL` | same | Alternate Minimax rewrite endpoint key. |
+| `REWRITE_MINIMAX_THINKING` | `disabled` | Exact `disabled` or `adaptive`; empty/invalid values fail startup. Adaptive requires `MiniMax-M3` and `anthropic`. Read at startup; no public request override. |
 | `REWRITE_MINIMAX_API_FORMAT` | `legacy-chat` | Minimax rewrite protocol. Supported: `legacy-chat`, `anthropic`. |
 | `REWRITE_PROVIDER_MINIMAX_API_FORMAT` | `legacy-chat` | Alternate Minimax rewrite protocol key. |
 | `REWRITE_MINIMAX_ANTHROPIC_BASE_URL` | `https://api.minimax.io/anthropic` | Base URL for the Anthropic SDK; the SDK appends `/v1/messages`. |
@@ -132,8 +135,22 @@ REWRITE_MINIMAX_MODEL=MiniMax-M3
 ```
 
 The legacy model, endpoint, and protocol remain the defaults. API format is
-never inferred from the model name. M3 thinking is explicitly disabled by the
-rewrite transport and is not configurable.
+never inferred from the model name. M3 thinking defaults to disabled. Set `REWRITE_MINIMAX_THINKING=adaptive` only
+with `MiniMax-M3` and `anthropic`; unsupported combinations fail startup. There is
+no low-effort or separate reasoning-budget setting in this integration. Restart
+is required after changing configuration. T2A and transcription do not use it.
+
+`REWRITE_MAX_COMPLETION_TOKENS` is shared by thinking and answer tokens on the
+Anthropic-compatible API. Keep the evaluated 4096 budget and existing timeout;
+values above the bridge maximum 8192 fall back to 300. A thinking-only response
+has the existing empty-content error; partial text retains existing success
+semantics (`max_tokens` terminal reason on streams), so a successful HTTP response
+alone is not proof of complete output. The JSON envelope has no new finish field.
+
+The adapter sends temperature 0.15 for compatibility, but MiniMax's current
+[API documentation](https://platform.minimax.io/docs/api-reference/text-anthropic-api)
+says M3 ignores it and uses 1. Reasoning content is excluded from response/debug
+payloads. See the [thinking trial runbook](../runbooks/minimax-thinking-trial.md).
 
 ## T2A Service And Minimax Provider
 
@@ -348,4 +365,11 @@ Passive readiness uses the shared lifecycle defaults: 10-minute readiness grace,
 fail-open on idle, three consecutive failures and 15-second recovery cooldown.
 It makes no paid probe and cannot certify credentials, enabled APIs or quota.
 Cloud billing caps are external and delayed; there is no local monthly ledger.
-Do not set `REWRITE_POLICY`: policy selection belongs to the future PR 3.
+`REWRITE_POLICY` is already implemented and provider-independent. The trial
+uses `hk-school-v2`; preserve the existing MiniMax adaptive profile for rollback.
+
+Integration status (2026-11-04): this reconciled draft retains the old adapter
+payload (raw input, no explicit temperature, LOW thinking). It is not yet aligned
+with the recent direct diagnostic. Use global for the intended trial; the current
+location parser still accepts us and would construct a previously rejected host.
+These are pending implementation gates, not supported deployment recommendations.

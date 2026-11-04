@@ -4,7 +4,7 @@ Active references describe the implemented provider abstraction and this branch'
 The operator reported successful VPS and worksheet acceptance of
 `9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` after the dependency fixes.
 See the [Gemini migration plan](architecture/gemini-rewrite-migration.md) for the
-attributed baseline and staged rewrite migration; school policy selection remains future work. Historical
+attributed baseline and staged rewrite migration; school policy selection is implemented on main; Gemini trial integration remains pending. Historical
 validation records retain the limits applicable when they were written.
 
 The repository-wide document disposition was reviewed against main commit
@@ -20,7 +20,7 @@ or active references.
 |---|---|
 | [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Proposed PR stack, administrator-only policies and rollout gates |
 | [Gemini adapter validation](reviews/2026-10-24-gemini-provider.md) | PR 2 tests, simulations, dependency finding and live acceptance limits |
-| [School rewrite specification](reference/hk-school-rewrite-specification.md) | Approved future behaviour; not current runtime |
+| [School rewrite specification](reference/hk-school-rewrite-specification.md) | School-policy requirements and known trial limitations |
 | [Rewrite evaluation](evaluation/README.md) | 60 approved cases and human evaluation protocol |
 | [Project README](../README.md) | Service overview and quick start |
 | [API reference](reference/api-reference.md) | Current endpoints, fields, response shapes and errors |
@@ -61,3 +61,13 @@ or active references.
 This review inspected repository files only. Public proxy URLs, service-account names and deployment paths are examples to adapt; the repository cannot prove the live server configuration, external consumers, Google access/quota or voice quality.
 
 - [Runtime failure corrections and regression evidence](reviews/2026-10-07-runtime-failure-corrections.md)
+
+## Rewrite policy upgrade
+
+- [Administrator-selected policy rollout](architecture/rewrite-policy-rollout.md) — independent of paused Gemini work.
+- [Hong Kong school specification](reference/hk-school-rewrite-specification.md).
+- [Approved language evaluation cases and rubric](evaluation/README.md).
+
+- [Candidate B limited production trial](runbooks/rewrite-policy-b-trial.md) — deployment, rollback and observation.
+
+- [MiniMax thinking trial](runbooks/minimax-thinking-trial.md): opt-in acceptance and rollback, stacked on PR #144.

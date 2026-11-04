@@ -14,7 +14,7 @@ current GitHub status. This is attributed evidence, not a fresh VPS inspection.
 
 The new [Gemini rewrite migration](gemini-rewrite-migration.md) starts with
 documentation PR 1 (#139), based on current main. The separately authorized PR 2
-adds the opt-in Gemini adapter on that branch; policy selection remains PR 3 work.
+adds the opt-in Gemini adapter on that branch; policy selection is already implemented on main; see the resumed trial plan for remaining gates.
 Future PRs stack on that new plan branch and subsequent latest open tip, not the
 old Step 5 branch. Keep the new stack open until its acceptance and operator merge
 approval. No Gemini implementation is authorized by the historical roadmap.

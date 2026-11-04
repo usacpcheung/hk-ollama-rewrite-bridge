@@ -892,7 +892,7 @@ app.post(
       let streamDoneReason = 'stop';
       let finalUsage = null;
 
-      const converter = rewriteService.createStreamConverter();
+      const converter = rewriteService.createStreamConverter({ inputText: requestPayload.text });
       const streamWriter = createStreamWriter(res, { signal: cancellation.signal });
 
       let rewriteResult;
@@ -1032,7 +1032,7 @@ app.post(
       return errorResponse(res, 502, 'OLLAMA_ERROR', 'Empty model response');
     }
 
-    return writeRewriteJsonSuccess({ res, service: rewriteService, response: modelText, usage });
+    return writeRewriteJsonSuccess({ res, service: rewriteService, response: modelText, usage, inputText: requestPayload.text });
   } catch (error) {
     if (cancellation.signal.aborted || res.destroyed) return;
     if (res.headersSent) return res.destroy();
@@ -1163,6 +1163,7 @@ app.listen(PORT, HOST, () => {
       level: 'info',
       msg: 'Effective provider config',
       ...providerInfo,
+      rewritePolicy: rewriteService.policyId,
       serviceReadyTimeoutMs: rewriteService.timeouts.readyMs,
       serviceColdTimeoutMs: rewriteService.timeouts.coldMs,
       t2aInvokeTimeoutMs: t2aService.timeouts.invokeMs,

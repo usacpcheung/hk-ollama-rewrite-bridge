@@ -25,11 +25,37 @@ Select a tested budget using `REWRITE_MAX_COMPLETION_TOKENS` (maximum 8192).
 
 There are no paid startup probes, inference retries or automatic fallback.
 Readiness does not verify Google permissions, quota or model availability. The
-school policy selector/evaluator is **not implemented yet**. Keep production on
+policy selector is already implemented; the Gemini integration still needs the
+remaining gates in the trial plan. Keep production on
 its tested configuration until maintenance acceptance; provider rollback means
 restoring the previous provider configuration and restarting. See the
 [migration plan](docs/architecture/gemini-rewrite-migration.md) and
 [Gemini environment reference](docs/reference/env-reference.md#google-gemini-rewrite).
+
+## Administrator-selected rewrite policy
+
+`REWRITE_POLICY=hk-school-v2` selects candidate B from the reviewed MiniMax-M3
+A/B experiment. It uses shorter ordered instructions and asks the model to keep
+all balanced quotations verbatim, including ordinary dialogue. It is available
+for an operator-authorized limited trial, not fully language-accepted: quoted
+word changes and obligation/uncertainty errors remain known limitations. Default
+`current-v1` and the earlier `hk-school-v1` remain available. See the
+[trial runbook](docs/runbooks/rewrite-policy-b-trial.md).
+
+`REWRITE_POLICY` defaults to `current-v1`, preserving the existing instructions
+verbatim. Administrators may opt into `hk-school-v1` for faithful Cantonese and
+mixed Chinese/English rewriting in natural Hong Kong school written Chinese.
+Policy is independent of `REWRITE_PROVIDER`; this rollout evaluates MiniMax.
+The repository's provider default remains Ollama; retain your existing MiniMax
+configuration. No public request parameter, header or query selects policy.
+
+Selection is fixed until restart. Unknown or empty values fail startup. To roll
+back policy, set `REWRITE_POLICY=current-v1` and restart during maintenance.
+The school policy is implemented but awaits live language review and VPS acceptance;
+do not enable it in production solely because automated tests pass.
+See the [policy rollout](docs/architecture/rewrite-policy-rollout.md),
+[specification](docs/reference/hk-school-rewrite-specification.md) and
+[evaluation cases](docs/evaluation/README.md).
 
 ## Worksheet audio transcription (opt-in)
 
@@ -302,6 +328,16 @@ remain supported and emit startup warnings when used. The code defines no
 removal date or release window; retirement needs a separate migration decision. The docs intentionally avoid duplicating the full env table here so that
 operators have one source of truth.
 
+### Optional MiniMax reasoning
+
+`REWRITE_MINIMAX_THINKING=disabled` is the default. Administrators can opt into
+`adaptive` with MiniMax-M3 and the Anthropic-compatible protocol. Invalid settings
+or unsupported adaptive model/protocol combinations fail startup. The setting
+applies to JSON and streaming, is independent of `REWRITE_POLICY`, and cannot be
+selected by public callers. Changing it requires a restart. Keep the current
+4096-token budget and timeout for the initial trial; thinking shares that budget
+with the answer. See [deployment and rollback](docs/runbooks/minimax-thinking-trial.md).
+
 ### Opt-in MiniMax M3 rewrite
 
 MiniMax M3 is supported through MiniMax's recommended Anthropic-compatible
@@ -428,3 +464,11 @@ are `audio`, `audio_hex`, `audioHex`, and `audio_data` inside the recognized
 `data.wrapper.payload` variant is retained. Existing direct response candidates remain
 supported. Arbitrary hexadecimal metadata is not audio; unrecognized response layouts
 fail with 502 `PROVIDER_ERROR`. Output formats remain MP3/WAV/PCM without transcoding.
+
+### School-policy quotation preservation
+
+With either `hk-school-v1` or `hk-school-v2`, exact balanced input quotations that remain
+unchanged in model output are preserved through character conversion, in both JSON
+and streaming responses. Translated/changed quotations are not automatically
+restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
+[quotation specification](docs/reference/hk-school-rewrite-specification.md).
