@@ -1,11 +1,11 @@
 # Repository documentation
 
-Active references describe the implemented provider abstraction merged into main.
-The operator reported successful VPS and worksheet acceptance of
-`9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` after the dependency fixes.
-See the [Gemini migration plan](architecture/gemini-rewrite-migration.md) for the
-attributed baseline and new, not-yet-implemented rewrite migration. Historical
-validation records retain the limits applicable when they were written.
+Active references include the accepted policy, adaptive-thinking and security
+release on main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d`. The operator reported
+successful automated and worksheet acceptance. See the
+[Gemini trial plan](architecture/gemini-rewrite-migration.md) for the resumed
+#139 → #140 stack and remaining implementation gates. Historical review records
+retain their original scope and are not current deployment instructions.
 
 The repository-wide document disposition was reviewed against main commit
 `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
@@ -18,8 +18,8 @@ or active references.
 
 | Folder / document | Purpose |
 |---|---|
-| [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Proposed PR stack, administrator-only policies and rollout gates |
-| [School rewrite specification](reference/hk-school-rewrite-specification.md) | Approved future behaviour; not current runtime |
+| [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Resumed Gemini stack, integration gaps and rollout gates |
+| [School rewrite specification](reference/hk-school-rewrite-specification.md) | School-policy requirements and known trial limitations |
 | [Rewrite evaluation](evaluation/README.md) | 60 approved cases and human evaluation protocol |
 | [Project README](../README.md) | Service overview and quick start |
 | [API reference](reference/api-reference.md) | Current endpoints, fields, response shapes and errors |
