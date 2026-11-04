@@ -4,7 +4,22 @@ Status: sequence recorded in PR #130, amended in PR #132 on 2026-10-07 to keep
 the refactor stacked until VPS acceptance and operator approval. This is a plan,
 not a claim that the implementation or VPS acceptance has happened.
 
-## Immediate boundary
+## Accepted release and resumed migration (2026-11-04)
+
+Main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d` includes policy #144,
+adaptive-thinking #145 and security #146. The operator reported 43 live automated
+checks and manual worksheet acceptance on the identical-tree candidate, then
+successful main readiness/preflight and worksheet verification. This is attributed
+operator evidence, not a fresh VPS inspection.
+
+The resumed [Gemini trial plan](gemini-rewrite-migration.md) uses
+main → #139 (`codex/gemini-rewrite-plan`) → #140 (`codex/gemini-rewrite-provider`).
+Policy selection already exists. Branch reconciliation does not complete the
+adapter/configuration and combined-acceptance gates. Keep both drafts unmerged;
+future increments stack on the latest open tip. Existing production remains
+MiniMax adaptive until a separately accepted trial.
+
+## Historical immediate boundary
 
 PR #130 was merged as `668e68e4e9ad72760b28bdc5b901e4d8659a249d`.
 The operator planned to verify that commit on the VPS and pin it as production;
