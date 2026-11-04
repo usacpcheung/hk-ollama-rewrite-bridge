@@ -1,11 +1,12 @@
 # Repository documentation
 
-Active references describe the implemented provider abstraction and this branch's opt-in Gemini rewrite adapter.
-The operator reported successful VPS and worksheet acceptance of
-`9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc` after the dependency fixes.
-See the [Gemini migration plan](architecture/gemini-rewrite-migration.md) for the
-attributed baseline and staged rewrite migration; school policy selection is implemented on main; Gemini trial integration remains pending. Historical
-validation records retain the limits applicable when they were written.
+Active references include the accepted policy, adaptive-thinking and security
+release on main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d`. The operator reported
+successful automated and worksheet acceptance. See the
+[Gemini trial plan](architecture/gemini-rewrite-migration.md) for the resumed
+#139 → #140 stack and remaining implementation gates. Historical review records
+retain their original scope and are not current deployment instructions. The
+[original Gemini adapter review](reviews/2026-10-24-gemini-provider.md) is historical evidence only.
 
 The repository-wide document disposition was reviewed against main commit
 `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
@@ -18,8 +19,7 @@ or active references.
 
 | Folder / document | Purpose |
 |---|---|
-| [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Proposed PR stack, administrator-only policies and rollout gates |
-| [Gemini adapter validation](reviews/2026-10-24-gemini-provider.md) | PR 2 tests, simulations, dependency finding and live acceptance limits |
+| [Gemini rewrite migration](architecture/gemini-rewrite-migration.md) | Resumed Gemini stack, integration gaps and rollout gates |
 | [School rewrite specification](reference/hk-school-rewrite-specification.md) | School-policy requirements and known trial limitations |
 | [Rewrite evaluation](evaluation/README.md) | 60 approved cases and human evaluation protocol |
 | [Project README](../README.md) | Service overview and quick start |

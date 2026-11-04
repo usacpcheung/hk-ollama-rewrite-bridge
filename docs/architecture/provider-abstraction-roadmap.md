@@ -4,20 +4,20 @@ Status: sequence recorded in PR #130, amended in PR #132 on 2026-10-07 to keep
 the refactor stacked until VPS acceptance and operator approval. This is a plan,
 not a claim that the implementation or VPS acceptance has happened.
 
-## Accepted release and next migration (2026-10-24)
+## Accepted release and resumed migration (2026-11-04)
 
-The original stack #131–#135 and dependency fixes #136/#138 are merged into main
-at `9bb1e59315eb959b0e2895bcfa7e02b50e81ebfc`. The operator reported 41 automated
-VPS checks, worksheet web acceptance and a clean dependency audit. Earlier open-PR
-and pending-acceptance statements below describe the historical sequence, not
-current GitHub status. This is attributed evidence, not a fresh VPS inspection.
+Main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d` includes policy #144,
+adaptive-thinking #145 and security #146. The operator reported 43 live automated
+checks and manual worksheet acceptance on the identical-tree candidate, then
+successful main readiness/preflight and worksheet verification. This is attributed
+operator evidence, not a fresh VPS inspection.
 
-The new [Gemini rewrite migration](gemini-rewrite-migration.md) starts with
-documentation PR 1 (#139), based on current main. The separately authorized PR 2
-adds the opt-in Gemini adapter on that branch; policy selection is already implemented on main; see the resumed trial plan for remaining gates.
-Future PRs stack on that new plan branch and subsequent latest open tip, not the
-old Step 5 branch. Keep the new stack open until its acceptance and operator merge
-approval. No Gemini implementation is authorized by the historical roadmap.
+The resumed [Gemini trial plan](gemini-rewrite-migration.md) uses
+main → #139 (`codex/gemini-rewrite-plan`) → #140 (`codex/gemini-rewrite-provider`).
+Policy selection already exists. Branch reconciliation does not complete the
+adapter/configuration and combined-acceptance gates. Keep both drafts unmerged;
+future increments stack on the latest open tip. Existing production remains
+MiniMax adaptive until a separately accepted trial.
 
 ## Historical immediate boundary
 
