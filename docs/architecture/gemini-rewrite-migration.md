@@ -121,3 +121,11 @@ Observe provider/model/policy, latency, sanitized errors and available token usa
 without logging student text or reasoning by default. Retain rollback credentials,
 profiles and backups. No automatic retirement of MiniMax or current-v1 is planned;
 retirement requires a separate decision and compatibility review.
+
+## Step 3 implementation status
+
+The increment stacked on #140 implements payload alignment, rejects invalid
+multi-region hostnames, and adds combined policy/provider and deadline tests.
+See the [alignment report](../reviews/2026-11-04-gemini-call-alignment.md).
+The remaining gates above continue to govern broader validation and live acceptance;
+implementation does not authorize switching production or merging the stack.

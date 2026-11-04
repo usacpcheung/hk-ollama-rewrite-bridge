@@ -47,7 +47,7 @@ test('Gemini slow response/caller disconnect releases capacity and subsequent co
   let aborted = 0;
   const f = await fixture(t, { env: { ...env, REWRITE_READY_INVOKE_TIMEOUT_MS: '100', REWRITE_COLD_INVOKE_TIMEOUT_MS: '100', GOOGLE_GEMINI_MAX_CONCURRENCY: '1' }, handle(req, res, body) {
     if (!req.url.startsWith('/gemini')) return false;
-    const text = body.contents[0].parts[0].text;
+    const text = body.contents[0].parts[0].text.replace(/^把下方文字改寫為繁體書面語：\n/, '');
     if (text === 'slow') { res.once('close', () => { aborted++; }); return true; }
     json(res, 200, result(text)); return true;
   } });
@@ -62,7 +62,7 @@ test('Gemini slow response/caller disconnect releases capacity and subsequent co
     headers: { ...AUTH, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'slow' }), signal: controller.signal });
   const rejection = assert.rejects(disconnected, { name: 'AbortError' });
   const started = Date.now();
-  while (f.calls.filter(c => c.body.contents?.[0]?.parts?.[0]?.text === 'slow').length < 2) {
+  while (f.calls.filter(c => c.body.contents?.[0]?.parts?.[0]?.text === '把下方文字改寫為繁體書面語：\nslow').length < 2) {
     assert.ok(Date.now() - started < 2000, 'second upstream request starts');
     await new Promise(resolve => setTimeout(resolve, 2));
   }
@@ -71,3 +71,32 @@ test('Gemini slow response/caller disconnect releases capacity and subsequent co
   assert.equal((await recovered.json()).result, '恢復');
   assert.equal(aborted, 2);
 });
+
+for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
+  test(`Gemini uses server policy ${policy} with retained MiniMax adaptive settings`, async t => {
+    const { resolveRewritePolicy } = require('../services/rewrite-policies');
+    const f = await fixture(t, { env: { ...env, REWRITE_POLICY: policy,
+      REWRITE_MINIMAX_MODEL: 'MiniMax-M3', REWRITE_MINIMAX_API_FORMAT: 'anthropic',
+      REWRITE_MINIMAX_THINKING: 'adaptive', REWRITE_MAX_COMPLETION_TOKENS: '4096' }, handle(req, res, body) {
+      if (!req.url.startsWith('/gemini')) return false;
+      assert.equal(body.systemInstruction.parts[0].text, resolveRewritePolicy(policy).instructions);
+      assert.equal(body.contents[0].parts[0].text, '把下方文字改寫為繁體書面語：\n老師說「里面」');
+      assert.deepEqual(body.generationConfig, { temperature: 0.15, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } });
+      if (req.url === '/gemini-stream') res.end('data: ' + JSON.stringify(result('老師說「里面」')) + '\n\n');
+      else json(res, 200, result('老師說「里面」'));
+      return true;
+    } });
+    for (const route of ['/rewrite', '/api/rewrite']) {
+      const responses = await Promise.all([false, true].map(stream => f.request(route, { body: {
+        text: '老師說「里面」', stream, policy: 'invalid', provider: 'minimax',
+        temperature: 2, thinkingLevel: 'HIGH', maxOutputTokens: 1,
+      } })));
+      const plain = await responses[0].json();
+      const frames = (await responses[1].text()).trim().split('\n').map(JSON.parse);
+      assert.equal(plain.ok, true);
+      assert.equal(frames.filter(x => x.done).length, 1);
+      assert.equal(frames.filter(x => !x.done).map(x => x.response).join(''), plain.result);
+      if (policy !== 'current-v1') assert.equal(plain.result, '老師説「里面」');
+    }
+  });
+}

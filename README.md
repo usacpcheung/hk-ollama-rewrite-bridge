@@ -26,7 +26,7 @@ Select a tested budget using `REWRITE_MAX_COMPLETION_TOKENS` (maximum 8192).
 There are no paid startup probes, inference retries or automatic fallback.
 Readiness does not verify Google permissions, quota or model availability. The
 policy selector is already implemented; the Gemini integration still needs the
-remaining gates in the trial plan. Keep production on
+remaining live-acceptance gates in the trial plan. Keep production on
 its tested configuration until maintenance acceptance; provider rollback means
 restoring the previous provider configuration and restarting. See the
 [migration plan](docs/architecture/gemini-rewrite-migration.md) and
@@ -472,3 +472,13 @@ unchanged in model output are preserved through character conversion, in both JS
 and streaming responses. Translated/changed quotations are not automatically
 restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
 [quotation specification](docs/reference/hk-school-rewrite-specification.md).
+
+### Gemini API-call alignment
+
+The opt-in Gemini adapter now uses the evaluated Chinese user-message prefix,
+temperature 0.15 and LOW thinking, with policy instructions still owned by the
+rewrite service. Use `REWRITE_GOOGLE_LOCATION=global` for the trial; `us`/`eu`
+are rejected instead of building invalid multi-region hostnames. Explicit empty
+model/location settings fail startup. MiniMax adaptive and public API fields are
+unchanged. This is not a production-switch instruction: see the
+[change and validation report](docs/reviews/2026-11-04-gemini-call-alignment.md).

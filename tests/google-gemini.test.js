@@ -28,7 +28,8 @@ test('Gemini sends neutral instructions/input to Vertex and normalizes usage', a
   assert.match(call[0], /locations\/global\/publishers\/google\/models\/gemini-3.8-flash:generateContent$/);
   const body = JSON.parse(call[1].body);
   assert.equal(body.systemInstruction.parts[0].text, request.instructions);
-  assert.equal(body.contents[0].parts[0].text, request.text);
+  assert.equal(body.contents[0].parts[0].text, '把下方文字改寫為繁體書面語：\n' + request.text);
+  assert.equal(body.generationConfig.temperature, 0.15);
   assert.equal(body.generationConfig.maxOutputTokens, 300);
   assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'LOW');
   assert.equal(call[1].redirect, 'error');
@@ -115,4 +116,75 @@ test('Gemini accepts multiline SSE data and excludes thought chunks', async () =
   const r = await stream(frame(thought) + terminal);
   assert.equal(r.result.ok, true); assert.equal(r.result.data.response, '完成');
   assert.deepEqual(r.events.map(x => x.type), ['text', 'done']); assert.ok(!JSON.stringify(r).includes('secret'));
+});
+
+for (const location of ['us', 'eu', '', ' global', 'global ', 'global/other']) {
+  test(`Gemini rejects unsupported location ${JSON.stringify(location)} before authentication`, () => {
+    assert.throws(() => createGoogleGeminiProvider({ project: 'test-project', location }), /REWRITE_GOOGLE_LOCATION/);
+  });
+}
+test('Google configuration defaults only absent model/location values', () => {
+  const { readConfiguration } = require('../providers/configuration/google-rewrite');
+  assert.equal(readConfiguration({ env: {} }).runtime.location, 'global');
+  for (const env of [{ REWRITE_GOOGLE_LOCATION: '' }, { REWRITE_GOOGLE_MODEL: '' }]) {
+    assert.throws(() => createGoogleGeminiProvider({ ...readConfiguration({ env }).runtime, project: 'test-project' }));
+  }
+});
+for (const streaming of [false, true]) {
+  test(`Gemini diagnostic wire profile (streaming=${streaming})`, async () => {
+    const { resolveRewritePolicy } = require('../services/rewrite-policies');
+    const instructions = resolveRewritePolicy('hk-school-v2').instructions;
+    const p = provider(async (url, options) => {
+      assert.equal(url, 'https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/publishers/google/models/gemini-3.8-flash:' + (streaming ? 'streamGenerateContent?alt=sse' : 'generateContent'));
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers.Authorization, 'Bearer synthetic-token');
+      assert.equal(options.headers['Content-Type'], 'application/json');
+      assert.equal(options.redirect, 'error');
+      assert.deepEqual(JSON.parse(options.body), {
+        systemInstruction: { parts: [{ text: instructions }] },
+        contents: [{ role: 'user', parts: [{ text: '把下方文字改寫為繁體書面語：\n我唔明' }] }],
+        generationConfig: { temperature: 0.15, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } }
+      });
+      return new Response(streaming ? frame(payload()) : JSON.stringify(payload()));
+    });
+    const r = await p.services.rewrite[streaming ? 'stream' : 'sync']({ ...request, instructions, outputBudget: 4096 });
+    assert.equal(r.ok, true);
+  });
+}
+test('Gemini rejects late credential completion even before timer callbacks run', async () => {
+  let calls = 0;
+  const p = createGoogleGeminiProvider({ project: 'test-project', getAccessToken: async () => {
+    const end = performance.now() + 30;
+    while (performance.now() < end) {} // Simulate synchronous SDK/event-loop delay.
+    return 'token';
+  }, fetchImpl: async () => { calls++; return new Response(JSON.stringify(payload())); } });
+  assert.equal((await p.services.rewrite.sync({ ...request, timeoutMs: 10 })).error.code, 'MODEL_TIMEOUT');
+  assert.equal(calls, 0);
+});
+for (const streaming of [false, true]) {
+  test(`Gemini real fetch stalled body respects deadline (streaming=${streaming})`, async t => {
+    const http = require('node:http');
+    const server = http.createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { 'Content-Type': streaming ? 'text/event-stream' : 'application/json' });
+      res.write(streaming ? frame({ candidates: [{ content: { parts: [{ thought: true, text: 'private' }] } }] }) : '{');
+    });
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    t.after(() => { server.closeAllConnections(); server.close(); });
+    const events = [];
+    const p = provider((_url, options) => fetch(`http://127.0.0.1:${server.address().port}`, options));
+    const r = await p.services.rewrite[streaming ? 'stream' : 'sync']({ ...request, timeoutMs: 150, onChunk: event => events.push(event) });
+    assert.equal(r.error.code, 'MODEL_TIMEOUT');
+    assert.deepEqual(events, []);
+  });
+}
+test('Gemini obtains a fresh credential result for successive invocations without inference replay', async () => {
+  let acquired = 0; const tokens = [];
+  const p = createGoogleGeminiProvider({ project: 'test-project', getAccessToken: async () => `token-${++acquired}`, fetchImpl: async (_url, options) => {
+    tokens.push(options.headers.Authorization);
+    return new Response(JSON.stringify(payload()), { status: tokens.length === 1 ? 401 : 200 });
+  } });
+  assert.equal((await p.services.rewrite.sync(request)).error.code, 'GEMINI_AUTH_ERROR');
+  assert.equal((await p.services.rewrite.sync(request)).ok, true);
+  assert.deepEqual(tokens, ['Bearer token-1', 'Bearer token-2']);
 });
