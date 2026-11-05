@@ -834,7 +834,8 @@ Google's 24000 Hz mono PCM16 WAV and converts it into requested MP3/WAV/raw PCM1
 WAV/PCM support integer sample rates 8000–48000. MP3 rates are 8000, 11025, 12000,
 16000, 22050, 24000, 32000, 44100, 48000; bitrate must be a supported MPEG bitrate
 (32,40,48,56,64,80,96,112,128,160,192,224,256,320 kbps). Rates below 32000 Hz
-allow at most 160 kbps; rates at least 32000 exclude 40/56 kbps. Unsupported
+allow at most 160 kbps, and rates below 16000 Hz allow at most 64 kbps;
+rates at least 32000 exclude 40/56 kbps. Unsupported
 combinations fail before synthesis. Bitrate has no effect on uncompressed WAV/PCM.
 
 Default TTS deadline is still 30000 ms, covering credentials, synthesis and conversion

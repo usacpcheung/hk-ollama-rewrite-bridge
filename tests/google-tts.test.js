@@ -63,3 +63,38 @@ test('active conversion child is stopped on caller cancellation',async()=>{
 test('WAV cannot contain truncated chunks or inconsistent PCM headers',()=>{
  for(const mutate of [b=>b.writeUInt32LE(999999,40),b=>b.writeUInt16LE(2,22),b=>b.writeUInt32LE(48000,24)]){const b=wav();mutate(b);assert.throws(()=>validateWav(b));}
 });
+test('long valid audio base64 does not overflow the validator stack',async()=>{
+ const b=Buffer.alloc(44+5760000);wav().copy(b,0,0,44);b.writeUInt32LE(b.length-8,4);b.writeUInt32LE(b.length-44,40);
+ const body=payload();body.candidates[0].content.parts[0].inlineData.data=b.toString('base64');
+ const r=await make({fetchImpl:async()=>new Response(JSON.stringify(body)),convert:async input=>{validateWav(input);return Buffer.from('converted');}}).services.t2a.sync({...request,timeoutMs:5000});
+ assert.equal(r.ok,true,JSON.stringify(r));
+});
+test('MPEG 2.5 cannot silently downgrade requested bitrates',()=>{
+ for(const sampleRate of [8000,11025,12000]){
+  assert.equal(policy.validateAudio({...request.audio,sampleRate,bitrate:128000}).ok,false);
+  assert.equal(policy.validateAudio({...request.audio,sampleRate,bitrate:64000}).ok,true);
+ }
+});
+test('credential failure recovers without retrying inference',async()=>{
+ let auth=0,calls=0;const p=make({getAccessToken:async()=>{if(++auth===1)throw Error('private');return 'token';},fetchImpl:async()=>{calls++;return new Response(JSON.stringify(payload()));},convert:async()=>Buffer.from('audio')});
+ assert.equal((await p.services.t2a.sync(request)).error.code,'GEMINI_AUTH_ERROR');assert.equal(calls,0);
+ assert.equal((await p.services.t2a.sync(request)).ok,true);assert.equal(calls,1);
+});
+test('oversized body cancels the reader and skips conversion',async()=>{
+ let cancelled=false,converted=false;
+ const p=make({fetchImpl:async()=>new Response(new ReadableStream({start(c){c.enqueue(Buffer.alloc(20*1024*1024+1));},cancel(){cancelled=true;}})),convert:async()=>{converted=true;return Buffer.from('bad');}});
+ assert.equal((await p.services.t2a.sync(request)).ok,false);assert.equal(converted,false);assert.equal(cancelled,true);
+});
+test('conversion output limit and permission failures settle safely',async()=>{
+ const {runConversion}=require('../lib/tts-audio');
+ await assert.rejects(runConversion(process.execPath,['-e',"process.stdin.resume();process.stdout.write(Buffer.alloc(25*1024*1024));"],Buffer.from('x'),new AbortController().signal),/AUDIO_TOO_LARGE/);
+ await assert.rejects(runConversion('/tmp',[],Buffer.from('x'),new AbortController().signal),/AUDIO_PROCESSOR_UNAVAILABLE/);
+});
+test('malformed base64 rejected without conversion',async()=>{
+ for(const value of ['AA=A','A===','AAAA\n','AB==']){
+  const b=payload();b.candidates[0].content.parts[0].inlineData.data=value;
+  let converted=false;
+  const r=await make({fetchImpl:async()=>new Response(JSON.stringify(b)),convert:async()=>{converted=true;throw Error('must not convert');}}).services.t2a.sync(request);
+  assert.equal(r.ok,false);assert.equal(converted,false);
+ }
+});

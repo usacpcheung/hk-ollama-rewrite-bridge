@@ -41,3 +41,18 @@ test('Gemini rewrite and TTS coexist, share admission, and accept the configured
  const count=f.calls.length;
  assert.equal((await f.request('/t2a',{body:{text:'字'.repeat(1001)}})).status,413);assert.equal(f.calls.length,count);
 });
+test('Gemini client disconnect cancels synthesis and releases provider admission',async t=>{
+ const {AUTH}=require('../test-support/server-fixture');let closed=false,started;
+ const upstreamStarted=new Promise(r=>started=r);
+ const f=await fixture(t,{env:{...env,GOOGLE_GEMINI_MAX_CONCURRENCY:'1'},handle(req,res,body){
+  if(req.url!=='/gemini')return false;
+  if(body.contents[0].parts[0].text==='disconnect'){res.once('close',()=>{closed=true;});started();return true;}
+  json(res,200,payload());return true;
+ }});
+ const c=new AbortController();const promise=fetch('http://127.0.0.1:3001/t2a',{method:'POST',headers:{...AUTH,'Content-Type':'application/json'},body:JSON.stringify({text:'disconnect'}),signal:c.signal});
+ const rejection=assert.rejects(promise,{name:'AbortError'});await upstreamStarted;c.abort();await rejection;
+ const r=await f.request('/api/t2a');assert.equal(r.status,200);await r.arrayBuffer();assert.equal(closed,true);
+ const count=f.calls.length;
+ assert.equal((await f.request('/api/t2a',{body:{text:'test',sample_rate:8000,bitrate:128000}})).status,400);
+ assert.equal(f.calls.length,count);
+});

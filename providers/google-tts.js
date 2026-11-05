@@ -80,8 +80,11 @@ function createGoogleTTSProvider({ project, location = 'global', model = 'gemini
       if (candidate.finishReason !== 'STOP' || !Array.isArray(parts) || parts.length !== 1) throw Error('INCOMPLETE_AUDIO');
       const inline = parts[0]?.inlineData;
       if (!inline || !['audio/wav','audio/x-wav'].includes(inline.mimeType) || typeof inline.data !== 'string'
-        || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(inline.data)) throw Error('INVALID_AUDIO');
+        || !inline.data.length || inline.data.length % 4 !== 0) throw Error('INVALID_AUDIO');
       const input = Buffer.from(inline.data,'base64');
+      // Round-trip validation is bounded by the response limit and avoids regex
+      // recursion on multi-megabyte audio. Also reject ignored bytes/bad padding.
+      if (input.toString('base64') !== inline.data) throw Error('INVALID_AUDIO');
       check();
       const data = await convert(input, request.audio, { signal, ffmpeg });
       check();
