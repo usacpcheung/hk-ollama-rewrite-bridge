@@ -482,3 +482,15 @@ are rejected instead of building invalid multi-region hostnames. Explicit empty
 model/location settings fail startup. MiniMax adaptive and public API fields are
 unchanged. This is not a production-switch instruction: see the
 [change and validation report](docs/reviews/2026-11-04-gemini-call-alignment.md).
+
+## Opt-in Gemini TTS (stacked trial)
+
+Gemini TTS is available through `T2A_PROVIDER=google-gemini`, with separate
+`T2A_GOOGLE_PROJECT`, `T2A_GOOGLE_LOCATION=global`, and
+`T2A_GOOGLE_MODEL=gemini-3.8-flash-tts` settings. MiniMax remains the default.
+Existing Google credentials and FFmpeg are required. Public routes, nine voice
+choices, MP3/WAV/PCM and binary/base64 responses remain available. Gemini rejects
+legacy raw voice/speed/pitch/volume/language controls; audit callers before switching.
+See [the integration and acceptance plan](docs/architecture/gemini-tts-migration.md)
+for the approved presets, format restrictions, limits and rollback procedure.
+No production deployment or automatic fallback is enabled by this change.

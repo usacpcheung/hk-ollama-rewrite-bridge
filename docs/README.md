@@ -71,3 +71,5 @@ This review inspected repository files only. Public proxy URLs, service-account 
 - [Candidate B limited production trial](runbooks/rewrite-policy-b-trial.md) — deployment, rollback and observation.
 
 - [MiniMax thinking trial](runbooks/minimax-thinking-trial.md): opt-in acceptance and rollback, stacked on PR #144.
+
+- [Gemini TTS integration and acceptance](architecture/gemini-tts-migration.md)
