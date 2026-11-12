@@ -356,7 +356,7 @@ An SDK credential operation cannot itself be cancelled through this interface.
 Existing rewrite input limits, invocation deadlines and streaming opt-in apply.
 `REWRITE_MAX_COMPLETION_TOKENS` controls Gemini `maxOutputTokens`, including
 thinking; default 300, maximum 8192. The adapter fixes thinking to LOW and requests
-one candidate. A truncation is a controlled error; increase a tested budget rather
+the API default single candidate. A truncation is a controlled error; increase a tested budget rather
 than accepting incomplete text. Responses are limited to 1 MiB per invocation.
 `GOOGLE_GEMINI_MAX_CONCURRENCY`, `GOOGLE_GEMINI_MAX_QUEUE_SIZE` and
 `GOOGLE_GEMINI_MAX_WAIT_MS` override the usual `ADMISSION_*` pool defaults.
@@ -368,8 +368,17 @@ Cloud billing caps are external and delayed; there is no local monthly ledger.
 `REWRITE_POLICY` is already implemented and provider-independent. The trial
 uses `hk-school-v2`; preserve the existing MiniMax adaptive profile for rollback.
 
-Integration status (2026-11-04): this reconciled draft retains the old adapter
-payload (raw input, no explicit temperature, LOW thinking). It is not yet aligned
-with the recent direct diagnostic. Use global for the intended trial; the current
-location parser still accepts us and would construct a previously rejected host.
-These are pending implementation gates, not supported deployment recommendations.
+API-call alignment (2026-11-04): Gemini sends the selected service policy as
+`systemInstruction`, and `把下方文字改寫為繁體書面語：\n` followed by input as the
+user message. Temperature 0.15 and LOW thinking are provider-owned fixed settings;
+callers cannot override them. `REWRITE_MAX_COMPLETION_TOKENS` remains the admin
+budget. Explicitly empty model/location values fail rather than choosing defaults.
+Location must be `global` or a regional-ID shape (for example `asia-east1`).
+`us` and `eu` are rejected because this adapter does not implement their multi-region
+routing. A syntactically valid region does not establish model availability.
+
+Use `global` for the evaluated trial. Existing Node fetch transport is retained;
+the diagnostic's fresh HTTPS connection behavior is not reproduced. The invocation
+deadline includes credential acquisition, unlike the diagnostic's inference-only
+timer. These differences require live bridge acceptance. See the
+[alignment review](../reviews/2026-11-04-gemini-call-alignment.md).

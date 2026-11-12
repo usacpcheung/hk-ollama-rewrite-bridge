@@ -1,6 +1,8 @@
 const { createInvocationAbort } = require('../lib/invocation-abort');
 const { successResult, failureResult, streamTextEvent, streamDoneEvent } = require('../lib/bridge-contract');
 
+const { performance } = require('node:perf_hooks');
+const USER_PREFIX = '把下方文字改寫為繁體書面語：\n';
 const LIMIT = 1024 * 1024;
 const fault = (code = 'GEMINI_INVALID_RESPONSE', status = 502, message = 'Invalid Gemini response.') =>
   Object.assign(new Error(message), { bridgeError: { code, status, message } });
@@ -47,7 +49,8 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
   fetchImpl = globalThis.fetch, getAccessToken } = {}) {
   if (sdkLogging) throw new Error('Unset GOOGLE_SDK_NODE_LOGGING when Google rewriting is selected.');
   if (!project || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(project)) throw new Error('REWRITE_GOOGLE_PROJECT must be a Google project ID or number.');
-  if (!/^[a-z][a-z0-9-]{0,62}$/.test(location)) throw new Error('Invalid REWRITE_GOOGLE_LOCATION.');
+  if (location !== 'global' && !/^[a-z]+(?:-[a-z]+)+[0-9]+$/.test(location))
+    throw new Error('REWRITE_GOOGLE_LOCATION must be global or a regional ID; us/eu multi-region hostnames are not supported.');
   if (!/^gemini-[a-z0-9][a-z0-9.-]{0,100}$/.test(model)) throw new Error('Invalid REWRITE_GOOGLE_MODEL.');
   const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
   const endpoint = `https://${host}/v1/projects/${project}/locations/${location}/publishers/google/models/${model}`;
@@ -73,27 +76,37 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
     return { code: 'GEMINI_ERROR', status: 502, message: 'Failed to reach Gemini.' };
   }
   async function invoke(request, streaming) {
-    const { controller, dispose } = createInvocationAbort(request.signal, request.timeoutMs ?? 30000);
+    const timeoutMs = request.timeoutMs ?? 30000;
+    const started = performance.now();
+    const { controller, dispose } = createInvocationAbort(request.signal, timeoutMs);
     const signal = controller.signal;
+    const expireDeadline = () => {
+      if (!signal.aborted && performance.now() - started >= timeoutMs) controller.abort();
+    };
+    const checkDeadline = () => {
+      expireDeadline();
+      signal.throwIfAborted();
+    };
     let reader;
     try {
-      signal.throwIfAborted();
+      checkDeadline();
       let accessToken;
       try { accessToken = await waitFor(token(), signal); }
       catch (error) {
-        signal.throwIfAborted();
+        checkDeadline();
         throw fault('GEMINI_AUTH_ERROR', 503, 'Google credentials could not authorize rewriting.');
       }
-      signal.throwIfAborted();
+      checkDeadline();
       if (typeof accessToken !== 'string' || !accessToken) throw fault('GEMINI_AUTH_ERROR', 503, 'Google credentials could not authorize rewriting.');
       const response = await fetchImpl(`${endpoint}:${streaming ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, {
         method: 'POST', redirect: 'error', signal,
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ systemInstruction: { parts: [{ text: request.instructions }] },
-          contents: [{ role: 'user', parts: [{ text: request.text }] }],
-          generationConfig: { candidateCount: 1, maxOutputTokens: request.outputBudget,
+          contents: [{ role: 'user', parts: [{ text: USER_PREFIX + request.text }] }],
+          generationConfig: { temperature: 0.15, maxOutputTokens: request.outputBudget,
             thinkingConfig: { thinkingLevel: 'LOW' } } })
       });
+      checkDeadline();
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) throw fault('GEMINI_AUTH_ERROR', 503, 'Google denied the rewrite request; check permissions and billing controls.');
         if (response.status === 429) throw fault('GEMINI_QUOTA_EXCEEDED', 429, 'Google rewrite quota or spending limit reached.');
@@ -102,15 +115,19 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
       if (!response.body) throw fault();
       reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8', { fatal: true });
+      const decodeBytes = (bytes, options) => {
+        try { return decoder.decode(bytes, options); }
+        catch { throw fault(); }
+      };
       let buffer = '';
       let received = 0;
       let text = '';
       let usage;
       let done = false;
       const emit = async event => {
-        signal.throwIfAborted();
+        checkDeadline();
         if (request.onChunk) await request.onChunk(event, { signal });
-        signal.throwIfAborted();
+        checkDeadline();
       };
       const processEvent = async record => {
         const data = record.split(/\r\n|\r|\n/).filter(line => line.startsWith('data:'))
@@ -125,14 +142,14 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
       };
       while (!done) {
         const next = await reader.read();
-        signal.throwIfAborted();
+        checkDeadline();
         if (next.done) {
-          buffer += decoder.decode();
+          buffer += decodeBytes();
           break;
         }
         received += next.value.byteLength;
         if (received > LIMIT) throw fault();
-        buffer += decoder.decode(next.value, { stream: true });
+        buffer += decodeBytes(next.value, { stream: true });
         if (streaming) {
           let boundary;
           while (!done && (boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer))) {
@@ -147,11 +164,12 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
         text = chunk.text; usage = chunk.usage; done = chunk.done;
       }
       if (!done || !text.trim()) throw fault();
-      signal.throwIfAborted();
+      checkDeadline();
       if (streaming) await emit(streamDoneEvent({ reason: 'stop', usage }));
       return successResult({ response: text, usage, doneReason: 'stop' });
     } catch (error) {
-      const malformed = error instanceof SyntaxError || (error instanceof TypeError && reader);
+      expireDeadline();
+      const malformed = error instanceof SyntaxError;
       return failureResult(mapError(signal.aborted ? signal.reason : malformed ? fault() : error));
     } finally {
       dispose();
