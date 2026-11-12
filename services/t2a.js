@@ -146,6 +146,12 @@ function createT2AServiceDefinition({ config: resolvedConfig, requestPolicy }) {
           message: 'format is not supported by the selected t2a provider' };
       }
 
+      const audioValidation = requestPolicy.validateAudio?.({
+        sampleRate: parsedSampleRate ?? audioDefaults.sampleRate,
+        bitrate: parsedBitrate ?? audioDefaults.bitrate, format: selectedFormat
+      });
+      if (audioValidation && !audioValidation.ok) return audioValidation;
+
       let selectedChoice = null;
       if (Object.hasOwn(body || {}, 'voice_choice')) {
         const conflictingField = requestPolicy.legacyFields

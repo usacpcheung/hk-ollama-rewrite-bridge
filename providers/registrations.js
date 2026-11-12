@@ -41,6 +41,12 @@ function buildMinimax({ serviceConfig, minimaxApiKey, debugLog, env = process.en
 }
 
 module.exports = [
+  { provider: 'google-gemini', serviceId: 't2a',
+    create: ({ serviceConfig }) => require('./google-tts').createGoogleTTSProvider(serviceConfig.provider.runtime),
+    readConfiguration: require('./configuration/google-t2a').readConfiguration,
+    requestPolicy: require('./google-t2a-policy').googleT2APolicy,
+    capabilities: { sync: true, streaming: false, lifecycle: 'none',
+      audioFormats: ['mp3', 'wav', 'pcm'], legacyVoiceControls: false } },
   { provider: 'google-gemini', serviceId: 'rewrite',
     create: ({ serviceConfig }) => createGoogleGeminiProvider(serviceConfig.provider.runtime),
     readConfiguration: require('./configuration/google-rewrite').readConfiguration,
