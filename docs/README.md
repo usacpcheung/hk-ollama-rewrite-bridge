@@ -5,7 +5,8 @@ release on main `0360aa9c19a0afbf724966d33fd1a0ed65a13f4d`. The operator reporte
 successful automated and worksheet acceptance. See the
 [Gemini trial plan](architecture/gemini-rewrite-migration.md) for the resumed
 #139 → #140 stack and remaining implementation gates. Historical review records
-retain their original scope and are not current deployment instructions.
+retain their original scope and are not current deployment instructions. The
+[original Gemini adapter review](reviews/2026-10-24-gemini-provider.md) is historical evidence only.
 
 The repository-wide document disposition was reviewed against main commit
 `a50c47d150724820080a8e7d7861070b7a0ecc51` on 2026-10-06. The
