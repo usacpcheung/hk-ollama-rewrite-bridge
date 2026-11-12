@@ -55,7 +55,8 @@ automatic retries. A cost cap may reject requests: record infrastructure failure
 separately from language failures; do not fabricate outputs or mark them passed.
 
 Compare MiniMax/current-v1 and MiniMax/hk-school-v1 on useful subsets.
-Gemini evaluation is paused and is not a dependency of this rollout. Record immutable code revision,
+Gemini provider-trial evaluation has resumed separately; see the
+[Gemini trial plan](../architecture/gemini-rewrite-migration.md). It does not change the policy rollout. Record immutable code revision,
 provider/model/location, policy ID and prompt digest, generation parameters, case
 ID, output, finish reason, latency, usage including reported reasoning tokens,
 request error, reviewer, verdict and rationale. Track estimated charges separately
