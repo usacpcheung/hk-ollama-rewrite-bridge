@@ -1,5 +1,14 @@
 # Gemini rewrite provider trial plan
 
+> Historical rollout plan: the Gemini stack (#139, #140, #147 and #148) was
+> subsequently merged and the operator deployed main with Google rewrite/TTS.
+> The pending gates and MiniMax production profile below describe the earlier
+> trial stage. Temperature was subsequently removed from Gemini rewrite requests:
+> 3.8 Flash ignores custom values. Preserve old diagnostic results as evidence of
+> the requests actually sent, not proof of temperature control. New diagnostics
+> should omit it from payloads and manifests. See the
+> [correction in the alignment report](../reviews/2026-11-04-gemini-call-alignment.md#subsequent-correction-ignored-temperature).
+
 Status: resumed planning and branch reconciliation, 2026-11-04. PR #139 targets
 main; PR #140 targets `codex/gemini-rewrite-plan`. Both remain unmerged drafts.
 This document is a plan, not permission to switch production.

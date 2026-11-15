@@ -368,10 +368,12 @@ Cloud billing caps are external and delayed; there is no local monthly ledger.
 `REWRITE_POLICY` is already implemented and provider-independent. The trial
 uses `hk-school-v2`; preserve the existing MiniMax adaptive profile for rollback.
 
-API-call alignment (2026-11-04): Gemini sends the selected service policy as
+Gemini sends the selected service policy as
 `systemInstruction`, and `把下方文字改寫為繁體書面語：\n` followed by input as the
-user message. Temperature 0.15 and LOW thinking are provider-owned fixed settings;
-callers cannot override them. `REWRITE_MAX_COMPLETION_TOKENS` remains the admin
+user message. LOW thinking is fixed by the provider adapter; no temperature field
+is sent because Gemini 3.8 Flash ignores custom temperature values. There is no
+Gemini temperature environment setting. Callers cannot override thinking or add
+temperature to the provider request. `REWRITE_MAX_COMPLETION_TOKENS` remains the admin
 budget. Explicitly empty model/location values fail rather than choosing defaults.
 Location must be `global` or a regional-ID shape (for example `asia-east1`).
 `us` and `eu` are rejected because this adapter does not implement their multi-region

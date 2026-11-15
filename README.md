@@ -475,9 +475,13 @@ restored. Other text uses OpenCC as before; `current-v1` is unchanged. See the
 
 ### Gemini API-call alignment
 
-The opt-in Gemini adapter now uses the evaluated Chinese user-message prefix,
-temperature 0.15 and LOW thinking, with policy instructions still owned by the
-rewrite service. Use `REWRITE_GOOGLE_LOCATION=global` for the trial; `us`/`eu`
+The opt-in Gemini adapter uses the evaluated Chinese user-message prefix and
+explicit LOW thinking, with policy instructions still owned by the rewrite
+service. It omits temperature: Google's [Gemini 3.8 Flash guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash)
+states that custom temperature values are ignored. Earlier diagnostics sent 0.15;
+their success did not establish that this value controlled generation. MiniMax
+and Ollama retain their own provider-specific sampling behavior.
+Use `REWRITE_GOOGLE_LOCATION=global` for the trial; `us`/`eu`
 are rejected instead of building invalid multi-region hostnames. Explicit empty
 model/location settings fail startup. MiniMax adaptive and public API fields are
 unchanged. This is not a production-switch instruction: see the

@@ -29,7 +29,7 @@ test('Gemini sends neutral instructions/input to Vertex and normalizes usage', a
   const body = JSON.parse(call[1].body);
   assert.equal(body.systemInstruction.parts[0].text, request.instructions);
   assert.equal(body.contents[0].parts[0].text, '把下方文字改寫為繁體書面語：\n' + request.text);
-  assert.equal(body.generationConfig.temperature, 0.15);
+  assert.equal(Object.hasOwn(body.generationConfig, 'temperature'), false);
   assert.equal(body.generationConfig.maxOutputTokens, 300);
   assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, 'LOW');
   assert.equal(call[1].redirect, 'error');
@@ -131,7 +131,7 @@ test('Google configuration defaults only absent model/location values', () => {
   }
 });
 for (const streaming of [false, true]) {
-  test(`Gemini diagnostic wire profile (streaming=${streaming})`, async () => {
+  test(`Gemini wire profile omits temperature and retains LOW thinking (streaming=${streaming})`, async () => {
     const { resolveRewritePolicy } = require('../services/rewrite-policies');
     const instructions = resolveRewritePolicy('hk-school-v2').instructions;
     const p = provider(async (url, options) => {
@@ -143,7 +143,7 @@ for (const streaming of [false, true]) {
       assert.deepEqual(JSON.parse(options.body), {
         systemInstruction: { parts: [{ text: instructions }] },
         contents: [{ role: 'user', parts: [{ text: '把下方文字改寫為繁體書面語：\n我唔明' }] }],
-        generationConfig: { temperature: 0.15, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } }
+        generationConfig: { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } }
       });
       return new Response(streaming ? frame(payload()) : JSON.stringify(payload()));
     });
