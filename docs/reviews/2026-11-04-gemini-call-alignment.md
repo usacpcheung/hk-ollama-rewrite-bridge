@@ -1,5 +1,18 @@
 # Gemini API-call alignment — 2026-11-04
 
+## Subsequent correction: ignored temperature
+
+This report records the implementation and evidence available on November 4.
+The adapter subsequently stopped sending `temperature: 0.15`: Google's
+[Gemini 3.8 Flash developer guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash)
+documents that custom temperature values are ignored. Successful diagnostic calls
+proved request acceptance, not that temperature controlled generation. The
+historical payload descriptions below remain a record of what was sent then.
+Current JSON and streaming requests retain the same user prefix, policy, LOW
+thinking and output budget, but omit temperature. Other providers are unchanged.
+Standalone diagnostic kits outside this repository should omit temperature from
+both new request payloads and new manifests; preserve prior reports unchanged.
+
 Base: #140 at `d6dfcd198ea713c1430d07b80e3088bf6ecb1f19`.
 This increment stacks on `codex/gemini-rewrite-provider`, not main. No production
 configuration change, live provider call or merge is part of implementation.

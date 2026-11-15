@@ -81,7 +81,7 @@ for (const policy of ['current-v1', 'hk-school-v1', 'hk-school-v2']) {
       if (!req.url.startsWith('/gemini')) return false;
       assert.equal(body.systemInstruction.parts[0].text, resolveRewritePolicy(policy).instructions);
       assert.equal(body.contents[0].parts[0].text, '把下方文字改寫為繁體書面語：\n老師說「里面」');
-      assert.deepEqual(body.generationConfig, { temperature: 0.15, maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } });
+      assert.deepEqual(body.generationConfig, { maxOutputTokens: 4096, thinkingConfig: { thinkingLevel: 'LOW' } });
       if (req.url === '/gemini-stream') res.end('data: ' + JSON.stringify(result('老師說「里面」')) + '\n\n');
       else json(res, 200, result('老師說「里面」'));
       return true;

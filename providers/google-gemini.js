@@ -103,7 +103,8 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ systemInstruction: { parts: [{ text: request.instructions }] },
           contents: [{ role: 'user', parts: [{ text: USER_PREFIX + request.text }] }],
-          generationConfig: { temperature: 0.15, maxOutputTokens: request.outputBudget,
+          // Gemini 3.8 Flash ignores temperature; omit it rather than imply control.
+          generationConfig: { maxOutputTokens: request.outputBudget,
             thinkingConfig: { thinkingLevel: 'LOW' } } })
       });
       checkDeadline();

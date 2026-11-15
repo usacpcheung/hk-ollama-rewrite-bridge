@@ -806,8 +806,9 @@ language acceptance. No request parameter selects it. Default remains current-v1
 
 Gemini's provider-owned request formatting prefixes validated input with
 `把下方文字改寫為繁體書面語：\n`. The selected service policy remains the system
-instruction. Temperature 0.15 and LOW thinking are fixed adapter settings;
-output budget remains server-configured. Public fields claiming to select model,
+instruction. LOW thinking is a fixed adapter setting; temperature is omitted
+because Gemini 3.8 Flash ignores custom values. The output budget remains
+server-configured. Public fields claiming to select model,
 provider, temperature, budget, thinking or policy do not override server settings.
 JSON and NDJSON use the same profile and existing postprocessing. Request deadlines
 include authentication waiting; no new public timeout or retry behavior is added.
