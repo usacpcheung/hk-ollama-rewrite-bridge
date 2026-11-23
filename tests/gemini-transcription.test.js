@@ -58,6 +58,11 @@ test('Gemini settings select the model independently of Speech V2 rollback value
     TRANSCRIPTION_GOOGLE_PROJECT: 'test-project', TRANSCRIPTION_GOOGLE_LOCATION: 'us',
     TRANSCRIPTION_GOOGLE_MODEL: 'chirp_3', TRANSCRIPTION_GOOGLE_LANGUAGE: 'yue-Hant-HK' };
   assert.equal(readTranscriptionConfig(env).providerConfig.model, 'gemini-3.5-transcribe');
+  assert.equal(readTranscriptionConfig(env).providerConfig.languageHint, '');
+  assert.equal(readTranscriptionConfig({ ...env, TRANSCRIPTION_GEMINI_LANGUAGE_HINT: '' }).providerConfig.languageHint, '');
+  const badHint = { ...env, TRANSCRIPTION_GEMINI_LANGUAGE_HINT: 'yue-HK, en-US' };
+  assert.throws(() => readTranscriptionConfig(badHint), /Invalid TRANSCRIPTION_GEMINI_LANGUAGE_HINT/);
+  assert.equal(readTranscriptionConfig({ ...badHint, TRANSCRIPTION_PROVIDER: 'google-speech' }).providerConfig.language, 'yue-Hant-HK');
   assert.throws(() => readTranscriptionConfig({ ...env, TRANSCRIPTION_GEMINI_MODEL: 'gemini-3.5-transcribe-live' }),
     /TRANSCRIPTION_GEMINI_MODEL/);
   assert.equal(readTranscriptionConfig({ ...env, TRANSCRIPTION_PROVIDER: 'google-speech' }).providerConfig.model, 'chirp_3');

@@ -29,7 +29,7 @@ async function readTranscript(response) {
   return text;
 }
 
-function createGeminiTranscription({ project, model, credentialsFile }, { fetchImpl = fetch, getAccessToken } = {}) {
+function createGeminiTranscription({ project, model, languageHint, credentialsFile }, { fetchImpl = fetch, getAccessToken } = {}) {
   const endpoint = `https://aiplatform.googleapis.com/v1/projects/${project}/locations/global/publishers/google/models/${model}:generateContent`;
   const token = createGoogleTokenSource(credentialsFile, getAccessToken);
 
@@ -44,9 +44,13 @@ function createGeminiTranscription({ project, model, credentialsFile }, { fetchI
       catch { callSignal.throwIfAborted(); throw unavailable(); }
       if (typeof access !== 'string' || !access) throw unavailable();
       callSignal.throwIfAborted();
-      const body = JSON.stringify({ contents: [{ role: 'user', parts: [
+      const payload = { contents: [{ role: 'user', parts: [
         { inlineData: { mimeType: 'audio/wav', data: audio.content.toString('base64') } }
-      ] }] });
+      ] }] };
+      if (languageHint) {
+        payload.generationConfig = { audioTranscriptionConfig: { languageCodes: [languageHint] } };
+      }
+      const body = JSON.stringify(payload);
       // Serialization and credential callbacks can finish before an overdue timer runs.
       if (performance.now() - started >= timeoutMs) throw timedOut();
       const response = await fetchImpl(endpoint, {

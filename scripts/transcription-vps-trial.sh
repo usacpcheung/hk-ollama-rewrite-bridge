@@ -30,9 +30,9 @@ use_env() {
   return 1
 }
 ready() {
-  python3 -I - "$1" "$app" <<'PY'
+  python3 -I - "$1" "$app" "${2:-any}" <<'PY'
 import json, pathlib, subprocess, sys, time, urllib.request
-expected, app = sys.argv[1:]
+expected, app, hint = sys.argv[1:]
 client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 for _ in range(45):
     try:
@@ -53,6 +53,9 @@ for _ in range(45):
         assert env.get(b'REWRITE_PROVIDER') == env.get(b'T2A_PROVIDER') == b'google-gemini'
         if expected == 'google-gemini':
             assert env.get(b'TRANSCRIPTION_GEMINI_MODEL',b'gemini-3.5-transcribe') == b'gemini-3.5-transcribe'
+            if hint != 'any':
+                assert env.get(b'TRANSCRIPTION_GEMINI_LANGUAGE_HINT', b'').decode() == ('' if hint == 'auto' else hint)
+                print('PASS: Gemini language hint =', hint)
         print('PASS: healthy, ready, transcription provider =', expected)
         sys.exit(0)
     except (OSError, ValueError, KeyError, AssertionError, subprocess.SubprocessError):
@@ -78,7 +81,8 @@ rollback() {
   else
     (umask 022; g switch --detach "$base") || return 1
   fi
-  systemctl start "$unit" && ready google-speech
+  systemctl start "$unit" || return 1
+  if [[ -f hint-upgrade ]]; then ready google-gemini auto; else ready google-speech; fi
 }
 failed() {
   local rc=$?
@@ -91,13 +95,22 @@ failed() {
 }
 
 case ${1:-} in
-  install)
-    [[ $(g rev-parse HEAD) == "$base" && ! -e SHA256SUMS && -f $envfile && ! -L $envfile ]]
-    ready google-speech
+  install|install-hint)
+    [[ $(g rev-parse HEAD) == "$base" && ! -e SHA256SUMS && ! -e hint-upgrade && -f $envfile && ! -L $envfile ]]
+    if [[ $1 == install-hint ]]; then ready google-gemini auto; else ready google-speech; fi
     g branch --show-current >original-branch
     cp --preserve=mode,ownership "$envfile" original.env
     cp --preserve=mode,ownership "$envfile" trial.env
-    python3 -I - <<'PY'
+    if [[ $1 == install-hint ]]; then
+      # This upgrade starts on the previous trial's Gemini / auto snapshot.
+      if grep -Eq '^[[:space:]]*TRANSCRIPTION_GEMINI_LANGUAGE_HINT[[:space:]]*=' original.env; then
+        echo 'STOP: existing language hint assignment. Review the original configuration.'
+        exit 1
+      fi
+      printf '\nTRANSCRIPTION_GEMINI_LANGUAGE_HINT=yue-Hant-HK\n' >>trial.env
+      printf '%s\n' 'google-gemini/auto' >hint-upgrade
+    else
+      python3 -I - <<'PY'
 from pathlib import Path
 import re
 p = Path('trial.env')
@@ -109,48 +122,68 @@ if len(matches) > 1 or (matches and matches[0].rstrip().endswith(b'\\')):
 line = b'TRANSCRIPTION_PROVIDER=google-gemini'
 p.write_bytes(re.sub(pattern, line, data) if matches else data + b'\n' + line + b'\n')
 PY
+    fi
     sha256sum original.env trial.env baseline candidate original-branch >SHA256SUMS
+    if [[ $1 == install-hint ]]; then sha256sum hint-upgrade >>SHA256SUMS; fi
     sha256sum --status -c SHA256SUMS
     trap failed EXIT
     systemctl stop "$unit"
     (umask 022; g switch --detach "$head")
+    if [[ $1 == install-hint ]]; then use_env trial.env; fi
     systemctl start "$unit"
-    ready google-speech
+    if [[ $1 == install-hint ]]; then ready google-gemini yue-Hant-HK; else ready google-speech; fi
     ;;
-  gemini|chirp)
+  gemini|chirp|auto|hint)
     [[ $(g rev-parse HEAD) == "$head" ]]
     sha256sum --status -c SHA256SUMS
-    if [[ $1 == gemini ]]; then
+    expected_hint=any
+    if [[ -f hint-upgrade ]]; then
+      provider=google-gemini
+      case $1 in
+        auto) cmp -s "$envfile" trial.env; source_env=original.env; expected_hint=auto ;;
+        hint) cmp -s "$envfile" original.env; source_env=trial.env; expected_hint=yue-Hant-HK ;;
+        *) echo 'Use auto, hint, or rollback for this hint trial.'; exit 2 ;;
+      esac
+    elif [[ $1 == gemini ]]; then
       cmp -s "$envfile" original.env
       source_env=trial.env; provider=google-gemini
-    else
+    elif [[ $1 == chirp ]]; then
       cmp -s "$envfile" trial.env
       source_env=original.env; provider=google-speech
-    fi
+    else echo "Use gemini or chirp for this provider trial."; exit 2; fi
     trap failed EXIT
     use_env "$source_env"
     systemctl restart "$unit"
-    ready "$provider"
+    ready "$provider" "$expected_hint"
     ;;
-  smoke)
+  smoke|smoke-notebook)
     [[ $(g rev-parse HEAD) == "$head" ]]
     sha256sum --status -c SHA256SUMS
-    if cmp -s original.env "$envfile"; then provider=google-speech
+    expected_hint=any
+    if [[ -f hint-upgrade ]]; then
+      provider=google-gemini
+      if cmp -s original.env "$envfile"; then expected_hint=auto
+      else cmp -s trial.env "$envfile"; expected_hint=yue-Hant-HK; fi
+    elif cmp -s original.env "$envfile"; then provider=google-speech
     else cmp -s trial.env "$envfile"; provider=google-gemini; fi
-    ready "$provider"
-    python3 -I - "${2:?Supply an allowed worksheet email}" <<'PY'
+    ready "$provider" "$expected_hint"
+    python3 -I - "${2:?Supply an allowed worksheet email}" "$1" <<'PY'
 import http.client, json, pathlib, secrets, subprocess, sys
 email = sys.argv[1]
 if not email.isascii() or any(c.isspace() or c == ',' for c in email):
     sys.exit('Invalid email.')
-audio = pathlib.Path('/root/bridge-acceptance-inputs/acceptance-speech.m4a')
+if sys.argv[2] == 'smoke-notebook':
+    audio, filename, mime = pathlib.Path('notebook-audio'), 'notebook.wav', 'audio/wav'
+else:
+    audio = pathlib.Path('/root/bridge-acceptance-inputs/acceptance-speech.m4a')
+    filename, mime = 'test.m4a', 'audio/mp4'
 if not 0 < audio.stat().st_size < 2 * 1024 * 1024:
     sys.exit('Unexpected acceptance recording size.')
 pid = subprocess.check_output(['systemctl','show','rewrite-bridge.service','-p','MainPID','--value'],text=True).strip()
 env = dict(i.split(b'=',1) for i in pathlib.Path('/proc',pid,'environ').read_bytes().split(b'\0') if b'=' in i)
 boundary = secrets.token_hex(20)
-body = (f'--{boundary}\r\nContent-Disposition: form-data; name="audio"; filename="test.m4a"\r\n'
-        'Content-Type: audio/mp4\r\n\r\n').encode() + audio.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
+body = (f'--{boundary}\r\nContent-Disposition: form-data; name="audio"; filename="{filename}"\r\n'
+        f'Content-Type: {mime}\r\n\r\n').encode() + audio.read_bytes() + f'\r\n--{boundary}--\r\n'.encode()
 conn = http.client.HTTPConnection('127.0.0.1',3001,timeout=190)
 print('START one paid transcription through the running bridge',flush=True)
 conn.request('POST','/api/transcriptions',body,headers={
@@ -165,5 +198,5 @@ print('Timings (ms):', result.get('timings'))
 PY
     ;;
   rollback) rollback ;;
-  *) echo 'Use install, gemini, chirp, smoke EMAIL, or rollback.'; exit 2 ;;
+  *) echo 'Use install, install-hint, gemini, chirp, auto, hint, smoke EMAIL, smoke-notebook EMAIL, or rollback.'; exit 2 ;;
 esac

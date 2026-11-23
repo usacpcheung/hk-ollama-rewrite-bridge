@@ -113,7 +113,7 @@ One or two channels and sample rates 8–192 kHz are allowed. File extensions an
 declared MIME types are not used to validate media. All accepted audio is decoded
 to mono 16 kHz, then encoded as FLAC for Speech V2 or WAV for Gemini.
 Administrators select the Gemini trial with `TRANSCRIPTION_PROVIDER=google-gemini`.
-It returns verbatim text with automatic language detection using one synchronous GenerateContent call.
+It returns verbatim text using one synchronous GenerateContent call. The administrator can set `TRANSCRIPTION_GEMINI_LANGUAGE_HINT=yue-Hant-HK` to hint Hong Kong Cantonese, or leave it unset for automatic detection.
 
 Success (`200`, JSON, `Cache-Control: no-store`):
 

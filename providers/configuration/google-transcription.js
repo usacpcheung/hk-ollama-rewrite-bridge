@@ -20,6 +20,8 @@ function readConfiguration({ env = process.env } = {}) {
 function readGeminiConfiguration({ env = process.env } = {}) {
   const model = env.TRANSCRIPTION_GEMINI_MODEL ?? 'gemini-3.5-transcribe';
   if (!/^gemini-[a-z0-9.-]{1,80}-transcribe$/.test(model)) throw new Error('Invalid TRANSCRIPTION_GEMINI_MODEL');
-  return { runtime: { ...readGoogleSettings(env), model, credentialsFile: env.GOOGLE_APPLICATION_CREDENTIALS } };
+  const languageHint = env.TRANSCRIPTION_GEMINI_LANGUAGE_HINT || '';
+  if (languageHint && languageHint !== 'yue-Hant-HK') throw new Error('Invalid TRANSCRIPTION_GEMINI_LANGUAGE_HINT');
+  return { runtime: { ...readGoogleSettings(env), model, languageHint, credentialsFile: env.GOOGLE_APPLICATION_CREDENTIALS } };
 }
 module.exports = { readConfiguration, readGeminiConfiguration };

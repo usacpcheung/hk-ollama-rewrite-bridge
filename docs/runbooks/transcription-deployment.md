@@ -217,3 +217,14 @@ selection), restart, wait for HTTP readiness and submit the same recording.
 Verify both directions during maintenance before enabling Gemini for the trial.
 During the trial, compare corrections to names, Cantonese and English terms, as well
 as timeout frequency and latency. Use aggregate observations with private test clips.
+
+### Trial a Cantonese hint on a running Gemini deployment
+
+Prepare a new private PR 150 release record pinned to the current Gemini/auto checkout and the
+reviewed hint candidate. Keep the earlier provider-switch record for returning to Chirp.
+The trial helper's `install-hint` action snapshots the current environment, installs the
+candidate, and sets `TRANSCRIPTION_GEMINI_LANGUAGE_HINT=yue-Hant-HK`. It checks the running
+process after restart. The hint is persistent and applies to every Gemini recording.
+Use `auto` and `hint` in that release record to compare the same clip, or `rollback` to
+restore the previous checkout and Gemini/auto configuration. The `smoke-notebook EMAIL`
+action sends one short mono 16 kHz WAV recording saved as `notebook-audio` in that private record directory.

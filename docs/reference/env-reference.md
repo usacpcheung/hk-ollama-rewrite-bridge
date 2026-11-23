@@ -16,6 +16,7 @@ Application Default Credentials; other adapters declare their own credentials.
 |---|---|---|
 | `TRANSCRIPTION_ENABLED` | `false` | Enable transcription (`true`/`1` or `false`/`0`). |
 | `TRANSCRIPTION_PROVIDER` | `google-speech` | Select `google-speech` (Speech V2) or `google-gemini` (Gemini 3.5 Transcribe trial), normalized to lowercase; unknown selection fails enabled startup. Ignored when transcription is disabled. |
+| `TRANSCRIPTION_GEMINI_LANGUAGE_HINT` | Unset (automatic detection) | Set exactly `yue-Hant-HK` to hint Hong Kong Cantonese on every Gemini recording. Empty also selects automatic detection. Other nonempty values fail Gemini startup. Restart to apply. |
 | `TRANSCRIPTION_GEMINI_MODEL` | `gemini-3.5-transcribe` | Synchronous Gemini transcription model. Verify availability and payload compatibility before selecting a different model. |
 | `TRANSCRIPTION_GOOGLE_MODEL` | `chirp_3` | Model identifier for the implemented Google V2 synchronous recognition call; letters/digits/underscore/dot/hyphen. Confirm region/language/model compatibility before changing. |
 | `TRANSCRIPTION_GOOGLE_LANGUAGE` | `yue-Hant-HK` | Speech V2 language tag; 2–3 letter primary tag with optional 2–8 character alphanumeric subtags. Syntax checking does not establish Google support. |
@@ -39,7 +40,7 @@ Application Default Credentials; other adapters declare their own credentials.
 The Gemini trial uses the shared transcription project, Google credentials and recognition deadline.
 It calls `gemini-3.5-transcribe` at the global Agent Platform endpoint with inline mono 16 kHz WAV.
 The Speech V2 model, location and language settings apply only to `google-speech` and may be kept for rollback.
-Gemini uses its default verbatim mode and automatic language detection.
+Gemini uses its default verbatim mode and automatic language detection unless the Cantonese hint is configured.
 
 The default reviewed Google profile remains `chirp_3`, `yue-Hant-HK`, and mono
 16 kHz FLAC. The two new model/language settings are passed through the existing
