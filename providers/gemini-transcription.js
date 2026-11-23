@@ -17,10 +17,11 @@ async function readTranscript(response) {
   }
   const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
   const candidate = body?.candidates?.[0];
-  if (body?.error || body?.promptFeedback?.blockReason || body?.candidates?.length !== 1 ||
+  if (body?.error || body?.promptFeedback?.blockReason || !Array.isArray(body?.candidates) || body.candidates.length !== 1 ||
       candidate?.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) throw failed();
   const text = candidate.content.parts.map(part => {
-    const value = part?.text ?? part?.audioTranscription?.text;
+    if (part?.text != null && typeof part.text !== 'string') throw failed();
+    const value = part?.text || (part?.audioTranscription?.text ?? part?.text);
     if (part?.thought || typeof value !== 'string') throw failed();
     return value;
   }).join('').trim();
@@ -72,7 +73,7 @@ function createGeminiTranscription({ project, model, credentialsFile }, { fetchI
       if ([401, 403].includes(response.status)) throw unavailable();
       if (response.status === 429) throw new TranscriptionError(429, 'TRANSCRIPTION_RATE_LIMITED', 'Transcription capacity is temporarily exhausted. Please retry later.');
       if ([408, 504].includes(response.status)) throw timedOut();
-      if (!response.ok) throw failed();
+      if (response.status !== 200) throw failed();
       return successResult({ response: await readTranscript(response) });
     } catch (error) {
       const reason = signal.aborted ? signal.reason : error;

@@ -14,9 +14,12 @@ for (const [description, status, upstream, expected] of [
   ['deadline', 504, {}, 'TRANSCRIPTION_TIMEOUT'],
   ['provider error', 500, {}, 'TRANSCRIPTION_FAILED'],
   ['truncation', 200, { candidates: [{ ...stop([{text:'private'}]).candidates[0], finishReason:'MAX_TOKENS' }] }, 'TRANSCRIPTION_FAILED'],
+  ['object instead of candidate list', 200, { candidates: { 0: stop([{text:'wrong'}]).candidates[0], length: 1 } }, 'TRANSCRIPTION_FAILED'],
+  ['partial HTTP response', 206, stop([{text:'partial'}]), 'TRANSCRIPTION_FAILED'],
   ['missing candidate', 200, {}, 'TRANSCRIPTION_FAILED'],
   ['malformed part', 200, stop([{}]), 'TRANSCRIPTION_FAILED'],
   ['silence', 200, stop([{ text: '' }]), 'NO_SPEECH'],
+  ['silence in nested transcript', 200, stop([{audioTranscription:{text:''}}]), 'NO_SPEECH'],
   ['oversized body', 200, stop([{text:'a'.repeat(1024 * 1024)}]), 'TRANSCRIPTION_FAILED']
 ]) {
   test('Gemini transcription: ' + description, async () => {
@@ -58,4 +61,14 @@ test('Gemini settings select the model independently of Speech V2 rollback value
   assert.throws(() => readTranscriptionConfig({ ...env, TRANSCRIPTION_GEMINI_MODEL: 'gemini-3.5-transcribe-live' }),
     /TRANSCRIPTION_GEMINI_MODEL/);
   assert.equal(readTranscriptionConfig({ ...env, TRANSCRIPTION_PROVIDER: 'google-speech' }).providerConfig.model, 'chirp_3');
+});
+
+
+test('empty plain text uses the nested transcript exactly once', async () => {
+  const sync = fixture(async () => Response.json(stop([
+    { text: '', audioTranscription: { text: '今日' } },
+    { text: '天晴', audioTranscription: { text: '天晴' } }
+  ])));
+  const result = await sync(request(new AbortController().signal));
+  assert.equal(result.data.output.text, '今日天晴');
 });
