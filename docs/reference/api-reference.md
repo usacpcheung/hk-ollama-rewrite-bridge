@@ -111,7 +111,9 @@ little-endian signed 16/24/32-bit PCM or little-endian 32-bit float PCM
 MP3; AAC in MP4/M4A/MOV; and Opus in WebM/Matroska/OGG.
 One or two channels and sample rates 8–192 kHz are allowed. File extensions and
 declared MIME types are not used to validate media. All accepted audio is decoded
-to mono 16 kHz, then encoded as FLAC for Google.
+to mono 16 kHz, then encoded as FLAC for Speech V2 or WAV for Gemini.
+Administrators select the Gemini trial with `TRANSCRIPTION_PROVIDER=google-gemini`.
+It returns verbatim text with automatic language detection using one synchronous GenerateContent call.
 
 Success (`200`, JSON, `Cache-Control: no-store`):
 

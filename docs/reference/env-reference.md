@@ -15,11 +15,12 @@ Application Default Credentials; other adapters declare their own credentials.
 | Variable | Default | Meaning |
 |---|---|---|
 | `TRANSCRIPTION_ENABLED` | `false` | Enable transcription (`true`/`1` or `false`/`0`). |
-| `TRANSCRIPTION_PROVIDER` | `google-speech` | Registered transcription provider, normalized to lowercase; unknown selection fails enabled startup. Ignored when transcription is disabled. |
+| `TRANSCRIPTION_PROVIDER` | `google-speech` | Select `google-speech` (Speech V2) or `google-gemini` (Gemini 3.5 Transcribe trial), normalized to lowercase; unknown selection fails enabled startup. Ignored when transcription is disabled. |
+| `TRANSCRIPTION_GEMINI_MODEL` | `gemini-3.5-transcribe` | Synchronous Gemini transcription model. Verify availability and payload compatibility before selecting a different model. |
 | `TRANSCRIPTION_GOOGLE_MODEL` | `chirp_3` | Model identifier for the implemented Google V2 synchronous recognition call; letters/digits/underscore/dot/hyphen. Confirm region/language/model compatibility before changing. |
-| `TRANSCRIPTION_GOOGLE_LANGUAGE` | `yue-Hant-HK` | Language tag passed to Google; 2–3 letter primary tag with optional 2–8 character alphanumeric subtags. Syntax checking does not establish Google support. |
+| `TRANSCRIPTION_GOOGLE_LANGUAGE` | `yue-Hant-HK` | Speech V2 language tag; 2–3 letter primary tag with optional 2–8 character alphanumeric subtags. Syntax checking does not establish Google support. |
 | `TRANSCRIPTION_GOOGLE_PROJECT` | Required when Google transcription is enabled | Google Cloud project ID (not project number). |
-| `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | `us` or `eu`; endpoint and recognizer location always match. |
+| `TRANSCRIPTION_GOOGLE_LOCATION` | `us` | Speech V2 only: `us` or `eu`; endpoint and recognizer location match. |
 | `TRANSCRIPTION_ALLOWED_ORIGINS` | Empty | Comma-separated exact worksheet HTTP(S) origins without paths/trailing slashes. Required for browser uploads with Origin headers; cross-site requests are rejected. Authenticated server-side calls without Origin remain supported. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | ADC discovery | Optional SDK credential-file path; use an absolute server-readable path for deployment and never commit the file. If unset, the SDK uses other ADC sources. |
 | `TRANSCRIPTION_TEMP_DIRECTORY` | OS temp directory + `rewrite-bridge-transcriptions` | Dedicated absolute, private service-owned directory; production recommendation `/var/lib/rewrite-bridge/transcriptions`. |
@@ -30,10 +31,15 @@ Application Default Credentials; other adapters declare their own credentials.
 | `TRANSCRIPTION_REQUESTS_PER_MINUTE` | `6` | Per resolved user/IP request attempts per fixed minute window; range 1–60. The separate one-active-request lock uses authenticated email. |
 | `TRANSCRIPTION_UPLOAD_TIMEOUT_MS` | `120000` | Total upload receive deadline; range 1,000–120,000 ms. |
 | `TRANSCRIPTION_CONVERSION_TIMEOUT_MS` | `15000` | Probe/decode/encode time budget after obtaining a conversion slot; range 1,000–60,000 ms. |
-| `TRANSCRIPTION_GOOGLE_TIMEOUT_MS` | `60000` | Google RPC deadline; range 1,000–120,000 ms, bounded by remaining total deadline. |
+| `TRANSCRIPTION_GOOGLE_TIMEOUT_MS` | `60000` | Google recognition deadline, including credential acquisition; range 1,000–120,000 ms, bounded by remaining total deadline. |
 | `TRANSCRIPTION_TOTAL_TIMEOUT_MS` | `180000` | Overall response deadline; range 1,000–300,000 ms. In-flight Google calls retain admission until they settle. |
 | `TRANSCRIPTION_FFMPEG_PATH` | `ffmpeg` | Server executable; use an absolute path if systemd PATH is restricted. |
 | `TRANSCRIPTION_FFPROBE_PATH` | `ffprobe` | Server executable. |
+
+The Gemini trial uses the shared transcription project, Google credentials and recognition deadline.
+It calls `gemini-3.5-transcribe` at the global Agent Platform endpoint with inline mono 16 kHz WAV.
+The Speech V2 model, location and language settings apply only to `google-speech` and may be kept for rollback.
+Gemini uses its default verbatim mode and automatic language detection.
 
 The default reviewed Google profile remains `chirp_3`, `yue-Hant-HK`, and mono
 16 kHz FLAC. The two new model/language settings are passed through the existing

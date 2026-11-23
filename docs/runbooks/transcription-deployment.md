@@ -11,6 +11,7 @@ See the [API contract](../reference/api-reference.md#transcription) and
 
 ## Reviewed configuration
 
+- The following checkpoints describe the default Speech V2 deployment. See the Gemini trial below for the alternative adapter.
 - Google Cloud Speech-to-Text **V2**, `chirp_3`, `us`, `yue-Hant-HK`.
 - `lib/transcription-media.js` decodes every accepted upload to mono 16 kHz FLAC; declaring a MIME type does not bypass validation. Synthetic-media tests verify this local path, not live Google recognition accuracy.
 - The code permits `us` or `eu`; `TRANSCRIPTION_GOOGLE_MODEL` and
@@ -200,3 +201,19 @@ Inspect the dedicated runtime directory before deleting leftover audio. Remove
 the dedicated credential copy and related env settings only after confirming
 they are not used elsewhere; revoke its Google key only when it is no longer
 needed by any test or service. Manage any independent speech installation separately from this bridge.
+
+## Gemini 3.5 Transcribe trial
+
+Use a project with Agent Platform API access and a service account authorized to call the model.
+Keep the Speech V2 settings for rollback. During maintenance, deploy the candidate with
+the current provider and submit a known recording through the worksheet. Record the
+transcript and latency. Back up the service environment privately, then set
+`TRANSCRIPTION_PROVIDER=google-gemini` and restart the bridge. This selection sends
+recordings to Google's **global** endpoint. Use it only if that location is suitable for
+the trial. Repeat the worksheet upload and check the returned text and timing.
+
+To roll back, restore `TRANSCRIPTION_PROVIDER=google-speech` (or the previous unset
+selection), restart, wait for HTTP readiness and submit the same recording.
+Verify both directions during maintenance before enabling Gemini for the trial.
+During the trial, compare corrections to names, Cantonese and English terms, as well
+as timeout frequency and latency. Use aggregate observations with private test clips.
