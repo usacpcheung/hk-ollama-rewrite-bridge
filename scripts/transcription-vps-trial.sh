@@ -25,7 +25,7 @@ g diff --quiet "$base" "$head" -- package.json package-lock.json
 use_env() {
   local tmp
   tmp=$(mktemp -- "${envfile}.pr150.XXXXXXXX")
-  if cp --preserve=mode,ownership -- "$1" "$tmp" && mv -T -- "$tmp" "$envfile"; then return; fi
+  if cp --preserve=mode,ownership -- "$1" "$tmp" && mv -T -- "$tmp" "$envfile"; then return 0; fi
   rm -f -- "$tmp"
   return 1
 }
