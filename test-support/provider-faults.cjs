@@ -2,7 +2,7 @@
 const definitions = require('../providers/registrations');
 const mode = process.env.TEST_PROVIDER_FAULT;
 if (mode === 'availability' || mode === 'async-availability') {
-  const registration = definitions.find(entry => entry.serviceId === 'transcription');
+  const registration = definitions.find(entry => entry.serviceId === 'transcription' && entry.provider === 'google-speech');
   registration.availability = mode === 'availability'
     ? () => { throw new Error('private provider details'); }
     : async () => { throw new Error('private provider details'); };

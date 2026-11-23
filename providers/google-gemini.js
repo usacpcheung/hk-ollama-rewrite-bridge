@@ -1,3 +1,4 @@
+const { createGoogleTokenSource } = require('./google-token');
 const { createInvocationAbort } = require('../lib/invocation-abort');
 const { successResult, failureResult, streamTextEvent, streamDoneEvent } = require('../lib/bridge-contract');
 
@@ -6,18 +7,6 @@ const USER_PREFIX = '把下方文字改寫為繁體書面語：\n';
 const LIMIT = 1024 * 1024;
 const fault = (code = 'GEMINI_INVALID_RESPONSE', status = 502, message = 'Invalid Gemini response.') =>
   Object.assign(new Error(message), { bridgeError: { code, status, message } });
-
-// Abort the waiter, not shared credential discovery. Only one credential operation
-// may remain in flight per adapter, even when multiple callers time out.
-function waitFor(promise, signal) {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const cancel = () => { cleanup(); reject(signal.reason); };
-    const cleanup = () => signal.removeEventListener('abort', cancel);
-    signal.addEventListener('abort', cancel, { once: true });
-    promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
-  });
-}
 
 function decode(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.error) throw fault();
@@ -54,22 +43,7 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
   if (!/^gemini-[a-z0-9][a-z0-9.-]{0,100}$/.test(model)) throw new Error('Invalid REWRITE_GOOGLE_MODEL.');
   const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
   const endpoint = `https://${host}/v1/projects/${project}/locations/${location}/publishers/google/models/${model}`;
-  let auth;
-  let pendingToken;
-  function token() {
-    if (!pendingToken) {
-      pendingToken = Promise.resolve().then(async () => {
-        if (getAccessToken) return getAccessToken();
-        if (!auth) {
-          const { GoogleAuth } = require('google-auth-library');
-          auth = new GoogleAuth({ keyFilename: credentialsFile, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-        }
-        const client = await auth.getClient();
-        return (await client.getAccessToken()).token;
-      }).finally(() => { pendingToken = undefined; });
-    }
-    return pendingToken;
-  }
+  const token = createGoogleTokenSource(credentialsFile, getAccessToken);
   function mapError(error) {
     if (error?.bridgeError) return error.bridgeError;
     if (error?.name === 'AbortError' || error?.name === 'TimeoutError') return { code: 'MODEL_TIMEOUT', status: 504, message: 'Model response timed out. Please retry.' };
@@ -91,7 +65,7 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
     try {
       checkDeadline();
       let accessToken;
-      try { accessToken = await waitFor(token(), signal); }
+      try { accessToken = await token(signal); }
       catch (error) {
         checkDeadline();
         throw fault('GEMINI_AUTH_ERROR', 503, 'Google credentials could not authorize rewriting.');
@@ -108,7 +82,7 @@ function createGoogleGeminiProvider({ project, location = 'global', model = 'gem
             thinkingConfig: { thinkingLevel: 'LOW' } } })
       });
       checkDeadline();
-      if (!response.ok) {
+      if (response.status !== 200) {
         if (response.status === 401 || response.status === 403) throw fault('GEMINI_AUTH_ERROR', 503, 'Google denied the rewrite request; check permissions and billing controls.');
         if (response.status === 429) throw fault('GEMINI_QUOTA_EXCEEDED', 429, 'Google rewrite quota or spending limit reached.');
         throw fault('GEMINI_ERROR', 502, 'Gemini request failed.');

@@ -4,7 +4,7 @@ Node.js Express bridge that exposes AI services behind shared authentication and
 
 - **Rewrite**: converts Hong Kong colloquial Cantonese into formal Traditional Chinese.
 - **T2A (text-to-audio)**: generates Cantonese-oriented speech audio through the Minimax-compatible provider path.
-- **Transcription (opt-in)**: transcribes completed recordings through Google Cloud Speech-to-Text V2 Chirp 3.
+- **Transcription (opt-in)**: transcribes completed recordings through Google Cloud Speech-to-Text V2 Chirp 3 or the opt-in Gemini 3.5 Transcribe adapter.
 
 This README is the top-level operator and integrator guide. Start with the [documentation index](docs/README.md), or use the [API reference](docs/reference/api-reference.md) for exact endpoint contracts.
 
@@ -78,7 +78,9 @@ to `google-speech`; `TRANSCRIPTION_GOOGLE_MODEL` and `TRANSCRIPTION_GOOGLE_LANGU
 select the model/language within the implemented Google V2 recognition protocol.
 It uses `chirp_3`, `yue-Hant-HK`, and the `us` endpoint by default. No Whisper daemon
 is needed. Uploads are limited to 20 MiB and 60 decoded seconds; FFmpeg normalizes
-audio to mono 16 kHz FLAC. Ten requests can be admitted, two conversions can run,
+audio to mono 16 kHz FLAC for Speech V2. For the Gemini trial, set
+`TRANSCRIPTION_PROVIDER=google-gemini` and restart the bridge. This adapter sends
+mono 16 kHz WAV to global `gemini-3.5-transcribe` using automatic language detection by default. Set `TRANSCRIPTION_GEMINI_LANGUAGE_HINT=yue-Hant-HK` and restart to hint Hong Kong Cantonese. Ten requests can be admitted, two conversions can run,
 and each user can have one active request. Audio deletion is attempted after
 processing; successful responses follow cleanup. Cleanup failures block further
 admission until restart. The bridge does not retain transcripts. Limits are

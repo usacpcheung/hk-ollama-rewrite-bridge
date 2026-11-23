@@ -1,3 +1,4 @@
+const { shareInFlight } = require('../lib/shared-operation');
 const { successResult, failureResult } = require('../lib/bridge-contract');
 const { TranscriptionError, checkAbort } = require('../lib/transcription-errors');
 
@@ -12,34 +13,26 @@ function mapGoogleSpeechError(error) {
 
 function createGoogleSpeechProvider(config, { createClient } = {}) {
   let client;
-  let initialization;
-  async function initialize(speech, signal, timeoutMs) {
-    initialization ||= Promise.resolve().then(() => speech.initialize?.()).catch(error => {
-      // Reset only on shared initialization failure, not a caller's timeout/abort.
-      // The SDK also caches its rejected stub, so a later request needs a new client.
-      if (client === speech) {
-        client = undefined;
-        initialization = undefined;
-      }
-      // Failed SDK initialization can make close reject too. Cleanup must neither
-      // mask the original error nor prevent the next request from recovering.
+  let initialized = false;
+  const waitForInitialization = shareInFlight(async () => {
+    const speech = client;
+    try {
+      await speech.initialize?.();
+      initialized = true;
+    } catch (error) {
+      client = undefined;
       void Promise.resolve().then(() => speech.close?.()).catch(() => {});
       throw error;
-    });
-    // Initialization has no audio/request payload. Share it and bound each caller's
-    // wait, so a stalled credential lookup cannot occupy all admission slots forever.
-    let timer;
-    let cancel;
+    }
+  });
+  async function initialize(signal, timeoutMs) {
+    if (initialized) return;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new TranscriptionError(504, 'TRANSCRIPTION_TIMEOUT', 'Transcription timed out.')), timeoutMs);
     try {
-      await Promise.race([initialization, new Promise((_resolve, reject) => {
-        cancel = () => reject(signal.reason);
-        timer = setTimeout(() => reject(new TranscriptionError(504, 'TRANSCRIPTION_TIMEOUT', 'Transcription timed out.')), timeoutMs);
-        signal?.addEventListener('abort', cancel, { once: true });
-        if (signal?.aborted) cancel();
-      })]);
+      await waitForInitialization(signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal);
     } finally {
       clearTimeout(timer);
-      signal?.removeEventListener('abort', cancel);
     }
   }
   const getClient = () => {
@@ -63,7 +56,7 @@ function createGoogleSpeechProvider(config, { createClient } = {}) {
         // Resolve ADC before the generated recognize wrapper; initialization errors
         // are then caught here instead of the wrapper's detached initialization catch.
         const started = Date.now();
-        await initialize(speech, signal, timeoutMs);
+        await initialize(signal, timeoutMs);
         checkAbort(signal);
         const remainingMs = timeoutMs - (Date.now() - started);
         if (remainingMs <= 0) throw new TranscriptionError(504, 'TRANSCRIPTION_TIMEOUT', 'Transcription timed out.');

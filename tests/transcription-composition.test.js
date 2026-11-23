@@ -108,3 +108,59 @@ test('actual server slow upload deadline cleans files', async (t) => {
   await new Promise((r) => setTimeout(r, 100));
   assert.deepEqual(await fs.readdir(f.directory), []);
 });
+
+for (const hint of ['', 'yue-Hant-HK']) {
+  mediaTest(`Gemini transcription uses normalized WAV on both aliases (hint: ${hint || 'auto'})`, async t => {
+    const f = await fixture(t, {
+      env: { ...enabled, TRANSCRIPTION_PROVIDER: 'google-gemini',
+        ...(hint && { TRANSCRIPTION_GEMINI_LANGUAGE_HINT: hint }),
+        TRANSCRIPTION_GOOGLE_LOCATION: 'us', TRANSCRIPTION_GOOGLE_MODEL: 'chirp_3',
+        NODE_OPTIONS: '--require=' + path.join(__dirname, '../test-support/gemini-transport.cjs') },
+      handle(req, res, body) {
+        if (req.url !== '/gemini') return false;
+        assert.equal(req.headers.authorization, 'Bearer test-only-token');
+        const inline = body.contents[0].parts[0].inlineData;
+        assert.equal(inline.mimeType, 'audio/wav');
+        assert.equal(Buffer.from(inline.data, 'base64').toString('ascii', 0, 4), 'RIFF');
+        const expected = { contents: [{ role: 'user', parts: [{ inlineData: inline }] }] };
+        if (hint) expected.generationConfig = { audioTranscriptionConfig: { languageCodes: ['yue-Hant-HK'] } };
+        assert.deepEqual(body, expected);
+        res.end(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: {
+          parts: [{ text: '我哋用 ' }, { audioTranscription: { text: 'Google Classroom。' } }]
+        } }] }));
+        return true;
+      }
+    });
+    for (const route of ['/transcriptions', '/api/transcriptions']) {
+      const response = await submit(route);
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.result, '我哋用 Google Classroom。');
+      assert.equal(data.durationSeconds, 0.1);
+      assert.ok(data.requestId && data.timings);
+      assert.deepEqual(await fs.readdir(f.directory), []);
+    }
+    assert.equal(f.calls.length, 2);
+  });
+}
+
+mediaTest('Gemini stalled response body times out, cleans up and admits the next upload', async t => {
+  let attempts = 0;
+  const f = await fixture(t, {
+    env: { ...enabled, TRANSCRIPTION_PROVIDER: 'google-gemini', TRANSCRIPTION_GOOGLE_TIMEOUT_MS: '1000',
+      NODE_OPTIONS: '--require=' + path.join(__dirname, '../test-support/gemini-transport.cjs') },
+    handle(req, res) {
+      if (req.url !== '/gemini') return false;
+      if (++attempts === 1) res.write('{"candidates":');
+      else res.end(JSON.stringify({ candidates: [{ finishReason:'STOP', content:{parts:[{text:'今日'}]} }] }));
+      return true;
+    }
+  });
+  const first = await submit('/transcriptions');
+  assert.equal(first.status, 504);
+  assert.equal((await first.json()).error.code, 'TRANSCRIPTION_TIMEOUT');
+  assert.deepEqual(await fs.readdir(f.directory), []);
+  const next = await submit('/transcriptions');
+  assert.equal((await next.json()).result, '今日');
+  assert.equal(attempts, 2);
+});

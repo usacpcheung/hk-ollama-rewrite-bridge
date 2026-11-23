@@ -1,18 +1,10 @@
+const { createGoogleTokenSource } = require('./google-token');
 const { performance } = require('node:perf_hooks');
 const { createInvocationAbort } = require('../lib/invocation-abort');
 const { successResult, failureResult } = require('../lib/bridge-contract');
 const { convertAudio } = require('../lib/tts-audio');
 const presets = require('./google-tts-voices');
 const fault = (code, status, message) => Object.assign(new Error(message), { bridgeError: { code, status, message } });
-function waitFor(promise, signal) {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const cancel = () => { cleanup(); reject(signal.reason); };
-    const cleanup = () => signal.removeEventListener('abort', cancel);
-    signal.addEventListener('abort', cancel, { once: true });
-    promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
-  });
-}
 function createGoogleTTSProvider({ project, location = 'global', model = 'gemini-3.8-flash-tts',
   credentialsFile, sdkLogging = process.env.GOOGLE_SDK_NODE_LOGGING, ffmpeg = '/usr/bin/ffmpeg',
   fetchImpl = globalThis.fetch, getAccessToken, convert = convertAudio } = {}) {
@@ -22,18 +14,7 @@ function createGoogleTTSProvider({ project, location = 'global', model = 'gemini
   if (!/^gemini-[a-z0-9][a-z0-9.-]{0,100}-tts$/.test(model)) throw Error('Invalid T2A_GOOGLE_MODEL.');
   if (typeof ffmpeg !== 'string' || !ffmpeg.startsWith('/')) throw Error('T2A_FFMPEG_PATH must be absolute.');
   const endpoint = `https://aiplatform.googleapis.com/v1/projects/${project}/locations/global/publishers/google/models/${model}:generateContent`;
-  let auth, pendingToken;
-  function token() {
-    if (!pendingToken) pendingToken = Promise.resolve().then(async () => {
-      if (getAccessToken) return getAccessToken();
-      if (!auth) {
-        const { GoogleAuth } = require('google-auth-library');
-        auth = new GoogleAuth({ keyFilename: credentialsFile, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-      }
-      return (await (await auth.getClient()).getAccessToken()).token;
-    }).finally(() => { pendingToken = undefined; });
-    return pendingToken;
-  }
+  const token = createGoogleTokenSource(credentialsFile, getAccessToken);
   function mapError(error) {
     if (error?.bridgeError) return error.bridgeError;
     if (['AbortError','TimeoutError'].includes(error?.name)) return { status: 504, code: 'MODEL_TIMEOUT', message: 'Model response timed out. Please retry.' };
@@ -54,7 +35,7 @@ function createGoogleTTSProvider({ project, location = 'global', model = 'gemini
         : selection?.kind === 'preset' && Object.hasOwn(presets, selection.id) ? presets[selection.id] : null;
       if (!preset) throw fault('INVALID_INPUT',400,'Unsupported Gemini voice selection.');
       let access;
-      try { access = await waitFor(token(), signal); } catch { check(); throw fault('GEMINI_AUTH_ERROR',503,'Google credentials could not authorize speech.'); }
+      try { access = await token(signal); } catch { check(); throw fault('GEMINI_AUTH_ERROR',503,'Google credentials could not authorize speech.'); }
       check();
       if (typeof access !== 'string' || !access) throw fault('GEMINI_AUTH_ERROR',503,'Google credentials could not authorize speech.');
       const response = await fetchImpl(endpoint, { method: 'POST', redirect: 'error', signal,
@@ -64,7 +45,7 @@ function createGoogleTTSProvider({ project, location = 'global', model = 'gemini
       check();
       if ([401,403].includes(response.status)) throw fault('GEMINI_AUTH_ERROR',503,'Google denied speech generation; check permissions and billing controls.');
       if (response.status === 429) throw fault('GEMINI_QUOTA_EXCEEDED',429,'Google speech quota or spending limit reached.');
-      if (!response.ok || !response.body) throw Error('GOOGLE_HTTP_ERROR');
+      if (response.status !== 200 || !response.body) throw Error('GOOGLE_HTTP_ERROR');
       reader = response.body.getReader();
       const chunks = []; let size = 0;
       while (true) {
@@ -75,7 +56,7 @@ function createGoogleTTSProvider({ project, location = 'global', model = 'gemini
         chunks.push(next.value);
       }
       const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
-      if (payload.error || payload.promptFeedback?.blockReason || payload.candidates?.length !== 1) throw Error('INVALID_RESPONSE');
+      if (payload.error || payload.promptFeedback?.blockReason || !Array.isArray(payload.candidates) || payload.candidates.length !== 1) throw Error('INVALID_RESPONSE');
       const candidate = payload.candidates[0], parts = candidate.content?.parts;
       if (candidate.finishReason !== 'STOP' || !Array.isArray(parts) || parts.length !== 1) throw Error('INCOMPLETE_AUDIO');
       const inline = parts[0]?.inlineData;

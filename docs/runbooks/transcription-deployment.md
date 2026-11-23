@@ -11,6 +11,7 @@ See the [API contract](../reference/api-reference.md#transcription) and
 
 ## Reviewed configuration
 
+- The following checkpoints describe the default Speech V2 deployment. See the Gemini trial below for the alternative adapter.
 - Google Cloud Speech-to-Text **V2**, `chirp_3`, `us`, `yue-Hant-HK`.
 - `lib/transcription-media.js` decodes every accepted upload to mono 16 kHz FLAC; declaring a MIME type does not bypass validation. Synthetic-media tests verify this local path, not live Google recognition accuracy.
 - The code permits `us` or `eu`; `TRANSCRIPTION_GOOGLE_MODEL` and
@@ -200,3 +201,30 @@ Inspect the dedicated runtime directory before deleting leftover audio. Remove
 the dedicated credential copy and related env settings only after confirming
 they are not used elsewhere; revoke its Google key only when it is no longer
 needed by any test or service. Manage any independent speech installation separately from this bridge.
+
+## Gemini 3.5 Transcribe trial
+
+Use a project with Agent Platform API access and a service account authorized to call the model.
+Keep the Speech V2 settings for rollback. During maintenance, deploy the candidate with
+the current provider and submit a known recording through the worksheet. Record the
+transcript and latency. Back up the service environment privately, then set
+`TRANSCRIPTION_PROVIDER=google-gemini` and restart the bridge. This selection sends
+recordings to Google's **global** endpoint. Use it only if that location is suitable for
+the trial. Repeat the worksheet upload and check the returned text and timing.
+
+To roll back, restore `TRANSCRIPTION_PROVIDER=google-speech` (or the previous unset
+selection), restart, wait for HTTP readiness and submit the same recording.
+Verify both directions during maintenance before enabling Gemini for the trial.
+During the trial, compare corrections to names, Cantonese and English terms, as well
+as timeout frequency and latency. Use aggregate observations with private test clips.
+
+### Trial a Cantonese hint on a running Gemini deployment
+
+Prepare a new private PR 150 release record pinned to the current Gemini/auto checkout and the
+reviewed hint candidate. Keep the earlier provider-switch record for returning to Chirp.
+The trial helper's `install-hint` action snapshots the current environment, installs the
+candidate, and sets `TRANSCRIPTION_GEMINI_LANGUAGE_HINT=yue-Hant-HK`. It checks the running
+process after restart. The hint is persistent and applies to every Gemini recording.
+Use `auto` and `hint` in that release record to compare the same clip, or `rollback` to
+restore the previous checkout and Gemini/auto configuration. The `smoke-notebook EMAIL`
+action sends one short mono 16 kHz WAV recording saved as `notebook-audio` in that private record directory.
