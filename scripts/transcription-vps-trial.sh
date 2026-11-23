@@ -30,7 +30,7 @@ use_env() {
   return 1
 }
 ready() {
-  python3 - "$1" "$app" <<'PY'
+  python3 -I - "$1" "$app" <<'PY'
 import json, pathlib, subprocess, sys, time, urllib.request
 expected, app = sys.argv[1:]
 client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -97,7 +97,7 @@ case ${1:-} in
     g branch --show-current >original-branch
     cp --preserve=mode,ownership "$envfile" original.env
     cp --preserve=mode,ownership "$envfile" trial.env
-    python3 - <<'PY'
+    python3 -I - <<'PY'
 from pathlib import Path
 import re
 p = Path('trial.env')
@@ -138,7 +138,7 @@ PY
     if cmp -s original.env "$envfile"; then provider=google-speech
     else cmp -s trial.env "$envfile"; provider=google-gemini; fi
     ready "$provider"
-    python3 - "${2:?Supply an allowed worksheet email}" <<'PY'
+    python3 -I - "${2:?Supply an allowed worksheet email}" <<'PY'
 import http.client, json, pathlib, secrets, subprocess, sys
 email = sys.argv[1]
 if not email.isascii() or any(c.isspace() or c == ',' for c in email):

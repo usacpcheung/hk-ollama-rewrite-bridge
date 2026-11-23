@@ -1,4 +1,4 @@
-const { once, EventEmitter } = require('node:events');
+const { createGoogleTokenSource } = require('./google-token');
 const { successResult, failureResult } = require('../lib/bridge-contract');
 const { TranscriptionError } = require('../lib/transcription-errors');
 
@@ -31,44 +31,28 @@ async function readTranscript(response) {
 
 function createGeminiTranscription({ project, model, credentialsFile }, { fetchImpl = fetch, getAccessToken } = {}) {
   const endpoint = `https://aiplatform.googleapis.com/v1/projects/${project}/locations/global/publishers/google/models/${model}:generateContent`;
-  let auth;
-  const acquire = getAccessToken || (() => {
-    const { GoogleAuth } = require('google-auth-library');
-    auth ||= new GoogleAuth({ keyFilename: credentialsFile, scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-    return auth.getAccessToken();
-  });
-  // Credential discovery is shared. A disconnected caller can detach even if ADC is stalled.
-  let pending;
-  async function token(signal) {
-    signal.throwIfAborted();
-    if (!pending) {
-      const waiters = new EventEmitter();
-      waiters.setMaxListeners(0); // The transcription service enforces the admission limit.
-      pending = waiters;
-      const finish = value => {
-        pending = undefined;
-        waiters.emit('ready', value);
-      };
-      Promise.resolve().then(acquire).then(finish, () => finish(null));
-    }
-    const [value] = await once(pending, 'ready', { signal });
-    if (typeof value !== 'string' || !value) throw unavailable();
-    return value;
-  }
+  const token = createGoogleTokenSource(credentialsFile, getAccessToken);
 
-  async function sync({ audio, signal }) {
+  async function sync({ audio, signal, timeoutMs }) {
     // recognizeAudio supplies a single deadline signal covering ADC, headers and body.
+    const started = performance.now();
     const controller = new AbortController();
     const callSignal = AbortSignal.any([signal, controller.signal]);
     try {
-      const access = await token(callSignal);
+      let access;
+      try { access = await token(callSignal); }
+      catch { callSignal.throwIfAborted(); throw unavailable(); }
+      if (typeof access !== 'string' || !access) throw unavailable();
       callSignal.throwIfAborted();
+      const body = JSON.stringify({ contents: [{ role: 'user', parts: [
+        { inlineData: { mimeType: 'audio/wav', data: audio.content.toString('base64') } }
+      ] }] });
+      // Serialization and credential callbacks can finish before an overdue timer runs.
+      if (performance.now() - started >= timeoutMs) throw timedOut();
       const response = await fetchImpl(endpoint, {
         method: 'POST', redirect: 'error', signal: callSignal,
         headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [
-          { inlineData: { mimeType: 'audio/wav', data: audio.content.toString('base64') } }
-        ] }] })
+        body
       });
       if ([401, 403].includes(response.status)) throw unavailable();
       if (response.status === 429) throw new TranscriptionError(429, 'TRANSCRIPTION_RATE_LIMITED', 'Transcription capacity is temporarily exhausted. Please retry later.');

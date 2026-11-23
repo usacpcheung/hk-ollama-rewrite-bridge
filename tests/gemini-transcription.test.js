@@ -72,3 +72,16 @@ test('empty plain text uses the nested transcript exactly once', async () => {
   const result = await sync(request(new AbortController().signal));
   assert.equal(result.data.output.text, '今日天晴');
 });
+
+
+test('credential callback exceeding the deadline cannot dispatch a late paid request', async () => {
+  let sent = false;
+  const sync = fixture(async () => { sent = true; return Response.json(stop([{text:'late'}])); }, () => {
+    const until = performance.now() + 20;
+    while (performance.now() < until) {} // Simulate a delayed event loop.
+    return 'token';
+  });
+  const result = await sync({ ...request(new AbortController().signal), timeoutMs: 5 });
+  assert.equal(result.error.code, 'TRANSCRIPTION_TIMEOUT');
+  assert.equal(sent, false);
+});

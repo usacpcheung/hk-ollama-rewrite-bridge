@@ -98,3 +98,15 @@ test('malformed base64 rejected without conversion',async()=>{
   assert.equal(r.ok,false);assert.equal(converted,false);
  }
 });
+
+test('partial HTTP content and malformed candidate lists cannot produce TTS audio', async () => {
+  const valid = payload();
+  const malformed = { candidates: { 0: valid.candidates[0], length: 1 } };
+  for (const [body, status] of [[valid,206], [malformed,200]]) {
+    let converted = false;
+    const provider = make({ fetchImpl: async () => Response.json(body, {status}),
+      convert: async () => { converted = true; return Buffer.from('bad'); } });
+    assert.equal((await provider.services.t2a.sync(request)).error.status, 502);
+    assert.equal(converted, false);
+  }
+});

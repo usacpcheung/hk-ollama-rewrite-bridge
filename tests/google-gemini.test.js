@@ -257,3 +257,7 @@ test('Gemini cancels unread error bodies without waiting for provider EOF', asyn
   assert.ok(!JSON.stringify(r).includes('private'));
   await closing;
 });
+
+test('partial HTTP content cannot complete a Gemini rewrite', async () => {
+  assert.equal((await sync(payload(), 206)).error.status, 502);
+});
